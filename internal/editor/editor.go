@@ -303,7 +303,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.helpOpen = !m.helpOpen
 	case "ctrl+b", "f9":
 		m.toggleTree()
-	case "ctrl+w":
+	case "ctrl+w", "ctrl+x":
 		if cmd := m.closeTab(); cmd != nil {
 			return cmd
 		}

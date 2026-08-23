@@ -51,7 +51,7 @@ Keybindings:
 | Ctrl+T | Open file by path (prompt) |
 | Ctrl+O or F3 | Fuzzy file finder |
 | Ctrl+B or F9 | Project tree: show/focus → hide (Esc = back to editor) |
-| Ctrl+W | Close tab (last one quits) |
+| Ctrl+W or Ctrl+X | Close tab (last one quits) |
 | Alt+← / Alt+→, Alt+1..9 | Switch tabs |
 | F1 or Ctrl+E | Help overlay |
 | Ctrl+Q or Ctrl+C | Quit |

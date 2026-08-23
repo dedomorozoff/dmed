@@ -127,6 +127,22 @@ func TestUntitledCannotSave(t *testing.T) {
 	}
 }
 
+func TestCtrlXCloseTab(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "a.txt", "alpha\n")
+	f2 := writeTemp(t, dir, "b.txt", "bravo\n")
+
+	m := New(f1, f2)
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlX})
+	if len(m.tabs) != 1 || m.activeTab().path != f1 {
+		t.Fatalf("ctrl+x must close active tab, tabs=%d", len(m.tabs))
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	if nm := next.(Model); len(nm.tabs) != 0 || cmd == nil {
+		t.Fatal("ctrl+x on last tab must quit")
+	}
+}
+
 func TestSaveWritesActiveTab(t *testing.T) {
 	dir := t.TempDir()
 	f1 := writeTemp(t, dir, "s.txt", "")

@@ -33,7 +33,7 @@ var helpEntries = []helpEntry{
 	{"↑↓/Enter/←→ in tree", "navigate, open, fold"},
 	{"Alt+←/→", "switch tabs"},
 	{"Alt+1..9", "jump to tab N"},
-	{"Ctrl+W", "close tab (last quits)"},
+	{"Ctrl+W / Ctrl+X", "close tab (last quits)"},
 	{"", ""},
 	{"Arrows/Home/End/PgUp/PgDn", "move cursor"},
 	{"Enter/Backspace/Delete/Tab", "edit text"},
