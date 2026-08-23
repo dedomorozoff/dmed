@@ -123,10 +123,11 @@ func (m *Model) jumpTab(n int) {
 }
 
 func (m *Model) closeTab() tea.Cmd {
-	m.tabs = append(m.tabs[:m.active], m.tabs[m.active+1:]...)
-	if len(m.tabs) == 0 {
+	if len(m.tabs) == 1 {
+		// Keep the tab so Bubbletea can render one final frame before Quit.
 		return tea.Quit
 	}
+	m.tabs = append(m.tabs[:m.active], m.tabs[m.active+1:]...)
 	if m.active >= len(m.tabs) {
 		m.active = len(m.tabs) - 1
 	}

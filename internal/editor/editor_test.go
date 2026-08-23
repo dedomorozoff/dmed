@@ -90,13 +90,17 @@ func TestPromptOpensAndCancels(t *testing.T) {
 
 func TestCloseLastTabReturnsQuit(t *testing.T) {
 	m := New()
+	m.width, m.height = 80, 24
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
-	if next.(Model).lenTabs() != 0 {
-		t.Fatal("tab must be removed")
+	nm := next.(Model)
+	if nm.lenTabs() != 1 {
+		t.Fatal("last tab must stay until program exits")
 	}
 	if cmd == nil {
 		t.Fatal("closing last tab must quit")
 	}
+	// Bubbletea renders one final frame after Update returns Quit.
+	_ = nm.View()
 }
 
 func (m Model) lenTabs() int { return len(m.tabs) }
@@ -138,8 +142,8 @@ func TestCtrlXCloseTab(t *testing.T) {
 		t.Fatalf("ctrl+x must close active tab, tabs=%d", len(m.tabs))
 	}
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
-	if nm := next.(Model); len(nm.tabs) != 0 || cmd == nil {
-		t.Fatal("ctrl+x on last tab must quit")
+	if nm := next.(Model); len(nm.tabs) != 1 || cmd == nil {
+		t.Fatal("ctrl+x on last tab must quit without emptying tabs")
 	}
 }
 
