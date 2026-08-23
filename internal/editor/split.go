@@ -41,10 +41,11 @@ func (m Model) editorAreaWidth() int { return m.width - m.sidebarWidth() }
 func (m Model) paneTotalWidth(paneIdx int) int {
 	ew := m.editorAreaWidth()
 	if m.layout == splitVert {
+		sep := 1
 		if paneIdx == 0 {
-			return ew / 2
+			return (ew - sep) / 2
 		}
-		return ew - ew/2
+		return ew - sep - (ew-sep)/2
 	}
 	return ew
 }

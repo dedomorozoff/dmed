@@ -36,7 +36,7 @@ type helpEntry struct {
 }
 
 var helpEntries = []helpEntry{
-	{"Ctrl+S", "save active tab"},
+	{"Ctrl+S", "save active tab (untitled: Save As)"},
 	{"", ""},
 	{"Ctrl+P / F2", "Command Palette (run any command)"},
 	{"Shift+Arrows", "select text range"},
@@ -60,7 +60,8 @@ var helpEntries = []helpEntry{
 	{"", ""},
 	{"Arrows/Home/End/PgUp/PgDn", "move cursor"},
 	{"Enter/Backspace/Delete/Tab", "edit text"},
-	{"Ctrl+Z / Ctrl+Y,Ctrl+R", "undo / redo"},
+	{"Ctrl+Z / Ctrl+R", "undo / redo"},
+	{"Ctrl+Y", "delete line"},
 	{"", ""},
 	{"F1 or Ctrl+E", "toggle this help"},
 	{"Ctrl+Q / Ctrl+C", "quit"},
@@ -117,8 +118,12 @@ func (m Model) View() string {
 	bottom := m.statusBar()
 	if m.conflictOpen {
 		bottom = m.conflictLine()
+	} else if m.quitConfirm {
+		bottom = m.quitLine()
 	} else if m.gitOpen {
 		bottom = m.gitLine()
+	} else if m.promptSave {
+		bottom = m.saveLine()
 	} else if m.promptOpen {
 		bottom = m.promptLine()
 	} else if m.searchOpen {
@@ -338,6 +343,24 @@ func (m Model) helpPanel(h int) []string {
 
 func (m Model) promptLine() string {
 	line := statusHiStyle.Render(" open file: ") + statusStyle.Render(string(m.promptIn)) + cursorStyle.Render(" ")
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+func (m Model) saveLine() string {
+	line := statusHiStyle.Render(" save as: ") + statusStyle.Render(string(m.promptSaveIn)) + cursorStyle.Render(" ")
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+func (m Model) quitLine() string {
+	line := statusHiStyle.Render(" save changes? ") + statusStyle.Render("(Y)es / (N)o / (Esc) Cancel")
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -617,7 +640,7 @@ func (m Model) statusBar() string {
 	}
 	right := fmt.Sprintf("Ln %d, Col %d ", t.buf.CurLine()+1, t.buf.Col()+1)
 	hint := ""
-	if !m.promptOpen && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen {
+	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen {
 		hint = "F1 help "
 		if m.layout != splitNone {
 			hint += "F8 pane "

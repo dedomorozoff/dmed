@@ -371,6 +371,24 @@ func (b *Buffer) Delete() {
 	}
 }
 
+func (b *Buffer) DeleteLine() {
+	b.beginChange()
+	b.pushUndo()
+	if len(b.lines) == 1 {
+		b.lines[0] = []rune{}
+		b.line = 0
+		b.col = 0
+		b.goalCol = 0
+		return
+	}
+	b.lines = append(b.lines[:b.line], b.lines[b.line+1:]...)
+	if b.line >= len(b.lines) {
+		b.line = len(b.lines) - 1
+	}
+	b.col = 0
+	b.goalCol = 0
+}
+
 func (b *Buffer) MoveLeft() {
 	b.hasSelection = false
 	b.breakGroup()

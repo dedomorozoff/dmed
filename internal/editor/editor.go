@@ -76,6 +76,8 @@ type Model struct {
 
 	promptOpen bool
 	promptIn   []rune
+	promptSave bool
+	promptSaveIn []rune
 
 	finderOpen  bool
 	finderQ     []rune
@@ -119,6 +121,9 @@ type Model struct {
 	paletteQ    []rune
 	paletteSel  int
 	clipboard   string
+
+	quitConfirm bool
+	pendingQuit bool
 }
 
 var debugKeys = os.Getenv("DMED_DEBUG_KEYS") != ""
@@ -185,7 +190,12 @@ func (m Model) baseDir() string {
 
 func (m Model) activeTab() *tab { return &m.tabs[m.activeTabIndex()] }
 
-func (m *Model) cur() *tab { return &m.tabs[m.activeTabIndex()] }
+func (m *Model) cur() *tab {
+	if len(m.tabs) == 0 {
+		return nil
+	}
+	return &m.tabs[m.activeTabIndex()]
+}
 
 func (m *Model) openPath(rawPath string) {
 	path := normalizePath(m.baseDir(), rawPath)
@@ -226,11 +236,7 @@ func (m *Model) jumpTab(n int) {
 func (m *Model) closeTab() tea.Cmd {
 	idx := m.activeTabIndex()
 	if len(m.tabs) == 1 {
-		// Keep the tab so Bubbletea can render one final frame before Quit.
-		// But only return Quit if there are no panes (or single pane with this tab)
-		if len(m.panes) == 0 || (len(m.panes) == 1 && m.panes[0].tabIdx == idx) {
-			return tea.Quit
-		}
+		return tea.Quit
 	}
 	m.tabs = append(m.tabs[:idx], m.tabs[idx+1:]...)
 	m.fixPaneTabsAfterClose(idx)
@@ -240,6 +246,11 @@ func (m *Model) closeTab() tea.Cmd {
 func (m *Model) startPrompt() {
 	m.promptOpen = true
 	m.promptIn = nil
+}
+
+func (m *Model) startSavePrompt() {
+	m.promptSave = true
+	m.promptSaveIn = nil
 }
 
 func (m *Model) startFinder() {
@@ -335,6 +346,96 @@ func (m *Model) handlePrompt(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+func (m *Model) handleSavePrompt(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc":
+		m.promptSave = false
+		m.pendingQuit = false
+	case "enter":
+		raw := strings.TrimSpace(string(m.promptSaveIn))
+		m.promptSave = false
+		if raw != "" {
+			path := normalizePath(m.baseDir(), raw)
+			t := m.cur()
+			t.path = path
+			if m.watcher != nil {
+				_ = m.watcher.Watch(path)
+			}
+			if err := os.WriteFile(t.path, []byte(t.buf.Text()), 0o644); err != nil {
+				m.msg = "save failed: " + err.Error()
+				return nil
+			}
+			t.buf.MarkSaved()
+			m.msg = "saved"
+			if m.pendingQuit {
+				m.pendingQuit = false
+				if m.watcher != nil {
+					_ = m.watcher.Close()
+				}
+				m.saveSession()
+				return tea.Quit
+			}
+		}
+	case "backspace":
+		if n := len(m.promptSaveIn); n > 0 {
+			m.promptSaveIn = m.promptSaveIn[:n-1]
+		}
+	default:
+		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+			m.promptSaveIn = append(m.promptSaveIn, msg.Runes...)
+		}
+	}
+	return nil
+}
+
+func (m Model) hasDirty() bool {
+	for _, t := range m.tabs {
+		if t.buf.Dirty() {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) handleQuitConfirm(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc":
+		m.quitConfirm = false
+		m.pendingQuit = false
+	case "y", "Y":
+		t := m.cur()
+		if t.path == "" {
+			m.pendingQuit = true
+			m.quitConfirm = false
+			m.startSavePrompt()
+			return nil
+		}
+		m.saveActive()
+		if t.buf.Dirty() {
+			m.quitConfirm = false
+			m.pendingQuit = false
+			m.msg = "save failed, not quitting"
+			return nil
+		}
+		m.quitConfirm = false
+		m.pendingQuit = false
+		if m.watcher != nil {
+			_ = m.watcher.Close()
+		}
+		m.saveSession()
+		return tea.Quit
+	case "n", "N":
+		m.quitConfirm = false
+		m.pendingQuit = false
+		if m.watcher != nil {
+			_ = m.watcher.Close()
+		}
+		m.saveSession()
+		return tea.Quit
+	}
+	return nil
+}
+
 type FileChangedMsg struct {
 	Path string
 }
@@ -394,13 +495,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if debugKeys {
 			fmt.Fprintf(os.Stderr, "dmed: key %q\n", msg.String())
 		}
-		if !m.promptOpen && msg.String() == "ctrl+q" {
-			if m.watcher != nil {
-				_ = m.watcher.Close()
-			}
-			m.saveSession()
-			return m, tea.Quit
-		}
 		cmd := m.handleKey(msg)
 		if debugKeys {
 			m.msg = "k:" + msg.String()
@@ -457,6 +551,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if m.promptOpen {
 		return m.handlePrompt(msg)
 	}
+	if m.promptSave {
+		return m.handleSavePrompt(msg)
+	}
 	if m.finderOpen {
 		return m.handleFinder(msg)
 	}
@@ -469,18 +566,39 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return m.handleSearch(msg)
 	}
+	if m.quitConfirm {
+		return m.handleQuitConfirm(msg)
+	}
 	if len(s) == 5 && strings.HasPrefix(s, "alt+") && s[4] >= '1' && s[4] <= '9' {
 		m.jumpTab(int(s[4] - '1'))
 		return nil
 	}
 	switch s {
+	case "ctrl+q":
+		if m.hasDirty() {
+			m.quitConfirm = true
+			return nil
+		}
+		if m.watcher != nil {
+			_ = m.watcher.Close()
+		}
+		m.saveSession()
+		return tea.Quit
 	case "ctrl+s":
-		m.saveActive()
+		t := m.cur()
+		if t.path == "" {
+			m.startSavePrompt()
+		} else {
+			m.saveActive()
+		}
 	case "ctrl+z":
 		if m.cur().buf.Undo() {
 			m.msg = ""
 		}
-	case "ctrl+y", "ctrl+r":
+	case "ctrl+y":
+		m.cur().buf.DeleteLine()
+		m.msg = ""
+	case "ctrl+r":
 		if m.cur().buf.Redo() {
 			m.msg = ""
 		}
@@ -519,6 +637,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.closePane()
 	case "ctrl+w":
 		if cmd := m.closeTab(); cmd != nil {
+			if m.hasDirty() {
+				m.quitConfirm = true
+				m.pendingQuit = true
+				return nil
+			}
 			m.saveSession()
 			return cmd
 		}
@@ -530,6 +653,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		if cmd := m.closeTab(); cmd != nil {
+			if m.hasDirty() {
+				m.quitConfirm = true
+				m.pendingQuit = true
+				return nil
+			}
 			m.saveSession()
 			return cmd
 		}
@@ -537,6 +665,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if m.cur().buf.HasSelection() {
 			m.clipboard = m.cur().buf.SelectedText()
 			m.msg = "copied to clipboard"
+			return nil
+		}
+		if m.hasDirty() {
+			m.quitConfirm = true
 			return nil
 		}
 		m.saveSession()
@@ -624,8 +756,14 @@ func (m *Model) saveActive() {
 }
 
 func (m *Model) clampScroll() {
+	if len(m.tabs) == 0 {
+		return
+	}
 	p := m.curPane()
 	t := m.cur()
+	if t == nil {
+		return
+	}
 	h := m.paneViewHeight(m.activePane)
 	cur := t.buf.CurLine()
 	if h > 0 {

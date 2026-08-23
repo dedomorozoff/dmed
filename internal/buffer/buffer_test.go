@@ -250,6 +250,43 @@ func TestSelectionAndInsert(t *testing.T) {
 	}
 }
 
+func TestDeleteLineRemovesCurrentLine(t *testing.T) {
+	b := Load("line1\nline2\nline3\n")
+	b.DeleteLine()
+	if b.Text() != "line2\nline3\n" || b.CurLine() != 0 || b.Col() != 0 {
+		t.Fatalf("delete line: %q line=%d col=%d", b.Text(), b.CurLine(), b.Col())
+	}
+}
+
+func TestDeleteLineLastLine(t *testing.T) {
+	b := Load("line1\nline2\n")
+	b.MoveDown()
+	b.DeleteLine()
+	if b.Text() != "line1\n" || b.CurLine() != 0 || b.Col() != 0 {
+		t.Fatalf("delete last line: %q line=%d col=%d", b.Text(), b.CurLine(), b.Col())
+	}
+}
+
+func TestDeleteLineSingleLine(t *testing.T) {
+	b := Load("only")
+	b.DeleteLine()
+	if b.Text() != "\n" || b.CurLine() != 0 || b.Col() != 0 {
+		t.Fatalf("delete single line: %q line=%d col=%d", b.Text(), b.CurLine(), b.Col())
+	}
+}
+
+func TestDeleteLineUndo(t *testing.T) {
+	b := Load("a\nb\nc\n")
+	b.DeleteLine()
+	if b.Text() != "b\nc\n" || b.CurLine() != 0 || b.Col() != 0 {
+		t.Fatalf("after delete: %q line=%d col=%d", b.Text(), b.CurLine(), b.Col())
+	}
+	b.Undo()
+	if b.Text() != "a\nb\nc\n" || b.CurLine() != 0 || b.Col() != 0 {
+		t.Fatalf("after undo: %q line=%d col=%d", b.Text(), b.CurLine(), b.Col())
+	}
+}
+
 func TestSelectionDeleteUndo(t *testing.T) {
 	b := Load("line1\nline2\nline3\n")
 	b.SetCursor(0, 5)

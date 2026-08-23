@@ -126,8 +126,120 @@ func TestUntitledCannotSave(t *testing.T) {
 	m := New()
 	m.width, m.height = 80, 24
 	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlS})
-	if !strings.Contains(m.msg, "no file name") {
-		t.Fatalf("msg = %q", m.msg)
+	if !m.promptSave {
+		t.Fatalf("untitled ctrl+s must open save prompt, msg = %q", m.msg)
+	}
+}
+
+func TestSaveAsWritesNewPath(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "new.txt")
+
+	m := New()
+	m.width, m.height = 80, 24
+	typeStr(m, "hello")
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	if !m.promptSave {
+		t.Fatal("untitled ctrl+s must open save prompt")
+	}
+	m = typeStr(m, target)
+	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.cur().path != target {
+		t.Fatalf("path = %q", m.cur().path)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "hello\n" {
+		t.Fatalf("saved = %q", data)
+	}
+	if m.cur().buf.Dirty() {
+		t.Fatal("must be clean after save")
+	}
+}
+
+func TestQuitDirtyPrompts(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "a.txt", "alpha\n")
+	m := New(f1)
+	m.width, m.height = 80, 24
+	typeStr(m, "X")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlQ})
+	nm := next.(Model)
+	if !nm.quitConfirm {
+		t.Fatalf("dirty ctrl+q must open quit confirm, msg = %q", nm.msg)
+	}
+}
+
+func TestQuitDirtySaveAndQuit(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "a.txt", "alpha\n")
+	m := New(f1)
+	m.width, m.height = 80, 24
+	typeStr(m, "X")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlQ})
+	nm := next.(Model)
+	if !nm.quitConfirm {
+		t.Fatal("dirty ctrl+q must open quit confirm")
+	}
+	next, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	nm = next.(Model)
+	if cmd == nil {
+		t.Fatal("confirming quit must return Quit")
+	}
+	if nm.cur().buf.Dirty() {
+		t.Fatal("buffer must be clean after save")
+	}
+}
+
+func TestQuitDirtyCancel(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "a.txt", "alpha\n")
+	m := New(f1)
+	m.width, m.height = 80, 24
+	typeStr(m, "X")
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlQ})
+	if !m.quitConfirm {
+		t.Fatal("dirty ctrl+q must open quit confirm")
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.quitConfirm {
+		t.Fatal("esc must cancel quit confirm")
+	}
+	if !m.cur().buf.Dirty() {
+		t.Fatal("buffer must remain dirty")
+	}
+}
+
+func TestQuitCopySkipsConfirm(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "a.txt", "alpha\n")
+	m := New(f1)
+	m.width, m.height = 80, 24
+	m.cur().buf.StartSelection()
+	m.cur().buf.MoveDownWithSelect()
+	m.cur().buf.LineEndWithSelect()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	nm := next.(Model)
+	if nm.quitConfirm {
+		t.Fatal("copy with selection must not quit")
+	}
+	if nm.clipboard != "alpha" {
+		t.Fatalf("clipboard = %q", nm.clipboard)
+	}
+}
+
+func TestQuitCopyOnDirtyQuits(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "a.txt", "alpha\n")
+	m := New(f1)
+	m.width, m.height = 80, 24
+	typeStr(m, "X")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	nm := next.(Model)
+	if !nm.quitConfirm {
+		t.Fatal("ctrl+c on dirty without selection must confirm quit")
 	}
 }
 
@@ -144,6 +256,67 @@ func TestCtrlXCloseTab(t *testing.T) {
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
 	if nm := next.(Model); len(nm.tabs) != 1 || cmd == nil {
 		t.Fatal("ctrl+x on last tab must quit without emptying tabs")
+	}
+}
+
+func TestCtrlXCloseLastDirtyConfirm(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "a.txt", "alpha\n")
+	m := New(f1)
+	m.width, m.height = 80, 24
+	typeStr(m, "X")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	nm := next.(Model)
+	if !nm.quitConfirm {
+		t.Fatalf("dirty ctrl+x on last tab must confirm quit, msg = %q", nm.msg)
+	}
+	next, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	nm = next.(Model)
+	if cmd == nil {
+		t.Fatal("confirming discard must return Quit")
+	}
+	if !nm.cur().buf.Dirty() {
+		t.Fatal("buffer must remain dirty when cancelling quit")
+	}
+}
+
+func TestCtrlWCloseLastDirtyConfirm(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "a.txt", "alpha\n")
+	m := New(f1)
+	m.width, m.height = 80, 24
+	typeStr(m, "X")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	nm := next.(Model)
+	if !nm.quitConfirm {
+		t.Fatalf("dirty ctrl+w on last tab must confirm quit, msg = %q", nm.msg)
+	}
+	next, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	nm = next.(Model)
+	if cmd == nil {
+		t.Fatal("confirming save+quit must return Quit")
+	}
+	if nm.cur().buf.Dirty() {
+		t.Fatal("buffer must be clean after save")
+	}
+}
+
+func TestSplitSizes(t *testing.T) {
+	m := New()
+	m.width, m.height = 80, 24
+
+	m.splitVert()
+	ew := m.editorAreaWidth()
+	if m.paneTotalWidth(0)+1+m.paneTotalWidth(1) != ew {
+		t.Fatalf("vert split widths must sum to editor width: %d+1+%d != %d", m.paneTotalWidth(0), m.paneTotalWidth(1), ew)
+	}
+
+	m = New()
+	m.width, m.height = 80, 24
+	m.splitHoriz()
+	vh := m.viewHeight()
+	if m.paneViewHeight(0)+1+m.paneViewHeight(1) != vh {
+		t.Fatalf("horiz split heights must sum to view height: %d+1+%d != %d", m.paneViewHeight(0), m.paneViewHeight(1), vh)
 	}
 }
 

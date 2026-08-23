@@ -16,6 +16,7 @@ type commandItem struct {
 func (m *Model) getPaletteCommands() []commandItem {
 	return []commandItem{
 		{id: "save", title: "File: Save", desc: "Ctrl+S — Save active buffer", action: func(m *Model) tea.Cmd { m.saveActive(); return nil }},
+		{id: "save_as", title: "File: Save As...", desc: "Save active buffer to a new path", action: func(m *Model) tea.Cmd { m.startSavePrompt(); return nil }},
 		{id: "close_tab", title: "File: Close Tab", desc: "Ctrl+W — Close active tab", action: func(m *Model) tea.Cmd { return m.closeTab() }},
 		{id: "open", title: "File: Open by Path...", desc: "Ctrl+T — Open file prompt", action: func(m *Model) tea.Cmd { m.startPrompt(); return nil }},
 		{id: "finder", title: "File: Fuzzy Finder...", desc: "Ctrl+O — Quick file search", action: func(m *Model) tea.Cmd { m.startFinder(); return nil }},
