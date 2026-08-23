@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -20,7 +21,7 @@ func (t *tab) name() string {
 	if t.path == "" {
 		return "[untitled]"
 	}
-	return t.path
+	return shortenPath(t.path)
 }
 
 type Model struct {
@@ -32,7 +33,15 @@ type Model struct {
 
 	promptOpen bool
 	promptIn   []rune
+
+	finderOpen  bool
+	finderQ     []rune
+	finderFiles []string
+	finderHits  []string
+	finderSel   int
 }
+
+var debugKeys = os.Getenv("DMED_DEBUG_KEYS") != ""
 
 func New(paths ...string) Model {
 	m := Model{width: 80, height: 24}
@@ -49,7 +58,8 @@ func (m Model) activeTab() *tab { return &m.tabs[m.active] }
 
 func (m *Model) cur() *tab { return &m.tabs[m.active] }
 
-func (m *Model) openPath(path string) {
+func (m *Model) openPath(rawPath string) {
+	path := normalizePath(rawPath)
 	data, err := os.ReadFile(path)
 	t := tab{path: path, buf: buffer.New()}
 	if err != nil {
@@ -95,6 +105,69 @@ func (m *Model) startPrompt() {
 	m.promptIn = nil
 }
 
+func (m *Model) startFinder() {
+	m.finderOpen = true
+	m.finderQ = nil
+	m.finderSel = 0
+	m.finderFiles = collectFiles()
+	m.finderHits = searchFiles(m.finderFiles, "")
+}
+
+func (m *Model) refind() {
+	m.finderHits = searchFiles(m.finderFiles, string(m.finderQ))
+	if m.finderSel >= len(m.finderHits) {
+		m.finderSel = len(m.finderHits) - 1
+	}
+	if m.finderSel < 0 {
+		m.finderSel = 0
+	}
+}
+
+func (m *Model) handleFinder(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc":
+		m.finderOpen = false
+	case "enter":
+		if n := len(m.finderHits); n > 0 {
+			path := m.finderHits[m.finderSel]
+			m.finderOpen = false
+			m.focusOrOpen(path)
+		} else {
+			m.finderOpen = false
+		}
+	case "up":
+		if n := len(m.finderHits); n > 0 {
+			m.finderSel = (m.finderSel - 1 + n) % n
+		}
+	case "down":
+		if n := len(m.finderHits); n > 0 {
+			m.finderSel = (m.finderSel + 1) % n
+		}
+	case "backspace":
+		if n := len(m.finderQ); n > 0 {
+			m.finderQ = m.finderQ[:n-1]
+			m.refind()
+		}
+	default:
+		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+			m.finderQ = append(m.finderQ, msg.Runes...)
+			m.refind()
+		}
+	}
+	return nil
+}
+
+func (m *Model) focusOrOpen(rawPath string) {
+	path := normalizePath(rawPath)
+	for i := range m.tabs {
+		if m.tabs[i].path == path {
+			m.active = i
+			return
+		}
+	}
+	m.openPath(path)
+}
+
 func (m *Model) handlePrompt(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
@@ -129,10 +202,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.height = msg.Height
 		}
 	case tea.KeyMsg:
+		if debugKeys {
+			fmt.Fprintf(os.Stderr, "dmed: key %q\n", msg.String())
+		}
 		if !m.promptOpen && (msg.String() == "ctrl+c" || msg.String() == "ctrl+q") {
 			return m, tea.Quit
 		}
-		if cmd := m.handleKey(msg); cmd != nil {
+		cmd := m.handleKey(msg)
+		if debugKeys {
+			m.msg = "k:" + msg.String()
+		}
+		if cmd != nil {
 			return m, cmd
 		}
 	}
@@ -141,9 +221,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
+	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+		if r := msg.Runes[0]; r > 0 && r < 32 {
+			msg = tea.KeyMsg{Type: tea.KeyType(r)}
+		}
+	}
 	s := msg.String()
 	if m.promptOpen {
 		return m.handlePrompt(msg)
+	}
+	if m.finderOpen {
+		return m.handleFinder(msg)
 	}
 	if len(s) == 5 && strings.HasPrefix(s, "alt+") && s[4] >= '1' && s[4] <= '9' {
 		m.jumpTab(int(s[4] - '1'))
@@ -162,6 +250,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	case "ctrl+t":
 		m.startPrompt()
+	case "ctrl+o", "f3":
+		m.startFinder()
 	case "ctrl+w":
 		if cmd := m.closeTab(); cmd != nil {
 			return cmd

@@ -18,7 +18,20 @@ var (
 	statusHiStyle  = lipgloss.NewStyle().Background(lipgloss.Color("61")).Foreground(lipgloss.Color("255")).Bold(true)
 )
 
-func (m Model) viewHeight() int { return m.height - 2 }
+func (m Model) finderExtraRows() int {
+	if !m.finderOpen {
+		return 0
+	}
+	return len(m.finderHits) + 1
+}
+
+func (m Model) viewHeight() int {
+	h := m.height - 2 - m.finderExtraRows()
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
 
 func (m Model) gutterWidth() int {
 	w := len(strconv.Itoa(m.activeTab().buf.LineCount())) + 1
@@ -53,6 +66,9 @@ func (m Model) View() string {
 		bottom = m.promptLine()
 	}
 	rows = append(rows, bottom)
+	if m.finderOpen {
+		rows = append(rows, m.finderPanel()...)
+	}
 	return lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n"))
 }
 
@@ -86,6 +102,25 @@ func (m Model) promptLine() string {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	return line
+}
+
+func (m Model) finderPanel() []string {
+	rows := make([]string, 0, len(m.finderHits)+1)
+	for i, hit := range m.finderHits {
+		label := " " + hit + " "
+		if i == m.finderSel {
+			rows = append(rows, statusHiStyle.Render(label))
+		} else {
+			rows = append(rows, statusStyle.Render(label))
+		}
+	}
+	line := statusHiStyle.Render(" find file: ") + statusStyle.Render(string(m.finderQ)) + cursorStyle.Render(" ")
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	rows = append(rows, line)
+	return rows
 }
 
 func (m Model) renderContent(t *tab, ln, w int) string {
