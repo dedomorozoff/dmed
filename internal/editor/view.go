@@ -2,12 +2,14 @@ package editor
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
 	"dmed/internal/syntax"
+	"dmed/internal/vcs"
 )
 
 const tabWidth = 4
@@ -22,6 +24,9 @@ var (
 	activePaneStyle = lipgloss.NewStyle().Background(lipgloss.Color("235"))
 	matchStyle      = lipgloss.NewStyle().Background(lipgloss.Color("214")).Foreground(lipgloss.Color("0"))
 	curMatchStyle   = lipgloss.NewStyle().Background(lipgloss.Color("226")).Foreground(lipgloss.Color("0")).Bold(true)
+	gitAddStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
+	gitModStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	gitDelStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
 )
 
 type helpEntry struct {
@@ -34,6 +39,8 @@ var helpEntries = []helpEntry{
 	{"", ""},
 	{"Ctrl+F", "search in file (Enter/F3 next, Shift+F3 prev)"},
 	{"Ctrl+H", "search & replace (Tab switch, Enter rep, Ctrl+A all)"},
+	{"Ctrl+G", "Git commit panel (Enter commit, Esc close)"},
+	{"Alt+[ / Alt+]", "jump to previous / next Git hunk"},
 	{"Ctrl+O", "fuzzy file finder"},
 	{"Ctrl+T", "open file by path"},
 	{"Ctrl+B / F9", "project tree: show, focus, hide"},
@@ -70,9 +77,9 @@ func (m Model) viewHeight() int {
 }
 
 func (m Model) gutterWidthForTab(t *tab) int {
-	w := len(strconv.Itoa(t.buf.LineCount())) + 1
-	if w < 4 {
-		w = 4
+	w := len(strconv.Itoa(t.buf.LineCount())) + 2
+	if w < 5 {
+		w = 5
 	}
 	return w
 }
@@ -92,7 +99,11 @@ func (m Model) View() string {
 		rows = append(rows, m.editorRows(h)...)
 	}
 	bottom := m.statusBar()
-	if m.promptOpen {
+	if m.conflictOpen {
+		bottom = m.conflictLine()
+	} else if m.gitOpen {
+		bottom = m.gitLine()
+	} else if m.promptOpen {
 		bottom = m.promptLine()
 	} else if m.searchOpen {
 		if m.replaceOpen {
@@ -164,15 +175,44 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	rows := make([]string, h)
 
 	syntaxLines := t.getSyntaxLines()
+	diff := t.getDiff(m.repo)
 
 	for row := 0; row < h; row++ {
 		ln := p.offsetY + row
 		num := strconv.Itoa(ln + 1)
-		gut := strings.Repeat(" ", gw-1-len(num)) + num + " "
+		gitMark := " "
+		gitMarkStyle := gutterStyle
+		if ln < len(diff.Lines) {
+			switch diff.Lines[ln] {
+			case vcs.DiffAdded:
+				gitMark = "+"
+				gitMarkStyle = gitAddStyle
+			case vcs.DiffModified:
+				gitMark = "~"
+				gitMarkStyle = gitModStyle
+			case vcs.DiffDeleted:
+				gitMark = "_"
+				gitMarkStyle = gitDelStyle
+			}
+		}
+
+		numPad := gw - 2 - len(num)
+		if numPad < 0 {
+			numPad = 0
+		}
+		numStr := strings.Repeat(" ", numPad) + num + " "
+		gutStr := numStr
 		if active && ln == cur && ln < t.buf.LineCount() {
-			rows[row] = curGutterStyle.Render(gut) + m.renderLine(p, t, ln, contentW, active, syntaxLines)
+			gutStr = curGutterStyle.Render(numStr)
 		} else {
-			rows[row] = gutterStyle.Render(gut) + m.renderLine(p, t, ln, contentW, active, syntaxLines)
+			gutStr = gutterStyle.Render(numStr)
+		}
+		gutStr += gitMarkStyle.Render(gitMark)
+
+		if ln < t.buf.LineCount() {
+			rows[row] = gutStr + m.renderLine(p, t, ln, contentW, active, syntaxLines)
+		} else {
+			rows[row] = gutStr + m.renderLine(p, t, ln, contentW, active, syntaxLines)
 		}
 		if active && m.layout != splitNone {
 			rows[row] = activePaneStyle.Render(rows[row])
@@ -279,6 +319,32 @@ func (m Model) helpPanel(h int) []string {
 
 func (m Model) promptLine() string {
 	line := statusHiStyle.Render(" open file: ") + statusStyle.Render(string(m.promptIn)) + cursorStyle.Render(" ")
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+func (m Model) gitLine() string {
+	line := statusHiStyle.Render(" git commit: ") + statusStyle.Render(string(m.gitCommitIn)) + cursorStyle.Render(" ")
+	if m.repo != nil {
+		branch := m.repo.Branch()
+		if branch != "" {
+			line += hintStyle.Render(fmt.Sprintf(" (%s: %s)", branch, m.repo.StatusSummary()))
+		}
+	}
+	line += hintStyle.Render("  (Enter: commit, Esc: close)")
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+func (m Model) conflictLine() string {
+	fname := filepath.Base(m.conflictPath)
+	line := statusHiStyle.Render(" CONFLICT ") + statusStyle.Render(fmt.Sprintf(" File modified on disk: [R]eload / [I]gnore? (%s)", fname))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -467,13 +533,20 @@ func (m Model) statusBar() string {
 		paneMark = fmt.Sprintf("[%d] ", m.activePane+1)
 	}
 	left := statusHiStyle.Render(" " + paneMark + t.name(base) + dirty)
+	if m.repo != nil {
+		b := m.repo.Branch()
+		if b != "" {
+			left += hintStyle.Render(" (" + b + ")")
+		}
+	}
+
 	mid := ""
 	if m.msg != "" {
 		mid = statusStyle.Render("  " + m.msg)
 	}
 	right := fmt.Sprintf("Ln %d, Col %d ", t.buf.CurLine()+1, t.buf.Col()+1)
 	hint := ""
-	if !m.promptOpen && !m.finderOpen && !m.searchOpen {
+	if !m.promptOpen && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen {
 		hint = "F1 help "
 		if m.layout != splitNone {
 			hint += "F8 pane "

@@ -9,7 +9,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"dmed/internal/buffer"
+	"dmed/internal/events"
 	"dmed/internal/syntax"
+	"dmed/internal/vcs"
+	"dmed/internal/watcher"
 )
 
 type tab struct {
@@ -17,6 +20,8 @@ type tab struct {
 	path         string
 	syntaxCached []syntax.HighlightedLine
 	syntaxText   string
+	diffCached   vcs.FileDiff
+	diffText     string
 }
 
 func (t *tab) name(base string) string {
@@ -34,6 +39,28 @@ func (t *tab) getSyntaxLines() []syntax.HighlightedLine {
 	t.syntaxText = text
 	t.syntaxCached = syntax.Default().HighlightBuffer(t.path, text)
 	return t.syntaxCached
+}
+
+func (t *tab) getDiff(repo *vcs.Repo) vcs.FileDiff {
+	if t.path == "" {
+		return vcs.FileDiff{}
+	}
+	r := repo
+	if r == nil || !strings.HasPrefix(t.path, r.Root) {
+		if found, err := vcs.Open(filepath.Dir(t.path)); err == nil {
+			r = found
+		}
+	}
+	if r == nil {
+		return vcs.FileDiff{}
+	}
+	text := t.buf.Text()
+	if t.diffCached.Lines != nil && t.diffText == text {
+		return t.diffCached
+	}
+	t.diffText = text
+	t.diffCached = r.DiffBuffer(t.path, text)
+	return t.diffCached
 }
 
 type Model struct {
@@ -72,12 +99,38 @@ type Model struct {
 	replaceOpen        bool
 	replaceWith        []rune
 	replaceFocusFind   bool
+
+	// Events, watcher, Git
+	bus          *events.Bus
+	watcher      *watcher.Watcher
+	fileEvents   chan string
+	repo         *vcs.Repo
+	conflictOpen bool
+	conflictPath string
+	gitOpen      bool
+	gitCommitIn  []rune
 }
 
 var debugKeys = os.Getenv("DMED_DEBUG_KEYS") != ""
 
 func New(paths ...string) Model {
-	m := Model{width: 80, height: 24, expanded: map[string]bool{}}
+	fe := make(chan string, 16)
+	m := Model{
+		width:      80,
+		height:     24,
+		expanded:   map[string]bool{},
+		fileEvents: fe,
+		bus:        events.New(),
+	}
+	if w, err := watcher.New(func(p string) {
+		select {
+		case fe <- p:
+		default:
+		}
+	}); err == nil {
+		m.watcher = w
+	}
+
 	for _, p := range paths {
 		if st, err := os.Stat(p); err == nil && st.IsDir() {
 			if m.root == "" {
@@ -95,6 +148,9 @@ func New(paths ...string) Model {
 	if m.root != "" {
 		m.treeVisible = true
 		m.rebuildTree()
+	}
+	if repo, err := vcs.Open(m.baseDir()); err == nil {
+		m.repo = repo
 	}
 	return m
 }
@@ -126,6 +182,9 @@ func (m *Model) openPath(rawPath string) {
 		}
 	} else {
 		t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
+	}
+	if m.watcher != nil && path != "" {
+		_ = m.watcher.Watch(path)
 	}
 	m.tabs = append(m.tabs, t)
 	// Only set active tab if panes are already initialized
@@ -259,10 +318,54 @@ func (m *Model) handlePrompt(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-func (m Model) Init() tea.Cmd { return nil }
+type FileChangedMsg struct {
+	Path string
+}
+
+func waitForFileEvent(ch <-chan string) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		p, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return FileChangedMsg{Path: p}
+	}
+}
+
+func (m Model) Init() tea.Cmd {
+	return waitForFileEvent(m.fileEvents)
+}
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case FileChangedMsg:
+		path := msg.Path
+		for i := range m.tabs {
+			t := &m.tabs[i]
+			if t.path == "" {
+				continue
+			}
+			absT, _ := filepath.Abs(t.path)
+			if absT == path || t.path == path {
+				if !t.buf.Dirty() {
+					if data, err := os.ReadFile(t.path); err == nil {
+						t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
+						t.syntaxCached = nil
+						t.diffText = ""
+						m.msg = "reloaded: " + t.name(m.baseDir())
+					}
+				} else {
+					m.conflictOpen = true
+					m.conflictPath = path
+					m.msg = "file modified externally: (r)eload or (i)gnore?"
+				}
+				break
+			}
+		}
+		return m, waitForFileEvent(m.fileEvents)
 	case tea.WindowSizeMsg:
 		if msg.Width > 0 {
 			m.width = msg.Width
@@ -275,6 +378,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fmt.Fprintf(os.Stderr, "dmed: key %q\n", msg.String())
 		}
 		if !m.promptOpen && (msg.String() == "ctrl+c" || msg.String() == "ctrl+q") {
+			if m.watcher != nil {
+				_ = m.watcher.Close()
+			}
 			return m, tea.Quit
 		}
 		cmd := m.handleKey(msg)
@@ -296,6 +402,34 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 	s := msg.String()
+	if m.conflictOpen {
+		switch s {
+		case "r", "R":
+			for i := range m.tabs {
+				t := &m.tabs[i]
+				absT, _ := filepath.Abs(t.path)
+				if absT == m.conflictPath || t.path == m.conflictPath {
+					if data, err := os.ReadFile(t.path); err == nil {
+						t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
+						t.syntaxCached = nil
+						t.diffText = ""
+						m.msg = "reloaded from disk"
+					}
+					break
+				}
+			}
+			m.conflictOpen = false
+			return nil
+		case "i", "I", "esc":
+			m.conflictOpen = false
+			m.msg = "kept buffer changes"
+			return nil
+		}
+		return nil
+	}
+	if m.gitOpen {
+		return m.handleGit(msg)
+	}
 	if m.helpOpen {
 		return m.handleHelp(msg)
 	}
@@ -341,6 +475,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.startSearch()
 	case "ctrl+h":
 		m.startReplace()
+	case "ctrl+g":
+		m.gitOpen = !m.gitOpen
+		m.gitCommitIn = nil
+	case "alt+[":
+		m.jumpHunk(-1)
+	case "alt+]":
+		m.jumpHunk(1)
 	case "f1", "ctrl+e":
 		m.helpOpen = !m.helpOpen
 	case "ctrl+b", "f9":
@@ -662,4 +803,79 @@ func (m *Model) doReplaceAll() {
 	m.msg = fmt.Sprintf("replaced %d occurrence(s)", count)
 	m.searchOpen = false
 	m.replaceOpen = false
+}
+
+func (m *Model) handleGit(msg tea.KeyMsg) tea.Cmd {
+	t := m.cur()
+	r := m.repo
+	if (r == nil || (t.path != "" && !strings.HasPrefix(t.path, r.Root))) && t.path != "" {
+		if found, err := vcs.Open(filepath.Dir(t.path)); err == nil {
+			r = found
+		}
+	}
+	switch msg.String() {
+	case "esc":
+		m.gitOpen = false
+		m.msg = ""
+	case "enter":
+		if len(m.gitCommitIn) > 0 && r != nil {
+			if t.path != "" {
+				_ = r.Stage(t.path)
+			}
+			hash, err := r.Commit(string(m.gitCommitIn))
+			if err != nil {
+				m.msg = "commit failed: " + err.Error()
+			} else {
+				m.msg = "committed: " + hash.String()[:7]
+				m.gitCommitIn = nil
+				m.gitOpen = false
+				t.diffText = ""
+			}
+		}
+	case "backspace":
+		if n := len(m.gitCommitIn); n > 0 {
+			m.gitCommitIn = m.gitCommitIn[:n-1]
+		}
+	default:
+		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+			m.gitCommitIn = append(m.gitCommitIn, msg.Runes...)
+		}
+	}
+	return nil
+}
+
+func (m *Model) jumpHunk(dir int) {
+	t := m.cur()
+	if t.path == "" {
+		return
+	}
+	diff := t.getDiff(m.repo)
+	if len(diff.Hunks) == 0 {
+		m.msg = "no git changes"
+		return
+	}
+	curLine := t.buf.CurLine()
+	if dir > 0 {
+		for _, h := range diff.Hunks {
+			if h.StartLine > curLine {
+				t.buf.SetCursor(h.StartLine, 0)
+				m.msg = fmt.Sprintf("git hunk: lines %d-%d", h.StartLine+1, h.EndLine+1)
+				return
+			}
+		}
+		t.buf.SetCursor(diff.Hunks[0].StartLine, 0)
+		m.msg = fmt.Sprintf("git hunk: lines %d-%d", diff.Hunks[0].StartLine+1, diff.Hunks[0].EndLine+1)
+	} else {
+		for i := len(diff.Hunks) - 1; i >= 0; i-- {
+			h := diff.Hunks[i]
+			if h.StartLine < curLine {
+				t.buf.SetCursor(h.StartLine, 0)
+				m.msg = fmt.Sprintf("git hunk: lines %d-%d", h.StartLine+1, h.EndLine+1)
+				return
+			}
+		}
+		last := diff.Hunks[len(diff.Hunks)-1]
+		t.buf.SetCursor(last.StartLine, 0)
+		m.msg = fmt.Sprintf("git hunk: lines %d-%d", last.StartLine+1, last.EndLine+1)
+	}
 }
