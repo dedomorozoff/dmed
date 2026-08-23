@@ -1,4 +1,4 @@
-GO       := /usr/lib/go/bin/go
+GO       := go
 GOPROXY  := https://proxy.golang.org,direct
 GOSUMDB  := sum.golang.org
 

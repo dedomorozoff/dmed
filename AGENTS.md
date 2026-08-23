@@ -15,16 +15,16 @@ AI-related code.
 
 ## Toolchain gotchas (this machine)
 
-- Use Go from `/usr/lib/go/bin/go` (1.22). Do NOT use plain `go` from PATH —
-  it is an ancient 1.15 and breaks builds.
-- The environment exports a stale `GOROOT` pointing at Go 1.15. Unset it:
-  `unset GOROOT` (the Makefile already does `export GOROOT :=`).
+- Use plain `go` from PATH (1.25.0, installed at `D:\go\bin`). No special
+  path needed; the old `/usr/lib/go/bin/go` (1.22) is gone.
+- A stale `GOROOT` used to be exported pointing at Go 1.15; it is clean now,
+  but the Makefile still does `export GOROOT :=` as insurance — leave it.
 - Network fetches need explicit `GOPROXY=https://proxy.golang.org,direct`
   and `GOSUMDB=sum.golang.org` (system defaults are wiped). The Makefile
   sets both.
-- Dependencies are pinned: bubbletea v1.2.4, lipgloss v1.0.0, because newer
-  releases require Go ≥ 1.24 and we build with 1.22. Do not bump them unless
-  you also upgrade the toolchain.
+- Dependencies are currently pinned: bubbletea v1.2.4, lipgloss v1.0.0.
+  They were pinned for the old Go 1.22 toolchain; with Go ≥ 1.24 bumping
+  is possible again, but only bump deliberately and re-run tests.
 
 ## Commands
 
