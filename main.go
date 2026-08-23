@@ -11,7 +11,7 @@ import (
 
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "-h" || os.Args[1] == "--help") {
-		fmt.Println("usage: dmed [files...]")
+		fmt.Println("usage: dmed [dir | files...]")
 		return
 	}
 	p := tea.NewProgram(editor.New(os.Args[1:]...), tea.WithAltScreen())

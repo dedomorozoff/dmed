@@ -2,7 +2,6 @@ package editor
 
 import (
 	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,13 +12,9 @@ const (
 	finderMaxShown = 8
 )
 
-func collectFiles() []string {
-	root, err := os.Getwd()
-	if err != nil {
-		return nil
-	}
+func collectFiles(base string) []string {
 	var out []string
-	filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -30,7 +25,7 @@ func collectFiles() []string {
 			}
 			return nil
 		}
-		rel, rerr := filepath.Rel(root, p)
+		rel, rerr := filepath.Rel(base, p)
 		if rerr != nil {
 			return nil
 		}
@@ -109,16 +104,17 @@ func searchFiles(files []string, q string) []string {
 	return out
 }
 
-func shortenPath(p string) string {
-	if cwd, err := os.Getwd(); err == nil {
-		if rel, err := filepath.Rel(cwd, p); err == nil && !strings.HasPrefix(rel, "..") {
-			return filepath.ToSlash(rel)
-		}
+func shortenPath(base, p string) string {
+	if rel, err := filepath.Rel(base, p); err == nil && !strings.HasPrefix(rel, "..") {
+		return filepath.ToSlash(rel)
 	}
 	return filepath.ToSlash(p)
 }
 
-func normalizePath(p string) string {
+func normalizePath(base, p string) string {
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(base, p)
+	}
 	abs, err := filepath.Abs(p)
 	if err != nil {
 		return p

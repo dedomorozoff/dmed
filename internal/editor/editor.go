@@ -3,6 +3,7 @@ package editor
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,14 +18,15 @@ type tab struct {
 	offsetY int
 }
 
-func (t *tab) name() string {
+func (t *tab) name(base string) string {
 	if t.path == "" {
 		return "[untitled]"
 	}
-	return shortenPath(t.path)
+	return shortenPath(base, t.path)
 }
 
 type Model struct {
+	root   string
 	tabs   []tab
 	active int
 	width  int
@@ -41,19 +43,48 @@ type Model struct {
 	finderSel   int
 
 	helpOpen bool
+
+	treeVisible bool
+	treeFocus   bool
+	treeRows    []treeEntry
+	treeSel     int
+	treeOffset  int
+	expanded    map[string]bool
 }
 
 var debugKeys = os.Getenv("DMED_DEBUG_KEYS") != ""
 
 func New(paths ...string) Model {
-	m := Model{width: 80, height: 24}
+	m := Model{width: 80, height: 24, expanded: map[string]bool{}}
 	for _, p := range paths {
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			if m.root == "" {
+				m.root = normalizePath(".", p)
+				m.msg = "project: " + filepath.Base(m.root)
+			}
+			continue
+		}
 		m.openPath(p)
 	}
 	if len(m.tabs) == 0 {
 		m.tabs = append(m.tabs, tab{buf: buffer.New()})
 	}
+	if m.root != "" {
+		m.treeVisible = true
+		m.rebuildTree()
+	}
 	return m
+}
+
+func (m Model) baseDir() string {
+	if m.root != "" {
+		return m.root
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return cwd
 }
 
 func (m Model) activeTab() *tab { return &m.tabs[m.active] }
@@ -61,7 +92,7 @@ func (m Model) activeTab() *tab { return &m.tabs[m.active] }
 func (m *Model) cur() *tab { return &m.tabs[m.active] }
 
 func (m *Model) openPath(rawPath string) {
-	path := normalizePath(rawPath)
+	path := normalizePath(m.baseDir(), rawPath)
 	data, err := os.ReadFile(path)
 	t := tab{path: path, buf: buffer.New()}
 	if err != nil {
@@ -111,7 +142,7 @@ func (m *Model) startFinder() {
 	m.finderOpen = true
 	m.finderQ = nil
 	m.finderSel = 0
-	m.finderFiles = collectFiles()
+	m.finderFiles = collectFiles(m.baseDir())
 	m.finderHits = searchFiles(m.finderFiles, "")
 }
 
@@ -161,14 +192,14 @@ func (m *Model) handleFinder(msg tea.KeyMsg) tea.Cmd {
 
 func (m *Model) handleHelp(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
-	case "esc", "f1", "ctrl+e", "ctrl+@", "\x00", "q":
+	case "esc", "f1", "ctrl+e", "q":
 		m.helpOpen = false
 	}
 	return nil
 }
 
 func (m *Model) focusOrOpen(rawPath string) {
-	path := normalizePath(rawPath)
+	path := normalizePath(m.baseDir(), rawPath)
 	for i := range m.tabs {
 		if m.tabs[i].path == path {
 			m.active = i
@@ -246,6 +277,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if m.finderOpen {
 		return m.handleFinder(msg)
 	}
+	if m.treeFocus {
+		return m.handleTree(msg)
+	}
 	if len(s) == 5 && strings.HasPrefix(s, "alt+") && s[4] >= '1' && s[4] <= '9' {
 		m.jumpTab(int(s[4] - '1'))
 		return nil
@@ -265,8 +299,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.startPrompt()
 	case "ctrl+o", "f3":
 		m.startFinder()
-	case "f1", "ctrl+e", "ctrl+@", "\x00":
+	case "f1", "ctrl+e":
 		m.helpOpen = !m.helpOpen
+	case "ctrl+b", "f9":
+		m.toggleTree()
 	case "ctrl+w":
 		if cmd := m.closeTab(); cmd != nil {
 			return cmd

@@ -29,6 +29,8 @@ var helpEntries = []helpEntry{
 	{"", ""},
 	{"Ctrl+O / F3", "fuzzy file finder"},
 	{"Ctrl+T", "open file by path"},
+	{"Ctrl+B / F9", "project tree: show, focus, hide"},
+	{"↑↓/Enter/←→ in tree", "navigate, open, fold"},
 	{"Alt+←/→", "switch tabs"},
 	{"Alt+1..9", "jump to tab N"},
 	{"Ctrl+W", "close tab (last quits)"},
@@ -64,7 +66,14 @@ func (m Model) gutterWidth() int {
 	return w
 }
 
-func (m Model) viewWidth() int { return m.width - m.gutterWidth() }
+func (m Model) viewWidth() int { return m.width - m.sidebarWidth() - m.gutterWidth() }
+
+func (m Model) sidebarWidth() int {
+	if m.sidebarOn() {
+		return treeWidth
+	}
+	return 0
+}
 
 func (m Model) View() string {
 	h := m.viewHeight()
@@ -76,6 +85,20 @@ func (m Model) View() string {
 	rows = append(rows, m.tabBar())
 	if m.helpOpen {
 		rows = append(rows, m.helpPanel(h)...)
+	} else if m.sidebarOn() {
+		tree := m.treePanel(h)
+		for row := 0; row < h; row++ {
+			ln := t.offsetY + row
+			num := strconv.Itoa(ln + 1)
+			gut := strings.Repeat(" ", gw-1-len(num)) + num + " "
+			cell := ""
+			if ln == cur && ln < t.buf.LineCount() {
+				cell = curGutterStyle.Render(gut)
+			} else {
+				cell = gutterStyle.Render(gut)
+			}
+			rows = append(rows, tree[row]+cell+m.renderContent(t, ln, w))
+		}
 	} else {
 		for row := 0; row < h; row++ {
 			ln := t.offsetY + row
@@ -100,10 +123,11 @@ func (m Model) View() string {
 }
 
 func (m Model) tabBar() string {
+	base := m.baseDir()
 	parts := make([]string, 0, len(m.tabs))
 	for i := range m.tabs {
 		t := &m.tabs[i]
-		label := " " + t.name()
+		label := " " + t.name(base)
 		if t.buf.Dirty() {
 			label += "*"
 		}
@@ -120,6 +144,54 @@ func (m Model) tabBar() string {
 		bar += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	return bar
+}
+
+func (m Model) treePanel(h int) []string {
+	inner := treeWidth - 2
+	rows := make([]string, 0, h)
+	for row := 0; row < h; row++ {
+		i := m.treeOffset + row
+		var cell string
+		if i < len(m.treeRows) {
+			e := m.treeRows[i]
+			indent := strings.Repeat("  ", e.depth-1)
+			label := e.name
+			if e.isDir {
+				if m.expanded[e.rel] {
+					label = "▾ " + label
+				} else {
+					label = "▸ " + label
+				}
+			} else {
+				label = "  " + label
+			}
+			pad := inner - lipgloss.Width(indent) - lipgloss.Width(label)
+			if pad < 0 {
+				runes := []rune(label)
+				label = string(runes[:maxInt(0, len(runes)+pad)])
+				pad = 0
+			}
+			line := indent + label + strings.Repeat(" ", pad)
+			if i == m.treeSel && m.treeFocus {
+				cell = statusHiStyle.Render(line)
+			} else if i == m.treeSel {
+				cell = statusStyle.Render(line)
+			} else {
+				cell = line
+			}
+		} else {
+			cell = strings.Repeat(" ", inner)
+		}
+		rows = append(rows, cell+" ")
+	}
+	return rows
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (m Model) helpPanel(h int) []string {
@@ -196,11 +268,12 @@ func (m Model) renderContent(t *tab, ln, w int) string {
 
 func (m Model) statusBar() string {
 	t := m.activeTab()
+	base := m.baseDir()
 	dirty := ""
 	if t.buf.Dirty() {
 		dirty = " *"
 	}
-	left := statusHiStyle.Render(" " + t.name() + dirty)
+	left := statusHiStyle.Render(" " + t.name(base) + dirty)
 	mid := ""
 	if m.msg != "" {
 		mid = statusStyle.Render("  " + m.msg)
