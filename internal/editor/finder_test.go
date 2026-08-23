@@ -88,8 +88,8 @@ func TestFinderOpensAndRefocuses(t *testing.T) {
 	if len(m.tabs) != 2 {
 		t.Fatalf("enter on open file must not duplicate tab, tabs=%d", len(m.tabs))
 	}
-	if m.active != 0 {
-		t.Fatalf("must refocus existing tab, active=%d", m.active)
+	if m.activeTabIndex() != 0 {
+		t.Fatalf("must refocus existing tab, activeTabIndex=%d", m.activeTabIndex())
 	}
 }
 

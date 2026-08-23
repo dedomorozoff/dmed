@@ -36,27 +36,27 @@ func TestTabsOpenSwitchClose(t *testing.T) {
 	f2 := writeTemp(t, dir, "b.txt", "bravo\n")
 
 	m := New(f1, f2)
-	if len(m.tabs) != 2 || m.active != 1 {
-		t.Fatalf("want 2 tabs active=1, got %d tabs active=%d", len(m.tabs), m.active)
+	if len(m.tabs) != 2 || m.activeTabIndex() != 1 {
+		t.Fatalf("want 2 tabs activeTabIndex=1, got %d tabs activeTabIndex=%d", len(m.tabs), m.activeTabIndex())
 	}
 	if got := m.activeTab().buf.Text(); got != "bravo\n" {
 		t.Fatalf("active content = %q", got)
 	}
 	m = press(m, tea.KeyMsg{Type: tea.KeyLeft, Alt: true})
-	if m.active != 0 || m.activeTab().buf.Text() != "alpha\n" {
-		t.Fatalf("alt+left: active=%d content=%q", m.active, m.activeTab().buf.Text())
+	if m.activeTabIndex() != 0 || m.activeTab().buf.Text() != "alpha\n" {
+		t.Fatalf("alt+left: activeTabIndex=%d content=%q", m.activeTabIndex(), m.activeTab().buf.Text())
 	}
 	typeStr(m, "X")
 	if !m.tabs[0].buf.Dirty() || m.tabs[1].buf.Dirty() {
 		t.Fatal("dirty must be per-tab")
 	}
 	m = press(m, tea.KeyMsg{Type: tea.KeyRight, Alt: true})
-	if m.active != 1 {
-		t.Fatalf("alt+right: active=%d", m.active)
+	if m.activeTabIndex() != 1 {
+		t.Fatalf("alt+right: activeTabIndex=%d", m.activeTabIndex())
 	}
 	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlW})
-	if len(m.tabs) != 1 || m.active != 0 || m.activeTab().path != f1 {
-		t.Fatalf("ctrl+w: %d tabs active=%d path=%q", len(m.tabs), m.active, m.activeTab().path)
+	if len(m.tabs) != 1 || m.activeTabIndex() != 0 || m.activeTab().path != f1 {
+		t.Fatalf("ctrl+w: %d tabs activeTabIndex=%d path=%q", len(m.tabs), m.activeTabIndex(), m.activeTab().path)
 	}
 }
 
@@ -77,8 +77,8 @@ func TestPromptOpensAndCancels(t *testing.T) {
 	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlT})
 	m = typeStr(m, target)
 	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.promptOpen || len(m.tabs) != 2 || m.active != 1 {
-		t.Fatalf("enter: prompt=%v tabs=%d active=%d", m.promptOpen, len(m.tabs), m.active)
+	if m.promptOpen || len(m.tabs) != 2 || m.activeTabIndex() != 1 {
+		t.Fatalf("enter: prompt=%v tabs=%d activeTabIndex=%d", m.promptOpen, len(m.tabs), m.activeTabIndex())
 	}
 	if got := m.activeTab().buf.Text(); got != "two lines\n" {
 		t.Fatalf("opened content = %q", got)

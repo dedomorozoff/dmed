@@ -11,12 +11,13 @@ import (
 const tabWidth = 4
 
 var (
-	gutterStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	curGutterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
-	cursorStyle    = lipgloss.NewStyle().Reverse(true)
-	statusStyle    = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("250"))
-	statusHiStyle  = lipgloss.NewStyle().Background(lipgloss.Color("61")).Foreground(lipgloss.Color("255")).Bold(true)
-	hintStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	gutterStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	curGutterStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	cursorStyle     = lipgloss.NewStyle().Reverse(true)
+	statusStyle     = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("250"))
+	statusHiStyle   = lipgloss.NewStyle().Background(lipgloss.Color("61")).Foreground(lipgloss.Color("255")).Bold(true)
+	hintStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	activePaneStyle = lipgloss.NewStyle().Background(lipgloss.Color("235"))
 )
 
 type helpEntry struct {
@@ -31,8 +32,12 @@ var helpEntries = []helpEntry{
 	{"Ctrl+T", "open file by path"},
 	{"Ctrl+B / F9", "project tree: show, focus, hide"},
 	{"↑↓/Enter/←→ in tree", "navigate, open, fold"},
-	{"Alt+←/→", "switch tabs"},
+	{"Alt+←/→", "switch tabs in active pane"},
 	{"Alt+1..9", "jump to tab N"},
+	{"Ctrl+\\ / F6", "split vertical (side by side)"},
+	{"Ctrl+Alt+H / F7", "split horizontal (stacked)"},
+	{"Ctrl+Alt+P / F8", "focus other pane"},
+	{"Ctrl+Alt+W", "close pane (unsplit)"},
 	{"Ctrl+W / Ctrl+X", "close tab (last quits)"},
 	{"", ""},
 	{"Arrows/Home/End/PgUp/PgDn", "move cursor"},
@@ -58,58 +63,27 @@ func (m Model) viewHeight() int {
 	return h
 }
 
-func (m Model) gutterWidth() int {
-	w := len(strconv.Itoa(m.activeTab().buf.LineCount())) + 1
+func (m Model) gutterWidthForTab(t *tab) int {
+	w := len(strconv.Itoa(t.buf.LineCount())) + 1
 	if w < 4 {
 		w = 4
 	}
 	return w
 }
 
-func (m Model) viewWidth() int { return m.width - m.sidebarWidth() - m.gutterWidth() }
-
-func (m Model) sidebarWidth() int {
-	if m.sidebarOn() {
-		return treeWidth
-	}
-	return 0
+func (m Model) paneContentWidth(paneIdx int) int {
+	t := &m.tabs[m.panes[paneIdx].tabIdx]
+	return m.paneTotalWidth(paneIdx) - m.gutterWidthForTab(t)
 }
 
 func (m Model) View() string {
 	h := m.viewHeight()
-	gw := m.gutterWidth()
-	w := m.width - gw
-	t := m.activeTab()
-	cur := t.buf.CurLine()
 	rows := make([]string, 0, h+2)
 	rows = append(rows, m.tabBar())
 	if m.helpOpen {
 		rows = append(rows, m.helpPanel(h)...)
-	} else if m.sidebarOn() {
-		tree := m.treePanel(h)
-		for row := 0; row < h; row++ {
-			ln := t.offsetY + row
-			num := strconv.Itoa(ln + 1)
-			gut := strings.Repeat(" ", gw-1-len(num)) + num + " "
-			cell := ""
-			if ln == cur && ln < t.buf.LineCount() {
-				cell = curGutterStyle.Render(gut)
-			} else {
-				cell = gutterStyle.Render(gut)
-			}
-			rows = append(rows, tree[row]+cell+m.renderContent(t, ln, w))
-		}
 	} else {
-		for row := 0; row < h; row++ {
-			ln := t.offsetY + row
-			num := strconv.Itoa(ln + 1)
-			gut := strings.Repeat(" ", gw-1-len(num)) + num + " "
-			if ln == cur && ln < t.buf.LineCount() {
-				rows = append(rows, curGutterStyle.Render(gut)+m.renderContent(t, ln, w))
-			} else {
-				rows = append(rows, gutterStyle.Render(gut)+m.renderContent(t, ln, w))
-			}
-		}
+		rows = append(rows, m.editorRows(h)...)
 	}
 	bottom := m.statusBar()
 	if m.promptOpen {
@@ -122,6 +96,84 @@ func (m Model) View() string {
 	return lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n"))
 }
 
+func (m Model) editorRows(h int) []string {
+	if m.layout == splitNone {
+		return m.composeSidebar(m.renderPaneRows(0, h, m.paneTotalWidth(0)))
+	}
+	if m.layout == splitVert {
+		w0 := m.paneTotalWidth(0)
+		w1 := m.paneTotalWidth(1)
+		left := m.renderPaneRows(0, h, w0)
+		right := m.renderPaneRows(1, h, w1)
+		combined := make([]string, h)
+		sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+		sep := sepStyle.Render("│")
+		for row := 0; row < h; row++ {
+			combined[row] = left[row] + sep + right[row]
+		}
+		return m.composeSidebar(combined)
+	}
+	// splitHoriz
+	h0 := m.paneViewHeight(0)
+	h1 := m.paneViewHeight(1)
+	top := m.renderPaneRows(0, h0, m.paneTotalWidth(0))
+	bottom := m.renderPaneRows(1, h1, m.paneTotalWidth(1))
+	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	sep := sepStyle.Render(strings.Repeat("─", m.editorAreaWidth()))
+	combined := make([]string, 0, h0+h1+1)
+	combined = append(combined, top...)
+	combined = append(combined, sep)
+	combined = append(combined, bottom...)
+	return m.composeSidebar(combined)
+}
+
+func (m Model) composeSidebar(editor []string) []string {
+	if !m.sidebarOn() {
+		return editor
+	}
+	tree := m.treePanel(len(editor))
+	out := make([]string, len(editor))
+	for row := range editor {
+		out[row] = tree[row] + editor[row]
+	}
+	return out
+}
+
+func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
+	p := &m.panes[paneIdx]
+	t := &m.tabs[p.tabIdx]
+	gw := m.gutterWidthForTab(t)
+	contentW := totalW - gw
+	if contentW < 0 {
+		contentW = 0
+	}
+	cur := t.buf.CurLine()
+	active := paneIdx == m.activePane
+	rows := make([]string, h)
+	for row := 0; row < h; row++ {
+		ln := p.offsetY + row
+		num := strconv.Itoa(ln + 1)
+		gut := strings.Repeat(" ", gw-1-len(num)) + num + " "
+		if active && ln == cur && ln < t.buf.LineCount() {
+			rows[row] = curGutterStyle.Render(gut) + m.renderContent(p, t, ln, contentW)
+		} else {
+			rows[row] = gutterStyle.Render(gut) + m.renderContent(p, t, ln, contentW)
+		}
+		// Highlight active pane background (subtle)
+		if active && m.layout != splitNone {
+			rows[row] = activePaneStyle.Render(rows[row])
+		}
+	}
+	return rows
+}
+
+func (m Model) sidebarWidth() int {
+	if m.sidebarOn() {
+		return treeWidth
+	}
+	return 0
+}
+
 func (m Model) tabBar() string {
 	base := m.baseDir()
 	parts := make([]string, 0, len(m.tabs))
@@ -132,7 +184,7 @@ func (m Model) tabBar() string {
 			label += "*"
 		}
 		label += " "
-		if i == m.active {
+		if i == m.activeTabIndex() {
 			parts = append(parts, statusHiStyle.Render(label))
 		} else {
 			parts = append(parts, statusStyle.Render(label))
@@ -239,13 +291,13 @@ func (m Model) finderPanel() []string {
 	return rows
 }
 
-func (m Model) renderContent(t *tab, ln, w int) string {
+func (m Model) renderContent(p *pane, t *tab, ln, w int) string {
 	if w <= 0 || ln >= t.buf.LineCount() {
 		return ""
 	}
 	raw := t.buf.LineAt(ln)
 	exp := expandTabs(raw)
-	start := t.offsetX
+	start := p.offsetX
 	if start > len(exp) {
 		start = len(exp)
 	}
@@ -273,7 +325,11 @@ func (m Model) statusBar() string {
 	if t.buf.Dirty() {
 		dirty = " *"
 	}
-	left := statusHiStyle.Render(" " + t.name(base) + dirty)
+	paneMark := ""
+	if m.layout != splitNone {
+		paneMark = fmt.Sprintf("[%d] ", m.activePane+1)
+	}
+	left := statusHiStyle.Render(" " + paneMark + t.name(base) + dirty)
 	mid := ""
 	if m.msg != "" {
 		mid = statusStyle.Render("  " + m.msg)
@@ -282,6 +338,9 @@ func (m Model) statusBar() string {
 	hint := ""
 	if !m.promptOpen && !m.finderOpen {
 		hint = "F1 help "
+		if m.layout != splitNone {
+			hint += "F8 pane "
+		}
 	}
 	rightBar := hintStyle.Render(hint) + statusStyle.Render(right)
 	fill := m.width - lipgloss.Width(left) - lipgloss.Width(mid) - lipgloss.Width(rightBar)

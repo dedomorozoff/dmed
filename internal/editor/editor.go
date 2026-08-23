@@ -12,10 +12,8 @@ import (
 )
 
 type tab struct {
-	buf     *buffer.Buffer
-	path    string
-	offsetX int
-	offsetY int
+	buf  *buffer.Buffer
+	path string
 }
 
 func (t *tab) name(base string) string {
@@ -28,7 +26,9 @@ func (t *tab) name(base string) string {
 type Model struct {
 	root   string
 	tabs   []tab
-	active int
+	panes  []pane
+	layout splitLayout
+	activePane int
 	width  int
 	height int
 	msg    string
@@ -69,6 +69,7 @@ func New(paths ...string) Model {
 	if len(m.tabs) == 0 {
 		m.tabs = append(m.tabs, tab{buf: buffer.New()})
 	}
+	m.initPanes()
 	if m.root != "" {
 		m.treeVisible = true
 		m.rebuildTree()
@@ -87,9 +88,9 @@ func (m Model) baseDir() string {
 	return cwd
 }
 
-func (m Model) activeTab() *tab { return &m.tabs[m.active] }
+func (m Model) activeTab() *tab { return &m.tabs[m.activeTabIndex()] }
 
-func (m *Model) cur() *tab { return &m.tabs[m.active] }
+func (m *Model) cur() *tab { return &m.tabs[m.activeTabIndex()] }
 
 func (m *Model) openPath(rawPath string) {
 	path := normalizePath(m.baseDir(), rawPath)
@@ -105,7 +106,10 @@ func (m *Model) openPath(rawPath string) {
 		t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
 	}
 	m.tabs = append(m.tabs, t)
-	m.active = len(m.tabs) - 1
+	// Only set active tab if panes are already initialized
+	if len(m.panes) > 0 {
+		m.setActiveTab(len(m.tabs) - 1)
+	}
 }
 
 func (m *Model) switchTab(d int) {
@@ -113,24 +117,22 @@ func (m *Model) switchTab(d int) {
 	if n == 0 {
 		return
 	}
-	m.active = ((m.active+d)%n + n) % n
+	idx := m.activeTabIndex()
+	m.setActiveTab(((idx+d)%n + n) % n)
 }
 
 func (m *Model) jumpTab(n int) {
-	if n >= 0 && n < len(m.tabs) {
-		m.active = n
-	}
+	m.setActiveTab(n)
 }
 
 func (m *Model) closeTab() tea.Cmd {
+	idx := m.activeTabIndex()
 	if len(m.tabs) == 1 {
 		// Keep the tab so Bubbletea can render one final frame before Quit.
 		return tea.Quit
 	}
-	m.tabs = append(m.tabs[:m.active], m.tabs[m.active+1:]...)
-	if m.active >= len(m.tabs) {
-		m.active = len(m.tabs) - 1
-	}
+	m.tabs = append(m.tabs[:idx], m.tabs[idx+1:]...)
+	m.fixPaneTabsAfterClose(idx)
 	return nil
 }
 
@@ -203,7 +205,7 @@ func (m *Model) focusOrOpen(rawPath string) {
 	path := normalizePath(m.baseDir(), rawPath)
 	for i := range m.tabs {
 		if m.tabs[i].path == path {
-			m.active = i
+			m.setActiveTab(i)
 			return
 		}
 	}
@@ -304,6 +306,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.helpOpen = !m.helpOpen
 	case "ctrl+b", "f9":
 		m.toggleTree()
+	case "ctrl+\\", "f6":
+		m.splitVert()
+	case "ctrl+alt+h", "f7":
+		m.splitHoriz()
+	case "ctrl+alt+p", "f8":
+		m.focusOtherPane()
+	case "ctrl+alt+w":
+		m.closePane()
 	case "ctrl+w", "ctrl+x":
 		if cmd := m.closeTab(); cmd != nil {
 			return cmd
@@ -326,12 +336,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.cur().buf.LineEnd()
 	case "pgup":
 		t := m.cur()
-		for i := 0; i < m.viewHeight()-2 && t.buf.CurLine() > 0; i++ {
+		for i := 0; i < m.paneViewHeight(m.activePane)-2 && t.buf.CurLine() > 0; i++ {
 			t.buf.MoveUp()
 		}
 	case "pgdown":
 		t := m.cur()
-		for i := 0; i < m.viewHeight()-2 && t.buf.CurLine() < t.buf.LineCount()-1; i++ {
+		for i := 0; i < m.paneViewHeight(m.activePane)-2 && t.buf.CurLine() < t.buf.LineCount()-1; i++ {
 			t.buf.MoveDown()
 		}
 	case "enter":
@@ -374,26 +384,27 @@ func (m *Model) saveActive() {
 }
 
 func (m *Model) clampScroll() {
+	p := m.curPane()
 	t := m.cur()
-	h := m.viewHeight()
+	h := m.paneViewHeight(m.activePane)
 	cur := t.buf.CurLine()
 	if h > 0 {
-		if cur < t.offsetY {
-			t.offsetY = cur
+		if cur < p.offsetY {
+			p.offsetY = cur
 		}
-		if cur >= t.offsetY+h {
-			t.offsetY = cur - h + 1
+		if cur >= p.offsetY+h {
+			p.offsetY = cur - h + 1
 		}
 	}
-	w := m.viewWidth()
+	w := m.paneContentWidth(m.activePane)
 	if w <= 0 {
 		return
 	}
 	x := visCol(t.buf.LineAt(cur), t.buf.Col())
-	if x < t.offsetX {
-		t.offsetX = x
+	if x < p.offsetX {
+		p.offsetX = x
 	}
-	if x >= t.offsetX+w {
-		t.offsetX = x - w + 1
+	if x >= p.offsetX+w {
+		p.offsetX = x - w + 1
 	}
 }
