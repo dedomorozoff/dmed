@@ -9,7 +9,7 @@ export GOSUMDB
 .PHONY: build test vet run clean
 
 build:
-	$(GO) build -o dmed .
+	$(GO) build ./
 
 test:
 	$(GO) test ./...
@@ -18,7 +18,7 @@ vet:
 	$(GO) vet ./...
 
 run: build
-	./dmed $(FILE)
+	./dmed.exe $(FILE)
 
 clean:
-	rm -f dmed
+	rm -f dmed dmed.exe

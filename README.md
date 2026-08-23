@@ -26,10 +26,10 @@ Roadmap (see [ROADMAP.md](ROADMAP.md)):
 
 ## Build
 
-Requires Go ≥ 1.22.
+Requires Go ≥ 1.24.
 
 ```sh
-make build        # produces ./dmed
+make build        # produces ./dmed.exe
 make test         # unit tests
 make vet          # static checks
 ```
@@ -37,7 +37,8 @@ make vet          # static checks
 ## Usage
 
 ```sh
-./dmed path/to/file.txt   # opens, or creates if missing
+./dmed.exe path/to/file.txt          # opens, or creates if missing
+./dmed.exe a.txt b.txt               # multiple files → tabs
 ```
 
 Keybindings:
@@ -45,8 +46,12 @@ Keybindings:
 | Keys | Action |
 |------|--------|
 | Arrows, Home/End, PgUp/PgDn | Cursor movement |
-| Ctrl+S | Save |
-| Ctrl+Z / Ctrl+Y | Undo / Redo |
+| Ctrl+S | Save active tab |
+| Ctrl+Z / Ctrl+Y (or Ctrl+R) | Undo / Redo |
+| Ctrl+T | Open file by path (prompt) |
+| Ctrl+O or F3 | Fuzzy file finder |
+| Ctrl+W | Close tab (last one quits) |
+| Alt+← / Alt+→, Alt+1..9 | Switch tabs |
 | Ctrl+Q or Ctrl+C | Quit |
 
 Consecutive typing collapses into a single undo step; any other operation
@@ -55,9 +60,9 @@ starts a new one.
 ## Layout
 
 ```
-internal/buffer/   pure text buffer + undo engine (unit tested)
-internal/editor/   Bubbletea model and rendering
-main.go            CLI entry point
+internal/buffer/    pure text buffer + undo engine (unit tested)
+internal/editor/   Bubbletea model: tabs, finder, rendering
+main.go             CLI entry point
 ```
 
 ## License

@@ -43,8 +43,9 @@ Run `make build && make vet && make test` before considering any change done.
   sticky goal column, undo/redo stacks with typing-run grouping. It must stay
   free of TUI imports; behavior changes belong in `buffer_test.go`.
 - `internal/editor/editor.go` — Bubbletea model: key handling, scrolling,
-  file I/O. `internal/editor/view.go` — rendering (gutter, cursor cell,
-  status bar, tab expansion).
+  file I/O, tabs. `internal/editor/finder.go` — fuzzy file finder (walk cwd,
+  subsequence scoring). `internal/editor/view.go` — rendering (tab bar,
+  gutter, cursor cell, status bar, finder panel, tab expansion).
 - `main.go` — CLI entry only.
 
 Conventions:
@@ -60,13 +61,23 @@ Conventions:
 
 ## Manual verification
 
-Unit tests cover the buffer core. For TUI behavior there is no automated UI
-test yet — smoke-test in a pty, e.g.:
+Unit tests cover the buffer core and editor tab/finder logic. For TUI
+behavior there is no automated UI test yet.
 
-```sh
-printf 'text\023\021' | script -qec './dmed /tmp/f.txt' /dev/null
-# \023 = Ctrl+S save, \021 = Ctrl+Q quit; then inspect /tmp/f.txt
+Known-broken on this machine: the old cygwin recipe
+`printf ... | script -qec './dmed f' /dev/null` does not work with the native
+Windows binary. Use a ConPTY harness instead (pywinpty is installed):
+
+```python
+from winpty import PtyProcess
+p = PtyProcess.spawn(r"<repo>\dmed.exe", cwd=workdir, dimensions=(24, 80))
+p.write("text\x13\x11")  # type, Ctrl+S save, Ctrl+Q quit
 ```
 
-Note: headless ptys may report a zero window size; the model guards against
-non-positive `WindowSizeMsg` values, keep that guard intact.
+Caveats of the winpty agent: most ctrl-chords arrive as plain letters
+(`\x02`→`b`, `\x06`→`f`) and F-key byte sequences fall apart, so only
+verify keybindings in a real terminal (Windows Terminal / mintty).
+`DMED_DEBUG_KEYS=1` echoes recognized keys into the status bar.
+Timing is flaky: capture several seconds after each keystroke before
+asserting on output; headless ptys may report a zero window size (the model
+guards against non-positive `WindowSizeMsg` values, keep that guard intact).
