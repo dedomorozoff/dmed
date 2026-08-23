@@ -9,37 +9,112 @@ import (
 	"dmed/internal/buffer"
 )
 
-type Model struct {
+type tab struct {
 	buf     *buffer.Buffer
 	path    string
-	width   int
-	height  int
 	offsetX int
 	offsetY int
-	msg     string
 }
 
-func New(path string) Model {
-	m := Model{width: 80, height: 24}
-	if path == "" {
-		m.buf = buffer.New()
-		m.path = "[untitled]"
-		m.msg = "new buffer"
-		return m
+func (t *tab) name() string {
+	if t.path == "" {
+		return "[untitled]"
 	}
-	m.path = path
+	return t.path
+}
+
+type Model struct {
+	tabs   []tab
+	active int
+	width  int
+	height int
+	msg    string
+
+	promptOpen bool
+	promptIn   []rune
+}
+
+func New(paths ...string) Model {
+	m := Model{width: 80, height: 24}
+	for _, p := range paths {
+		m.openPath(p)
+	}
+	if len(m.tabs) == 0 {
+		m.tabs = append(m.tabs, tab{buf: buffer.New()})
+	}
+	return m
+}
+
+func (m Model) activeTab() *tab { return &m.tabs[m.active] }
+
+func (m *Model) cur() *tab { return &m.tabs[m.active] }
+
+func (m *Model) openPath(path string) {
 	data, err := os.ReadFile(path)
+	t := tab{path: path, buf: buffer.New()}
 	if err != nil {
-		m.buf = buffer.New()
 		if os.IsNotExist(err) {
-			m.msg = "new file"
+			m.msg = "new file: " + path
 		} else {
 			m.msg = "open failed: " + err.Error()
 		}
-		return m
+	} else {
+		t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
 	}
-	m.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
-	return m
+	m.tabs = append(m.tabs, t)
+	m.active = len(m.tabs) - 1
+}
+
+func (m *Model) switchTab(d int) {
+	n := len(m.tabs)
+	if n == 0 {
+		return
+	}
+	m.active = ((m.active+d)%n + n) % n
+}
+
+func (m *Model) jumpTab(n int) {
+	if n >= 0 && n < len(m.tabs) {
+		m.active = n
+	}
+}
+
+func (m *Model) closeTab() tea.Cmd {
+	m.tabs = append(m.tabs[:m.active], m.tabs[m.active+1:]...)
+	if len(m.tabs) == 0 {
+		return tea.Quit
+	}
+	if m.active >= len(m.tabs) {
+		m.active = len(m.tabs) - 1
+	}
+	return nil
+}
+
+func (m *Model) startPrompt() {
+	m.promptOpen = true
+	m.promptIn = nil
+}
+
+func (m *Model) handlePrompt(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc":
+		m.promptOpen = false
+	case "enter":
+		path := strings.TrimSpace(string(m.promptIn))
+		m.promptOpen = false
+		if path != "" {
+			m.openPath(path)
+		}
+	case "backspace":
+		if n := len(m.promptIn); n > 0 {
+			m.promptIn = m.promptIn[:n-1]
+		}
+	default:
+		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+			m.promptIn = append(m.promptIn, msg.Runes...)
+		}
+	}
+	return nil
 }
 
 func (m Model) Init() tea.Cmd { return nil }
@@ -54,113 +129,129 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.height = msg.Height
 		}
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" || msg.String() == "ctrl+q" {
+		if !m.promptOpen && (msg.String() == "ctrl+c" || msg.String() == "ctrl+q") {
 			return m, tea.Quit
 		}
-		m.handleKey(msg)
+		if cmd := m.handleKey(msg); cmd != nil {
+			return m, cmd
+		}
 	}
 	m.clampScroll()
 	return m, nil
 }
 
-func (m *Model) handleKey(msg tea.KeyMsg) {
-	switch msg.String() {
+func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
+	s := msg.String()
+	if m.promptOpen {
+		return m.handlePrompt(msg)
+	}
+	if len(s) == 5 && strings.HasPrefix(s, "alt+") && s[4] >= '1' && s[4] <= '9' {
+		m.jumpTab(int(s[4] - '1'))
+		return nil
+	}
+	switch s {
 	case "ctrl+s":
-		m.save()
-		return
+		m.saveActive()
 	case "ctrl+z":
-		if m.buf.Undo() {
+		if m.cur().buf.Undo() {
 			m.msg = ""
 		}
-		return
 	case "ctrl+y", "ctrl+r":
-		if m.buf.Redo() {
+		if m.cur().buf.Redo() {
 			m.msg = ""
 		}
-		return
+	case "ctrl+t":
+		m.startPrompt()
+	case "ctrl+w":
+		if cmd := m.closeTab(); cmd != nil {
+			return cmd
+		}
+	case "alt+left":
+		m.switchTab(-1)
+	case "alt+right":
+		m.switchTab(1)
 	case "up":
-		m.buf.MoveUp()
-		return
+		m.cur().buf.MoveUp()
 	case "down":
-		m.buf.MoveDown()
-		return
+		m.cur().buf.MoveDown()
 	case "left":
-		m.buf.MoveLeft()
-		return
+		m.cur().buf.MoveLeft()
 	case "right":
-		m.buf.MoveRight()
-		return
+		m.cur().buf.MoveRight()
 	case "home":
-		m.buf.LineStart()
-		return
+		m.cur().buf.LineStart()
 	case "end":
-		m.buf.LineEnd()
-		return
+		m.cur().buf.LineEnd()
 	case "pgup":
-		n := m.viewHeight() - 2
-		for i := 0; i < n && m.buf.CurLine() > 0; i++ {
-			m.buf.MoveUp()
+		t := m.cur()
+		for i := 0; i < m.viewHeight()-2 && t.buf.CurLine() > 0; i++ {
+			t.buf.MoveUp()
 		}
-		return
 	case "pgdown":
-		n := m.viewHeight() - 2
-		for i := 0; i < n && m.buf.CurLine() < m.buf.LineCount()-1; i++ {
-			m.buf.MoveDown()
+		t := m.cur()
+		for i := 0; i < m.viewHeight()-2 && t.buf.CurLine() < t.buf.LineCount()-1; i++ {
+			t.buf.MoveDown()
 		}
-		return
 	case "enter":
-		m.buf.InsertNewline()
+		m.cur().buf.InsertNewline()
+		m.msg = ""
 	case "backspace":
-		m.buf.Backspace()
+		m.cur().buf.Backspace()
+		m.msg = ""
 	case "delete":
-		m.buf.Delete()
+		m.cur().buf.Delete()
+		m.msg = ""
 	case "tab":
-		m.buf.Insert('\t')
+		m.cur().buf.Insert('\t')
+		m.msg = ""
 	default:
 		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
 			for _, r := range msg.Runes {
-				m.buf.Insert(r)
+				m.cur().buf.Insert(r)
 			}
+			m.msg = ""
 		} else {
-			return
+			return nil
 		}
 	}
-	m.msg = ""
+	return nil
 }
 
-func (m *Model) save() {
-	if m.path == "[untitled]" {
+func (m *Model) saveActive() {
+	t := m.cur()
+	if t.path == "" {
 		m.msg = "cannot save: no file name"
 		return
 	}
-	if err := os.WriteFile(m.path, []byte(m.buf.Text()), 0o644); err != nil {
+	if err := os.WriteFile(t.path, []byte(t.buf.Text()), 0o644); err != nil {
 		m.msg = "save failed: " + err.Error()
 		return
 	}
-	m.buf.MarkSaved()
+	t.buf.MarkSaved()
 	m.msg = "saved"
 }
 
 func (m *Model) clampScroll() {
+	t := m.cur()
 	h := m.viewHeight()
-	cur := m.buf.CurLine()
+	cur := t.buf.CurLine()
 	if h > 0 {
-		if cur < m.offsetY {
-			m.offsetY = cur
+		if cur < t.offsetY {
+			t.offsetY = cur
 		}
-		if cur >= m.offsetY+h {
-			m.offsetY = cur - h + 1
+		if cur >= t.offsetY+h {
+			t.offsetY = cur - h + 1
 		}
 	}
 	w := m.viewWidth()
 	if w <= 0 {
 		return
 	}
-	x := visCol(m.buf.LineAt(cur), m.buf.Col())
-	if x < m.offsetX {
-		m.offsetX = x
+	x := visCol(t.buf.LineAt(cur), t.buf.Col())
+	if x < t.offsetX {
+		t.offsetX = x
 	}
-	if x >= m.offsetX+w {
-		m.offsetX = x - w + 1
+	if x >= t.offsetX+w {
+		t.offsetX = x - w + 1
 	}
 }

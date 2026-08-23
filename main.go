@@ -10,15 +10,11 @@ import (
 )
 
 func main() {
-	if len(os.Args) > 2 {
-		fmt.Fprintln(os.Stderr, "usage: dmed [file]")
-		os.Exit(2)
+	if len(os.Args) > 1 && (os.Args[1] == "-h" || os.Args[1] == "--help") {
+		fmt.Println("usage: dmed [files...]")
+		return
 	}
-	path := ""
-	if len(os.Args) == 2 {
-		path = os.Args[1]
-	}
-	p := tea.NewProgram(editor.New(path), tea.WithAltScreen())
+	p := tea.NewProgram(editor.New(os.Args[1:]...), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
