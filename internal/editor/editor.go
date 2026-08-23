@@ -109,6 +109,9 @@ type Model struct {
 	conflictOpen bool
 	conflictPath string
 	gitOpen      bool
+	gitMode      gitPanelMode
+	gitFiles     []vcs.FileStatus
+	gitSel       int
 	gitCommitIn  []rune
 
 	// Command palette & Clipboard
@@ -860,45 +863,6 @@ func (m *Model) doReplaceAll() {
 	m.msg = fmt.Sprintf("replaced %d occurrence(s)", count)
 	m.searchOpen = false
 	m.replaceOpen = false
-}
-
-func (m *Model) handleGit(msg tea.KeyMsg) tea.Cmd {
-	t := m.cur()
-	r := m.repo
-	if (r == nil || (t.path != "" && !strings.HasPrefix(t.path, r.Root))) && t.path != "" {
-		if found, err := vcs.Open(filepath.Dir(t.path)); err == nil {
-			r = found
-		}
-	}
-	switch msg.String() {
-	case "esc":
-		m.gitOpen = false
-		m.msg = ""
-	case "enter":
-		if len(m.gitCommitIn) > 0 && r != nil {
-			if t.path != "" {
-				_ = r.Stage(t.path)
-			}
-			hash, err := r.Commit(string(m.gitCommitIn))
-			if err != nil {
-				m.msg = "commit failed: " + err.Error()
-			} else {
-				m.msg = "committed: " + hash.String()[:7]
-				m.gitCommitIn = nil
-				m.gitOpen = false
-				t.diffText = ""
-			}
-		}
-	case "backspace":
-		if n := len(m.gitCommitIn); n > 0 {
-			m.gitCommitIn = m.gitCommitIn[:n-1]
-		}
-	default:
-		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-			m.gitCommitIn = append(m.gitCommitIn, msg.Runes...)
-		}
-	}
-	return nil
 }
 
 func (m *Model) jumpHunk(dir int) {

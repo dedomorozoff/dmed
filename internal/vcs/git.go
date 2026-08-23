@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -81,8 +82,90 @@ func (repo *Repo) Branch() string {
 	return h
 }
 
+// FileStatusCode indicates the state of a file in the working tree / index.
+type FileStatusCode rune
+
+const (
+	StatusUnmodified FileStatusCode = ' '
+	StatusModified   FileStatusCode = 'M'
+	StatusAdded      FileStatusCode = 'A'
+	StatusDeleted    FileStatusCode = 'D'
+	StatusUntracked  FileStatusCode = '?'
+	StatusRenamed    FileStatusCode = 'R'
+)
+
+// FileStatus represents one file's staging and worktree status.
+type FileStatus struct {
+	Path    string
+	Staging FileStatusCode
+	Worktree FileStatusCode
+}
+
+// IsClean returns true when there are no staging or worktree changes.
+func (fs FileStatus) IsClean() bool {
+	return (fs.Staging == StatusUnmodified || fs.Staging == 0) &&
+		(fs.Worktree == StatusUnmodified || fs.Worktree == 0)
+}
+
+// IsStaged returns true when the file has staged changes.
+func (fs FileStatus) IsStaged() bool {
+	return fs.Staging != StatusUnmodified && fs.Staging != StatusUntracked && fs.Staging != 0
+}
+
+// StatusFiles returns all changed files in the working tree / index.
+func (repo *Repo) StatusFiles() ([]FileStatus, error) {
+	wt, err := repo.r.Worktree()
+	if err != nil {
+		return nil, err
+	}
+	st, err := wt.Status()
+	if err != nil {
+		return nil, err
+	}
+
+	var files []FileStatus
+	for path, fs := range st {
+		staging := FileStatusCode(fs.Staging)
+		worktree := FileStatusCode(fs.Worktree)
+		if staging == '?' {
+			staging = StatusUnmodified
+		}
+		entry := FileStatus{
+			Path:     path,
+			Staging:  staging,
+			Worktree: worktree,
+		}
+		if !entry.IsClean() {
+			files = append(files, entry)
+		}
+	}
+	// Sort for stable ordering
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].Path < files[j].Path
+	})
+	return files, nil
+}
+
+// Unstage removes a file from the index (git restore --staged).
+func (repo *Repo) Unstage(path string) error {
+	wt, err := repo.r.Worktree()
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(repo.Root, path)
+	if err != nil {
+		rel = path
+	}
+	rel = filepath.ToSlash(rel)
+	return wt.Restore(&git.RestoreOptions{
+		Staged: true,
+		Files:  []string{rel},
+	})
+}
+
 // StatusSummary returns a short string summarizing repository changes.
 func (repo *Repo) StatusSummary() string {
+
 	wt, err := repo.r.Worktree()
 	if err != nil {
 		return ""
