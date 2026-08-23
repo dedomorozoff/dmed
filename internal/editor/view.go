@@ -153,7 +153,11 @@ func (m Model) editorRows(h int) []string {
 		left := m.renderPaneRows(0, h, w0)
 		right := m.renderPaneRows(1, h, w1)
 		combined := make([]string, h)
-		sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+		sepColor := "238"
+		if m.activePane == 0 {
+			sepColor = "61" // highlight left pane separator
+		}
+		sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(sepColor))
 		sep := sepStyle.Render("│")
 		for row := 0; row < h; row++ {
 			combined[row] = left[row] + sep + right[row]
@@ -165,7 +169,11 @@ func (m Model) editorRows(h int) []string {
 	h1 := m.paneViewHeight(1)
 	top := m.renderPaneRows(0, h0, m.paneTotalWidth(0))
 	bottom := m.renderPaneRows(1, h1, m.paneTotalWidth(1))
-	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	sepColor := "238"
+	if m.activePane == 0 {
+		sepColor = "61" // highlight top pane separator
+	}
+	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(sepColor))
 	sep := sepStyle.Render(strings.Repeat("─", m.editorAreaWidth()))
 	combined := make([]string, 0, h0+h1+1)
 	combined = append(combined, top...)
@@ -237,9 +245,6 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 			rows[row] = gutStr + m.renderLine(p, t, ln, contentW, active, syntaxLines)
 		} else {
 			rows[row] = gutStr + m.renderLine(p, t, ln, contentW, active, syntaxLines)
-		}
-		if active && m.layout != splitNone {
-			rows[row] = activePaneStyle.Render(rows[row])
 		}
 	}
 	return rows
