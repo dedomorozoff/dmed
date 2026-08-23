@@ -221,3 +221,52 @@ func TestReplaceAll(t *testing.T) {
 		t.Fatalf("after redo: %q", b.Text())
 	}
 }
+
+func TestSelectionAndInsert(t *testing.T) {
+	b := Load("hello beautiful world\n")
+	b.SetCursor(0, 6)
+	for i := 0; i < 9; i++ {
+		b.MoveRightWithSelect()
+	}
+	if !b.HasSelection() {
+		t.Fatal("expected active selection")
+	}
+	if b.SelectedText() != "beautiful" {
+		t.Fatalf("expected 'beautiful', got %q", b.SelectedText())
+	}
+
+	// Insert replaces selection
+	b.InsertText("brave new")
+	if b.Text() != "hello brave new world\n" {
+		t.Fatalf("after insert: %q", b.Text())
+	}
+	if b.HasSelection() {
+		t.Fatal("selection should be cleared after insert")
+	}
+
+	b.Undo()
+	if b.Text() != "hello beautiful world\n" {
+		t.Fatalf("after undo: %q", b.Text())
+	}
+}
+
+func TestSelectionDeleteUndo(t *testing.T) {
+	b := Load("line1\nline2\nline3\n")
+	b.SetCursor(0, 5)
+	b.MoveDownWithSelect()
+	b.LineEndWithSelect()
+
+	if b.SelectedText() != "\nline2" {
+		t.Fatalf("selected text: %q", b.SelectedText())
+	}
+
+	b.DeleteSelection()
+	if b.Text() != "line1\nline3\n" {
+		t.Fatalf("after delete selection: %q", b.Text())
+	}
+
+	b.Undo()
+	if b.Text() != "line1\nline2\nline3\n" {
+		t.Fatalf("after undo: %q", b.Text())
+	}
+}

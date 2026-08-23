@@ -27,6 +27,7 @@ var (
 	gitAddStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
 	gitModStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	gitDelStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	selectionStyle  = lipgloss.NewStyle().Background(lipgloss.Color("60")).Foreground(lipgloss.Color("255"))
 )
 
 type helpEntry struct {
@@ -36,6 +37,10 @@ type helpEntry struct {
 
 var helpEntries = []helpEntry{
 	{"Ctrl+S", "save active tab"},
+	{"", ""},
+	{"Ctrl+P / F2", "Command Palette (run any command)"},
+	{"Shift+Arrows", "select text range"},
+	{"Ctrl+C / Ctrl+X / Ctrl+V", "copy / cut / paste"},
 	{"", ""},
 	{"Ctrl+F", "search in file (Enter/F3 next, Shift+F3 prev)"},
 	{"Ctrl+H", "search & replace (Tab switch, Enter rep, Ctrl+A all)"},
@@ -68,8 +73,19 @@ func (m Model) finderExtraRows() int {
 	return len(m.finderHits) + 1
 }
 
+func (m Model) paletteExtraRows() int {
+	if !m.paletteOpen {
+		return 0
+	}
+	hits := m.filterPalette()
+	if len(hits) > 8 {
+		return 9
+	}
+	return len(hits) + 1
+}
+
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.finderExtraRows()
+	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -115,6 +131,9 @@ func (m Model) View() string {
 	rows = append(rows, bottom)
 	if m.finderOpen {
 		rows = append(rows, m.finderPanel()...)
+	}
+	if m.paletteOpen {
+		rows = append(rows, m.palettePanel()...)
 	}
 	return lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n"))
 }
@@ -490,6 +509,30 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 		end = len(exp)
 	}
 
+	// Selection range
+	selStart := -1
+	selEnd := -1
+	if t.buf.HasSelection() {
+		sl, sc, el, ec := t.buf.SelectionRange()
+		if ln >= sl && ln <= el {
+			if ln == sl {
+				if sc <= len(raw) {
+					selStart = rawToExp[sc]
+				}
+			} else {
+				selStart = 0
+			}
+
+			if ln == el {
+				if ec <= len(raw) {
+					selEnd = rawToExp[ec]
+				}
+			} else {
+				selEnd = len(exp)
+			}
+		}
+	}
+
 	var out strings.Builder
 	for i := start; i < end; i++ {
 		r := exp[i]
@@ -506,6 +549,10 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 			}
 		}
 
+		if selStart >= 0 && i >= selStart && i < selEnd {
+			st = selectionStyle
+		}
+
 		if i == cx {
 			st = cursorStyle
 		}
@@ -519,6 +566,30 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 	}
 
 	return out.String()
+}
+
+func (m Model) palettePanel() []string {
+	hits := m.filterPalette()
+	displayHits := hits
+	if len(displayHits) > 8 {
+		displayHits = displayHits[:8]
+	}
+	rows := make([]string, 0, len(displayHits)+1)
+	for i, hit := range displayHits {
+		label := fmt.Sprintf(" %s — %s ", hit.title, hit.desc)
+		if i == m.paletteSel {
+			rows = append(rows, statusHiStyle.Render(label))
+		} else {
+			rows = append(rows, statusStyle.Render(label))
+		}
+	}
+	line := statusHiStyle.Render(" > ") + statusStyle.Render(string(m.paletteQ)) + cursorStyle.Render(" ")
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	rows = append(rows, line)
+	return rows
 }
 
 func (m Model) statusBar() string {

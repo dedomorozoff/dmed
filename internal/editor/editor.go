@@ -10,6 +10,7 @@ import (
 
 	"dmed/internal/buffer"
 	"dmed/internal/events"
+	"dmed/internal/session"
 	"dmed/internal/syntax"
 	"dmed/internal/vcs"
 	"dmed/internal/watcher"
@@ -109,6 +110,12 @@ type Model struct {
 	conflictPath string
 	gitOpen      bool
 	gitCommitIn  []rune
+
+	// Command palette & Clipboard
+	paletteOpen bool
+	paletteQ    []rune
+	paletteSel  int
+	clipboard   string
 }
 
 var debugKeys = os.Getenv("DMED_DEBUG_KEYS") != ""
@@ -140,6 +147,13 @@ func New(paths ...string) Model {
 			continue
 		}
 		m.openPath(p)
+	}
+	if len(paths) == 0 && m.root != "" {
+		if sess, err := session.Load(session.DefaultPath(m.root)); err == nil && len(sess.Files) > 0 {
+			for _, f := range sess.Files {
+				m.openPath(f)
+			}
+		}
 	}
 	if len(m.tabs) == 0 {
 		m.tabs = append(m.tabs, tab{buf: buffer.New()})
@@ -377,10 +391,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if debugKeys {
 			fmt.Fprintf(os.Stderr, "dmed: key %q\n", msg.String())
 		}
-		if !m.promptOpen && (msg.String() == "ctrl+c" || msg.String() == "ctrl+q") {
+		if !m.promptOpen && msg.String() == "ctrl+q" {
 			if m.watcher != nil {
 				_ = m.watcher.Close()
 			}
+			m.saveSession()
 			return m, tea.Quit
 		}
 		cmd := m.handleKey(msg)
@@ -430,6 +445,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if m.gitOpen {
 		return m.handleGit(msg)
 	}
+	if m.paletteOpen {
+		return m.handlePalette(msg)
+	}
 	if m.helpOpen {
 		return m.handleHelp(msg)
 	}
@@ -467,6 +485,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.startPrompt()
 	case "ctrl+o":
 		m.startFinder()
+	case "ctrl+p", "ctrl+shift+p", "f2":
+		m.startPalette()
 	case "f3":
 		m.updateSearchMatches(true)
 	case "shift+f3":
@@ -494,14 +514,51 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.focusOtherPane()
 	case "ctrl+alt+w":
 		m.closePane()
-	case "ctrl+w", "ctrl+x":
+	case "ctrl+w":
 		if cmd := m.closeTab(); cmd != nil {
+			m.saveSession()
 			return cmd
+		}
+	case "ctrl+x":
+		if m.cur().buf.HasSelection() {
+			m.clipboard = m.cur().buf.SelectedText()
+			m.cur().buf.DeleteSelection()
+			m.msg = "cut to clipboard"
+			return nil
+		}
+		if cmd := m.closeTab(); cmd != nil {
+			m.saveSession()
+			return cmd
+		}
+	case "ctrl+c":
+		if m.cur().buf.HasSelection() {
+			m.clipboard = m.cur().buf.SelectedText()
+			m.msg = "copied to clipboard"
+			return nil
+		}
+		m.saveSession()
+		return tea.Quit
+	case "ctrl+v":
+		if m.clipboard != "" {
+			m.cur().buf.InsertText(m.clipboard)
+			m.msg = ""
 		}
 	case "alt+left":
 		m.switchTab(-1)
 	case "alt+right":
 		m.switchTab(1)
+	case "shift+up":
+		m.cur().buf.MoveUpWithSelect()
+	case "shift+down":
+		m.cur().buf.MoveDownWithSelect()
+	case "shift+left":
+		m.cur().buf.MoveLeftWithSelect()
+	case "shift+right":
+		m.cur().buf.MoveRightWithSelect()
+	case "shift+home":
+		m.cur().buf.LineStartWithSelect()
+	case "shift+end":
+		m.cur().buf.LineEndWithSelect()
 	case "up":
 		m.cur().buf.MoveUp()
 	case "down":
@@ -878,4 +935,30 @@ func (m *Model) jumpHunk(dir int) {
 		t.buf.SetCursor(last.StartLine, 0)
 		m.msg = fmt.Sprintf("git hunk: lines %d-%d", last.StartLine+1, last.EndLine+1)
 	}
+}
+
+func (m *Model) startPalette() {
+	m.paletteOpen = true
+	m.paletteQ = nil
+	m.paletteSel = 0
+}
+
+func (m *Model) saveSession() {
+	var files []string
+	for _, t := range m.tabs {
+		if t.path != "" {
+			files = append(files, t.path)
+		}
+	}
+	if len(files) == 0 {
+		return
+	}
+	sess := session.SessionState{
+		Root:       m.root,
+		Files:      files,
+		ActiveTab:  m.activeTabIndex(),
+		Layout:     int(m.layout),
+		ActivePane: m.activePane,
+	}
+	_ = session.Save(session.DefaultPath(m.root), sess)
 }

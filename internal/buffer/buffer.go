@@ -15,6 +15,9 @@ type Buffer struct {
 	line          int
 	col           int
 	goalCol       int
+	selLine       int
+	selCol        int
+	hasSelection  bool
 	undoStack     []snapshot
 	redoStack     []snapshot
 	saved         string
@@ -83,8 +86,135 @@ func (b *Buffer) LineCount() int      { return len(b.lines) }
 func (b *Buffer) LineAt(i int) []rune { return b.lines[i] }
 func (b *Buffer) CurLine() int        { return b.line }
 func (b *Buffer) Col() int            { return b.col }
+
+func (b *Buffer) HasSelection() bool {
+	return b.hasSelection && !(b.selLine == b.line && b.selCol == b.col)
+}
+
+func (b *Buffer) ClearSelection() {
+	b.hasSelection = false
+}
+
+func (b *Buffer) StartSelection() {
+	if !b.hasSelection {
+		b.hasSelection = true
+		b.selLine = b.line
+		b.selCol = b.col
+	}
+}
+
+func (b *Buffer) SelectionRange() (startLine, startCol, endLine, endCol int) {
+	if !b.hasSelection {
+		return b.line, b.col, b.line, b.col
+	}
+	if b.selLine < b.line || (b.selLine == b.line && b.selCol <= b.col) {
+		return b.selLine, b.selCol, b.line, b.col
+	}
+	return b.line, b.col, b.selLine, b.selCol
+}
+
+func (b *Buffer) SelectedText() string {
+	if !b.HasSelection() {
+		return ""
+	}
+	sl, sc, el, ec := b.SelectionRange()
+	if sl == el {
+		return string(b.lines[sl][sc:ec])
+	}
+	var parts []string
+	parts = append(parts, string(b.lines[sl][sc:]))
+	for i := sl + 1; i < el; i++ {
+		parts = append(parts, string(b.lines[i]))
+	}
+	parts = append(parts, string(b.lines[el][:ec]))
+	return strings.Join(parts, "\n")
+}
+
+func (b *Buffer) deleteSelectionWithoutUndo() (int, int) {
+	if !b.HasSelection() {
+		return b.line, b.col
+	}
+	sl, sc, el, ec := b.SelectionRange()
+	startLineRunes := b.lines[sl][:sc]
+	endLineRunes := b.lines[el][ec:]
+	combined := append(append([]rune(nil), startLineRunes...), endLineRunes...)
+
+	newLines := make([][]rune, 0, len(b.lines)-(el-sl))
+	newLines = append(newLines, b.lines[:sl]...)
+	newLines = append(newLines, combined)
+	if el+1 < len(b.lines) {
+		newLines = append(newLines, b.lines[el+1:]...)
+	}
+
+	b.lines = newLines
+	b.line = sl
+	b.col = sc
+	b.goalCol = b.col
+	b.hasSelection = false
+	return sl, sc
+}
+
+func (b *Buffer) DeleteSelection() bool {
+	if !b.HasSelection() {
+		return false
+	}
+	b.beginChange()
+	b.pushUndo()
+	b.deleteSelectionWithoutUndo()
+	return true
+}
+
+func (b *Buffer) InsertText(text string) {
+	if text == "" && !b.HasSelection() {
+		return
+	}
+	b.beginChange()
+	b.pushUndo()
+	if b.HasSelection() {
+		b.deleteSelectionWithoutUndo()
+	}
+
+	lines := strings.Split(text, "\n")
+	curLine := b.lines[b.line]
+	before := curLine[:b.col]
+	after := curLine[b.col:]
+
+	if len(lines) == 1 {
+		runes := []rune(lines[0])
+		newL := append(append([]rune(nil), before...), runes...)
+		newL = append(newL, after...)
+		b.lines[b.line] = newL
+		b.col += len(runes)
+		b.goalCol = b.col
+		return
+	}
+
+	firstLine := append(append([]rune(nil), before...), []rune(lines[0])...)
+	lastLine := append([]rune(lines[len(lines)-1]), after...)
+
+	insertedLines := make([][]rune, len(lines))
+	insertedLines[0] = firstLine
+	for i := 1; i < len(lines)-1; i++ {
+		insertedLines[i] = []rune(lines[i])
+	}
+	insertedLines[len(lines)-1] = lastLine
+
+	newLines := make([][]rune, 0, len(b.lines)+len(lines)-1)
+	newLines = append(newLines, b.lines[:b.line]...)
+	newLines = append(newLines, insertedLines...)
+	if b.line+1 < len(b.lines) {
+		newLines = append(newLines, b.lines[b.line+1:]...)
+	}
+
+	b.lines = newLines
+	b.line = b.line + len(lines) - 1
+	b.col = len([]rune(lines[len(lines)-1]))
+	b.goalCol = b.col
+}
+
 func (b *Buffer) SetCursor(line, col int) {
 	b.breakGroup()
+	b.hasSelection = false
 	if line < 0 {
 		line = 0
 	} else if line >= len(b.lines) {
@@ -118,6 +248,7 @@ func (b *Buffer) ReplaceRange(line, col, length int, replacement []rune) bool {
 	b.line = line
 	b.col = col + len(replacement)
 	b.goalCol = b.col
+	b.hasSelection = false
 	return true
 }
 
@@ -149,10 +280,14 @@ func (b *Buffer) ReplaceAll(find, replace string) int {
 		b.col = len(b.lines[b.line])
 	}
 	b.goalCol = b.col
+	b.hasSelection = false
 	return count
 }
 
 func (b *Buffer) Insert(r rune) {
+	if b.HasSelection() {
+		b.DeleteSelection()
+	}
 	grouped := b.lastWasInsert && b.line == b.lastLine && b.col == b.lastCol
 	b.breakGroup()
 	if !grouped {
@@ -168,9 +303,13 @@ func (b *Buffer) Insert(r rune) {
 	b.lastWasInsert = true
 	b.lastLine = b.line
 	b.lastCol = b.col
+	b.hasSelection = false
 }
 
 func (b *Buffer) InsertNewline() {
+	if b.HasSelection() {
+		b.DeleteSelection()
+	}
 	b.beginChange()
 	b.pushUndo()
 	l := b.lines[b.line]
@@ -182,9 +321,14 @@ func (b *Buffer) InsertNewline() {
 	b.line++
 	b.col = 0
 	b.goalCol = 0
+	b.hasSelection = false
 }
 
 func (b *Buffer) Backspace() {
+	if b.HasSelection() {
+		b.DeleteSelection()
+		return
+	}
 	b.beginChange()
 	if b.col > 0 {
 		b.pushUndo()
@@ -208,6 +352,10 @@ func (b *Buffer) Backspace() {
 }
 
 func (b *Buffer) Delete() {
+	if b.HasSelection() {
+		b.DeleteSelection()
+		return
+	}
 	b.beginChange()
 	l := b.lines[b.line]
 	if b.col < len(l) {
@@ -224,6 +372,7 @@ func (b *Buffer) Delete() {
 }
 
 func (b *Buffer) MoveLeft() {
+	b.hasSelection = false
 	b.breakGroup()
 	if b.col > 0 {
 		b.col--
@@ -235,6 +384,7 @@ func (b *Buffer) MoveLeft() {
 }
 
 func (b *Buffer) MoveRight() {
+	b.hasSelection = false
 	b.breakGroup()
 	if b.col < len(b.lines[b.line]) {
 		b.col++
@@ -246,6 +396,7 @@ func (b *Buffer) MoveRight() {
 }
 
 func (b *Buffer) MoveUp() {
+	b.hasSelection = false
 	b.breakGroup()
 	if b.line == 0 {
 		return
@@ -255,6 +406,51 @@ func (b *Buffer) MoveUp() {
 }
 
 func (b *Buffer) MoveDown() {
+	b.hasSelection = false
+	b.breakGroup()
+	if b.line >= len(b.lines)-1 {
+		return
+	}
+	b.line++
+	b.clampCol()
+}
+
+func (b *Buffer) MoveLeftWithSelect() {
+	b.StartSelection()
+	b.breakGroup()
+	if b.col > 0 {
+		b.col--
+	} else if b.line > 0 {
+		b.line--
+		b.col = len(b.lines[b.line])
+	}
+	b.goalCol = b.col
+}
+
+func (b *Buffer) MoveRightWithSelect() {
+	b.StartSelection()
+	b.breakGroup()
+	if b.col < len(b.lines[b.line]) {
+		b.col++
+	} else if b.line < len(b.lines)-1 {
+		b.line++
+		b.col = 0
+	}
+	b.goalCol = b.col
+}
+
+func (b *Buffer) MoveUpWithSelect() {
+	b.StartSelection()
+	b.breakGroup()
+	if b.line == 0 {
+		return
+	}
+	b.line--
+	b.clampCol()
+}
+
+func (b *Buffer) MoveDownWithSelect() {
+	b.StartSelection()
 	b.breakGroup()
 	if b.line >= len(b.lines)-1 {
 		return
@@ -273,12 +469,28 @@ func (b *Buffer) clampCol() {
 }
 
 func (b *Buffer) LineStart() {
+	b.hasSelection = false
 	b.breakGroup()
 	b.col = 0
 	b.goalCol = 0
 }
 
 func (b *Buffer) LineEnd() {
+	b.hasSelection = false
+	b.breakGroup()
+	b.col = len(b.lines[b.line])
+	b.goalCol = b.col
+}
+
+func (b *Buffer) LineStartWithSelect() {
+	b.StartSelection()
+	b.breakGroup()
+	b.col = 0
+	b.goalCol = 0
+}
+
+func (b *Buffer) LineEndWithSelect() {
+	b.StartSelection()
 	b.breakGroup()
 	b.col = len(b.lines[b.line])
 	b.goalCol = b.col
