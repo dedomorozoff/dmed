@@ -51,3 +51,23 @@ func TestStatusBarShowsHint(t *testing.T) {
 		t.Fatal("status bar must hint F1 help by default")
 	}
 }
+
+func TestNulByteOpensHelp(t *testing.T) {
+	m := New()
+	m.width, m.height = 80, 24
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\x00'}})
+	if !m.helpOpen {
+		t.Fatal("NUL rune (mangled F1) must open help")
+	}
+	if m.tabs[0].buf.Text() != "\n" {
+		t.Fatal("NUL must not insert into buffer")
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\x00'}})
+	if m.helpOpen {
+		t.Fatal("second NUL must close help")
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlAt})
+	if !m.helpOpen {
+		t.Fatal("ctrl+@ must toggle help too")
+	}
+}

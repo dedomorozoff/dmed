@@ -161,7 +161,7 @@ func (m *Model) handleFinder(msg tea.KeyMsg) tea.Cmd {
 
 func (m *Model) handleHelp(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
-	case "esc", "f1", "ctrl+e", "q":
+	case "esc", "f1", "ctrl+e", "ctrl+@", "\x00", "q":
 		m.helpOpen = false
 	}
 	return nil
@@ -232,7 +232,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
-		if r := msg.Runes[0]; r > 0 && r < 32 {
+		if r := msg.Runes[0]; r < 32 && r != '\t' {
 			msg = tea.KeyMsg{Type: tea.KeyType(r)}
 		}
 	}
@@ -265,7 +265,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.startPrompt()
 	case "ctrl+o", "f3":
 		m.startFinder()
-	case "f1", "ctrl+e":
+	case "f1", "ctrl+e", "ctrl+@", "\x00":
 		m.helpOpen = !m.helpOpen
 	case "ctrl+w":
 		if cmd := m.closeTab(); cmd != nil {
