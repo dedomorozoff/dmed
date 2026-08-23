@@ -52,6 +52,7 @@ Keybindings:
 | Ctrl+O or F3 | Fuzzy file finder |
 | Ctrl+W | Close tab (last one quits) |
 | Alt+← / Alt+→, Alt+1..9 | Switch tabs |
+| F1 or Ctrl+E | Help overlay |
 | Ctrl+Q or Ctrl+C | Quit |
 
 Consecutive typing collapses into a single undo step; any other operation

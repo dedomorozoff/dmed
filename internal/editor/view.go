@@ -16,7 +16,30 @@ var (
 	cursorStyle    = lipgloss.NewStyle().Reverse(true)
 	statusStyle    = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("250"))
 	statusHiStyle  = lipgloss.NewStyle().Background(lipgloss.Color("61")).Foreground(lipgloss.Color("255")).Bold(true)
+	hintStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 )
+
+type helpEntry struct {
+	keys string
+	desc string
+}
+
+var helpEntries = []helpEntry{
+	{"Ctrl+S", "save active tab"},
+	{"", ""},
+	{"Ctrl+O / F3", "fuzzy file finder"},
+	{"Ctrl+T", "open file by path"},
+	{"Alt+←/→", "switch tabs"},
+	{"Alt+1..9", "jump to tab N"},
+	{"Ctrl+W", "close tab (last quits)"},
+	{"", ""},
+	{"Arrows/Home/End/PgUp/PgDn", "move cursor"},
+	{"Enter/Backspace/Delete/Tab", "edit text"},
+	{"Ctrl+Z / Ctrl+Y,Ctrl+R", "undo / redo"},
+	{"", ""},
+	{"F1 or Ctrl+E", "toggle this help"},
+	{"Ctrl+Q / Ctrl+C", "quit"},
+}
 
 func (m Model) finderExtraRows() int {
 	if !m.finderOpen {
@@ -51,14 +74,18 @@ func (m Model) View() string {
 	cur := t.buf.CurLine()
 	rows := make([]string, 0, h+2)
 	rows = append(rows, m.tabBar())
-	for row := 0; row < h; row++ {
-		ln := t.offsetY + row
-		num := strconv.Itoa(ln + 1)
-		gut := strings.Repeat(" ", gw-1-len(num)) + num + " "
-		if ln == cur && ln < t.buf.LineCount() {
-			rows = append(rows, curGutterStyle.Render(gut)+m.renderContent(t, ln, w))
-		} else {
-			rows = append(rows, gutterStyle.Render(gut)+m.renderContent(t, ln, w))
+	if m.helpOpen {
+		rows = append(rows, m.helpPanel(h)...)
+	} else {
+		for row := 0; row < h; row++ {
+			ln := t.offsetY + row
+			num := strconv.Itoa(ln + 1)
+			gut := strings.Repeat(" ", gw-1-len(num)) + num + " "
+			if ln == cur && ln < t.buf.LineCount() {
+				rows = append(rows, curGutterStyle.Render(gut)+m.renderContent(t, ln, w))
+			} else {
+				rows = append(rows, gutterStyle.Render(gut)+m.renderContent(t, ln, w))
+			}
 		}
 	}
 	bottom := m.statusBar()
@@ -93,6 +120,23 @@ func (m Model) tabBar() string {
 		bar += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	return bar
+}
+
+func (m Model) helpPanel(h int) []string {
+	rows := make([]string, 0, h)
+	rows = append(rows, statusHiStyle.Render(" dmed — keys ")+" "+hintStyle.Render("(F1/Esc closes)"))
+	for _, e := range helpEntries {
+		if e.keys == "" {
+			rows = append(rows, "")
+			continue
+		}
+		key := e.keys
+		if len(key) < 26 {
+			key += strings.Repeat(" ", 26-len(key))
+		}
+		rows = append(rows, " "+statusStyle.Render(key)+e.desc)
+	}
+	return rows
 }
 
 func (m Model) promptLine() string {
@@ -161,12 +205,17 @@ func (m Model) statusBar() string {
 	if m.msg != "" {
 		mid = statusStyle.Render("  " + m.msg)
 	}
-	right := statusStyle.Render(fmt.Sprintf("Ln %d, Col %d ", t.buf.CurLine()+1, t.buf.Col()+1))
-	fill := m.width - lipgloss.Width(left) - lipgloss.Width(mid) - lipgloss.Width(right)
-	if fill > 0 {
-		return left + mid + statusStyle.Render(strings.Repeat(" ", fill)) + right
+	right := fmt.Sprintf("Ln %d, Col %d ", t.buf.CurLine()+1, t.buf.Col()+1)
+	hint := ""
+	if !m.promptOpen && !m.finderOpen {
+		hint = "F1 help "
 	}
-	return left + mid + right
+	rightBar := hintStyle.Render(hint) + statusStyle.Render(right)
+	fill := m.width - lipgloss.Width(left) - lipgloss.Width(mid) - lipgloss.Width(rightBar)
+	if fill > 0 {
+		return left + mid + statusStyle.Render(strings.Repeat(" ", fill)) + rightBar
+	}
+	return left + mid + rightBar
 }
 
 func expandTabs(l []rune) []rune {

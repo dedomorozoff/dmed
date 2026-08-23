@@ -39,6 +39,8 @@ type Model struct {
 	finderFiles []string
 	finderHits  []string
 	finderSel   int
+
+	helpOpen bool
 }
 
 var debugKeys = os.Getenv("DMED_DEBUG_KEYS") != ""
@@ -157,6 +159,14 @@ func (m *Model) handleFinder(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+func (m *Model) handleHelp(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc", "f1", "ctrl+e", "q":
+		m.helpOpen = false
+	}
+	return nil
+}
+
 func (m *Model) focusOrOpen(rawPath string) {
 	path := normalizePath(rawPath)
 	for i := range m.tabs {
@@ -227,6 +237,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 	s := msg.String()
+	if m.helpOpen {
+		return m.handleHelp(msg)
+	}
 	if m.promptOpen {
 		return m.handlePrompt(msg)
 	}
@@ -252,6 +265,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.startPrompt()
 	case "ctrl+o", "f3":
 		m.startFinder()
+	case "f1", "ctrl+e":
+		m.helpOpen = !m.helpOpen
 	case "ctrl+w":
 		if cmd := m.closeTab(); cmd != nil {
 			return cmd
