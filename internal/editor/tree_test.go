@@ -46,18 +46,26 @@ func TestTreeNavigateOpenAndFold(t *testing.T) {
 
 	m := New(root)
 	m.width, m.height = 100, 24
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlB})
-	m = press(m, tea.KeyMsg{Type: tea.KeyDown})
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlB}) // focus tree
+	m = press(m, tea.KeyMsg{Type: tea.KeyDown})  // select b.txt
+	m = press(m, tea.KeyMsg{Type: tea.KeyEnter}) // open file, defocus tree
 	if m.activeTab().path != filepath.Join(root, "b.txt") {
 		t.Fatalf("enter on file must open it, got %q", m.activeTab().path)
 	}
 	if m.activeTab().buf.Text() != "bee\n" {
 		t.Fatalf("content = %q", m.activeTab().buf.Text())
 	}
+	if m.treeFocus {
+		t.Fatal("enter on file must return focus to editor")
+	}
+	if !m.treeVisible {
+		t.Fatal("sidebar must stay visible after opening file")
+	}
 
-	m = press(m, tea.KeyMsg{Type: tea.KeyUp})
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	// Re-focus tree to navigate to dir
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlB}) // re-focus tree
+	m = press(m, tea.KeyMsg{Type: tea.KeyUp})    // select sub dir
+	m = press(m, tea.KeyMsg{Type: tea.KeyEnter}) // expand sub (stays in tree)
 	found := false
 	for _, r := range m.treeRows {
 		if r.rel == "sub/a.txt" && r.depth == 2 {
@@ -66,6 +74,9 @@ func TestTreeNavigateOpenAndFold(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("enter on dir must expand children, rows=%v", m.treeRows)
+	}
+	if !m.treeFocus {
+		t.Fatal("enter on dir must keep focus in tree")
 	}
 	m = press(m, tea.KeyMsg{Type: tea.KeyLeft})
 	for _, r := range m.treeRows {

@@ -131,7 +131,25 @@ func (m *Model) handleTree(msg tea.KeyMsg) tea.Cmd {
 		if m.treeSel > len(m.treeRows)-1 {
 			m.treeSel = len(m.treeRows) - 1
 		}
-	case "enter", "right":
+	case "enter":
+		if m.treeSel >= len(m.treeRows) {
+			break
+		}
+		e := m.treeRows[m.treeSel]
+		if e.isDir {
+			// Toggle expand/collapse
+			if m.expanded[e.rel] {
+				delete(m.expanded, e.rel)
+			} else {
+				m.expanded[e.rel] = true
+			}
+			m.rebuildTree()
+		} else {
+			// Open file and return focus to editor (tree stays open)
+			m.focusOrOpen(e.rel)
+			m.treeFocus = false
+		}
+	case "right":
 		if m.treeSel >= len(m.treeRows) {
 			break
 		}
@@ -140,6 +158,7 @@ func (m *Model) handleTree(msg tea.KeyMsg) tea.Cmd {
 			m.expanded[e.rel] = true
 			m.rebuildTree()
 		} else {
+			// Preview: open but keep tree focused
 			m.focusOrOpen(e.rel)
 		}
 	case "left":
@@ -161,7 +180,8 @@ func (m *Model) handleTree(msg tea.KeyMsg) tea.Cmd {
 				}
 			}
 		}
-	case "esc":
+	case "esc", "tab":
+		// Return focus to editor without closing the sidebar
 		m.treeFocus = false
 	case "ctrl+b", "f9":
 		m.toggleTree()
