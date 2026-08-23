@@ -18,7 +18,7 @@ func TestHelpToggle(t *testing.T) {
 		t.Fatal("f1 must open help")
 	}
 	v := m.View()
-	for _, want := range []string{"dmed — keys", "Ctrl+S", "Ctrl+O / F3", "Ctrl+W"} {
+	for _, want := range []string{"dmed — keys", "Ctrl+S", "Ctrl+F", "Ctrl+H", "Ctrl+O", "Ctrl+W"} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("help view missing %q", want)
 		}

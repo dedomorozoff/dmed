@@ -83,6 +83,74 @@ func (b *Buffer) LineCount() int      { return len(b.lines) }
 func (b *Buffer) LineAt(i int) []rune { return b.lines[i] }
 func (b *Buffer) CurLine() int        { return b.line }
 func (b *Buffer) Col() int            { return b.col }
+func (b *Buffer) SetCursor(line, col int) {
+	b.breakGroup()
+	if line < 0 {
+		line = 0
+	} else if line >= len(b.lines) {
+		line = len(b.lines) - 1
+	}
+	b.line = line
+	if col < 0 {
+		col = 0
+	} else if col > len(b.lines[b.line]) {
+		col = len(b.lines[b.line])
+	}
+	b.col = col
+	b.goalCol = b.col
+}
+
+func (b *Buffer) ReplaceRange(line, col, length int, replacement []rune) bool {
+	if line < 0 || line >= len(b.lines) {
+		return false
+	}
+	l := b.lines[line]
+	if col < 0 || col > len(l) || col+length > len(l) {
+		return false
+	}
+	b.beginChange()
+	b.pushUndo()
+	newLine := make([]rune, 0, len(l)-length+len(replacement))
+	newLine = append(newLine, l[:col]...)
+	newLine = append(newLine, replacement...)
+	newLine = append(newLine, l[col+length:]...)
+	b.lines[line] = newLine
+	b.line = line
+	b.col = col + len(replacement)
+	b.goalCol = b.col
+	return true
+}
+
+func (b *Buffer) ReplaceAll(find, replace string) int {
+	if find == "" {
+		return 0
+	}
+	count := 0
+	for _, l := range b.lines {
+		str := string(l)
+		count += strings.Count(str, find)
+	}
+	if count == 0 {
+		return 0
+	}
+	b.beginChange()
+	b.pushUndo()
+	for i, l := range b.lines {
+		str := string(l)
+		if strings.Contains(str, find) {
+			newStr := strings.ReplaceAll(str, find, replace)
+			b.lines[i] = []rune(newStr)
+		}
+	}
+	if b.line >= len(b.lines) {
+		b.line = len(b.lines) - 1
+	}
+	if b.col > len(b.lines[b.line]) {
+		b.col = len(b.lines[b.line])
+	}
+	b.goalCol = b.col
+	return count
+}
 
 func (b *Buffer) Insert(r rune) {
 	grouped := b.lastWasInsert && b.line == b.lastLine && b.col == b.lastCol

@@ -170,3 +170,54 @@ func TestDirtyMarkSaved(t *testing.T) {
 		t.Fatal("saved buffer must be clean")
 	}
 }
+
+func TestSetCursor(t *testing.T) {
+	b := Load("hello\nworld")
+	b.SetCursor(1, 3)
+	if b.CurLine() != 1 || b.Col() != 3 {
+		t.Fatalf("SetCursor(1, 3): line=%d col=%d", b.CurLine(), b.Col())
+	}
+	b.SetCursor(-5, -2)
+	if b.CurLine() != 0 || b.Col() != 0 {
+		t.Fatalf("SetCursor(-5, -2): line=%d col=%d", b.CurLine(), b.Col())
+	}
+	b.SetCursor(100, 100)
+	if b.CurLine() != 1 || b.Col() != 5 {
+		t.Fatalf("SetCursor(100, 100): line=%d col=%d", b.CurLine(), b.Col())
+	}
+}
+
+func TestReplaceRange(t *testing.T) {
+	b := Load("hello world\nfoo bar")
+	ok := b.ReplaceRange(0, 6, 5, []rune("dmed"))
+	if !ok || b.Text() != "hello dmed\nfoo bar\n" {
+		t.Fatalf("ReplaceRange: ok=%v text=%q", ok, b.Text())
+	}
+	if b.CurLine() != 0 || b.Col() != 10 {
+		t.Fatalf("after replace: line=%d col=%d", b.CurLine(), b.Col())
+	}
+	b.Undo()
+	if b.Text() != "hello world\nfoo bar\n" {
+		t.Fatalf("after undo: %q", b.Text())
+	}
+	b.Redo()
+	if b.Text() != "hello dmed\nfoo bar\n" {
+		t.Fatalf("after redo: %q", b.Text())
+	}
+}
+
+func TestReplaceAll(t *testing.T) {
+	b := Load("banana apple banana\nbanana split")
+	count := b.ReplaceAll("banana", "orange")
+	if count != 3 || b.Text() != "orange apple orange\norange split\n" {
+		t.Fatalf("ReplaceAll: count=%d text=%q", count, b.Text())
+	}
+	b.Undo()
+	if b.Text() != "banana apple banana\nbanana split\n" {
+		t.Fatalf("after undo: %q", b.Text())
+	}
+	b.Redo()
+	if b.Text() != "orange apple orange\norange split\n" {
+		t.Fatalf("after redo: %q", b.Text())
+	}
+}

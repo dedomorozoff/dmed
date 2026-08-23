@@ -9,11 +9,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"dmed/internal/buffer"
+	"dmed/internal/syntax"
 )
 
 type tab struct {
-	buf  *buffer.Buffer
-	path string
+	buf          *buffer.Buffer
+	path         string
+	syntaxCached []syntax.HighlightedLine
+	syntaxText   string
 }
 
 func (t *tab) name(base string) string {
@@ -21,6 +24,16 @@ func (t *tab) name(base string) string {
 		return "[untitled]"
 	}
 	return shortenPath(base, t.path)
+}
+
+func (t *tab) getSyntaxLines() []syntax.HighlightedLine {
+	text := t.buf.Text()
+	if t.syntaxCached != nil && t.syntaxText == text {
+		return t.syntaxCached
+	}
+	t.syntaxText = text
+	t.syntaxCached = syntax.Default().HighlightBuffer(t.path, text)
+	return t.syntaxCached
 }
 
 type Model struct {
@@ -50,6 +63,15 @@ type Model struct {
 	treeSel     int
 	treeOffset  int
 	expanded    map[string]bool
+
+	// Search/replace
+	searchOpen         bool
+	searchQuery        []rune
+	searchMatchIdx     int
+	searchTotalMatches int
+	replaceOpen        bool
+	replaceWith        []rune
+	replaceFocusFind   bool
 }
 
 var debugKeys = os.Getenv("DMED_DEBUG_KEYS") != ""
@@ -129,7 +151,10 @@ func (m *Model) closeTab() tea.Cmd {
 	idx := m.activeTabIndex()
 	if len(m.tabs) == 1 {
 		// Keep the tab so Bubbletea can render one final frame before Quit.
-		return tea.Quit
+		// But only return Quit if there are no panes (or single pane with this tab)
+		if len(m.panes) == 0 || (len(m.panes) == 1 && m.panes[0].tabIdx == idx) {
+			return tea.Quit
+		}
 	}
 	m.tabs = append(m.tabs[:idx], m.tabs[idx+1:]...)
 	m.fixPaneTabsAfterClose(idx)
@@ -283,6 +308,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if m.treeFocus {
 		return m.handleTree(msg)
 	}
+	if m.searchOpen {
+		if m.replaceOpen {
+			return m.handleReplace(msg)
+		}
+		return m.handleSearch(msg)
+	}
 	if len(s) == 5 && strings.HasPrefix(s, "alt+") && s[4] >= '1' && s[4] <= '9' {
 		m.jumpTab(int(s[4] - '1'))
 		return nil
@@ -300,8 +331,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	case "ctrl+t":
 		m.startPrompt()
-	case "ctrl+o", "f3":
+	case "ctrl+o":
 		m.startFinder()
+	case "f3":
+		m.updateSearchMatches(true)
+	case "shift+f3":
+		m.findPrev()
+	case "ctrl+f":
+		m.startSearch()
+	case "ctrl+h":
+		m.startReplace()
 	case "f1", "ctrl+e":
 		m.helpOpen = !m.helpOpen
 	case "ctrl+b", "f9":
@@ -407,4 +446,220 @@ func (m *Model) clampScroll() {
 	if x >= p.offsetX+w {
 		p.offsetX = x - w + 1
 	}
+}
+
+func (m *Model) startSearch() {
+	m.searchOpen = true
+	m.replaceOpen = false
+	m.replaceFocusFind = true
+	if len(m.searchQuery) > 0 {
+		m.updateSearchMatches(false)
+	}
+}
+
+func (m *Model) startReplace() {
+	m.searchOpen = true
+	m.replaceOpen = true
+	m.replaceFocusFind = false
+	if len(m.searchQuery) > 0 {
+		m.updateSearchMatches(false)
+	}
+}
+
+func (m *Model) handleSearch(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc":
+		m.searchOpen = false
+		m.replaceOpen = false
+		m.msg = ""
+	case "enter", "f3", "down", "ctrl+n":
+		if len(m.searchQuery) > 0 {
+			m.updateSearchMatches(true)
+		}
+	case "shift+f3", "up", "ctrl+p":
+		if len(m.searchQuery) > 0 {
+			m.findPrev()
+		}
+	case "ctrl+h":
+		m.startReplace()
+	case "backspace":
+		if n := len(m.searchQuery); n > 0 {
+			m.searchQuery = m.searchQuery[:n-1]
+			m.updateSearchMatches(false)
+		}
+	default:
+		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+			m.searchQuery = append(m.searchQuery, msg.Runes...)
+			m.updateSearchMatches(false)
+		}
+	}
+	return nil
+}
+
+func (m *Model) handleReplace(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc":
+		m.searchOpen = false
+		m.replaceOpen = false
+		m.msg = ""
+	case "tab":
+		m.replaceFocusFind = !m.replaceFocusFind
+	case "ctrl+a":
+		m.doReplaceAll()
+	case "enter":
+		if m.replaceFocusFind {
+			m.updateSearchMatches(true)
+		} else {
+			m.doReplace()
+		}
+	case "f3", "down", "ctrl+n":
+		m.updateSearchMatches(true)
+	case "shift+f3", "up", "ctrl+p":
+		m.findPrev()
+	case "backspace":
+		if m.replaceFocusFind {
+			if n := len(m.searchQuery); n > 0 {
+				m.searchQuery = m.searchQuery[:n-1]
+				m.updateSearchMatches(false)
+			}
+		} else {
+			if n := len(m.replaceWith); n > 0 {
+				m.replaceWith = m.replaceWith[:n-1]
+			}
+		}
+	default:
+		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+			if m.replaceFocusFind {
+				m.searchQuery = append(m.searchQuery, msg.Runes...)
+				m.updateSearchMatches(false)
+			} else {
+				m.replaceWith = append(m.replaceWith, msg.Runes...)
+			}
+		}
+	}
+	return nil
+}
+
+type searchMatch struct {
+	line int
+	col  int
+}
+
+func findMatchesInRunes(line []rune, query []rune) []int {
+	if len(query) == 0 || len(line) < len(query) {
+		return nil
+	}
+	var cols []int
+	for i := 0; i <= len(line)-len(query); i++ {
+		match := true
+		for j := 0; j < len(query); j++ {
+			if line[i+j] != query[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			cols = append(cols, i)
+			i += len(query) - 1
+		}
+	}
+	return cols
+}
+
+func (m *Model) allMatches() []searchMatch {
+	if len(m.searchQuery) == 0 {
+		return nil
+	}
+	t := m.cur()
+	var matches []searchMatch
+	for ln := 0; ln < t.buf.LineCount(); ln++ {
+		cols := findMatchesInRunes(t.buf.LineAt(ln), m.searchQuery)
+		for _, col := range cols {
+			matches = append(matches, searchMatch{line: ln, col: col})
+		}
+	}
+	return matches
+}
+
+func (m *Model) updateSearchMatches(jumpToNext bool) {
+	matches := m.allMatches()
+	m.searchTotalMatches = len(matches)
+	if len(matches) == 0 {
+		m.searchMatchIdx = -1
+		return
+	}
+	t := m.cur()
+	curLine := t.buf.CurLine()
+	curCol := t.buf.Col()
+
+	foundIdx := 0
+	for i, mPos := range matches {
+		if mPos.line > curLine || (mPos.line == curLine && mPos.col >= curCol) {
+			foundIdx = i
+			break
+		}
+	}
+	if jumpToNext && m.searchMatchIdx >= 0 {
+		foundIdx = (m.searchMatchIdx + 1) % len(matches)
+	}
+	m.searchMatchIdx = foundIdx
+	target := matches[foundIdx]
+	t.buf.SetCursor(target.line, target.col)
+}
+
+func (m *Model) findPrev() {
+	matches := m.allMatches()
+	m.searchTotalMatches = len(matches)
+	if len(matches) == 0 {
+		m.searchMatchIdx = -1
+		return
+	}
+	if m.searchMatchIdx <= 0 {
+		m.searchMatchIdx = len(matches) - 1
+	} else {
+		m.searchMatchIdx--
+	}
+	target := matches[m.searchMatchIdx]
+	m.cur().buf.SetCursor(target.line, target.col)
+}
+
+func (m *Model) doReplace() {
+	if len(m.searchQuery) == 0 {
+		return
+	}
+	t := m.cur()
+	matches := m.allMatches()
+	if len(matches) == 0 {
+		return
+	}
+	curLine := t.buf.CurLine()
+	curCol := t.buf.Col()
+	qLen := len(m.searchQuery)
+
+	onMatch := false
+	for _, mPos := range matches {
+		if mPos.line == curLine && mPos.col == curCol {
+			onMatch = true
+			break
+		}
+	}
+	if !onMatch {
+		m.updateSearchMatches(false)
+		return
+	}
+
+	t.buf.ReplaceRange(curLine, curCol, qLen, m.replaceWith)
+	m.msg = "replaced 1 occurrence"
+	m.updateSearchMatches(false)
+}
+
+func (m *Model) doReplaceAll() {
+	if len(m.searchQuery) == 0 {
+		return
+	}
+	t := m.cur()
+	count := t.buf.ReplaceAll(string(m.searchQuery), string(m.replaceWith))
+	m.msg = fmt.Sprintf("replaced %d occurrence(s)", count)
+	m.searchOpen = false
+	m.replaceOpen = false
 }

@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"dmed/internal/syntax"
 )
 
 const tabWidth = 4
@@ -18,6 +20,8 @@ var (
 	statusHiStyle   = lipgloss.NewStyle().Background(lipgloss.Color("61")).Foreground(lipgloss.Color("255")).Bold(true)
 	hintStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	activePaneStyle = lipgloss.NewStyle().Background(lipgloss.Color("235"))
+	matchStyle      = lipgloss.NewStyle().Background(lipgloss.Color("214")).Foreground(lipgloss.Color("0"))
+	curMatchStyle   = lipgloss.NewStyle().Background(lipgloss.Color("226")).Foreground(lipgloss.Color("0")).Bold(true)
 )
 
 type helpEntry struct {
@@ -28,7 +32,9 @@ type helpEntry struct {
 var helpEntries = []helpEntry{
 	{"Ctrl+S", "save active tab"},
 	{"", ""},
-	{"Ctrl+O / F3", "fuzzy file finder"},
+	{"Ctrl+F", "search in file (Enter/F3 next, Shift+F3 prev)"},
+	{"Ctrl+H", "search & replace (Tab switch, Enter rep, Ctrl+A all)"},
+	{"Ctrl+O", "fuzzy file finder"},
 	{"Ctrl+T", "open file by path"},
 	{"Ctrl+B / F9", "project tree: show, focus, hide"},
 	{"↑↓/Enter/←→ in tree", "navigate, open, fold"},
@@ -88,6 +94,12 @@ func (m Model) View() string {
 	bottom := m.statusBar()
 	if m.promptOpen {
 		bottom = m.promptLine()
+	} else if m.searchOpen {
+		if m.replaceOpen {
+			bottom = m.replaceLine()
+		} else {
+			bottom = m.searchLine()
+		}
 	}
 	rows = append(rows, bottom)
 	if m.finderOpen {
@@ -150,16 +162,18 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	cur := t.buf.CurLine()
 	active := paneIdx == m.activePane
 	rows := make([]string, h)
+
+	syntaxLines := t.getSyntaxLines()
+
 	for row := 0; row < h; row++ {
 		ln := p.offsetY + row
 		num := strconv.Itoa(ln + 1)
 		gut := strings.Repeat(" ", gw-1-len(num)) + num + " "
 		if active && ln == cur && ln < t.buf.LineCount() {
-			rows[row] = curGutterStyle.Render(gut) + m.renderContent(p, t, ln, contentW)
+			rows[row] = curGutterStyle.Render(gut) + m.renderLine(p, t, ln, contentW, active, syntaxLines)
 		} else {
-			rows[row] = gutterStyle.Render(gut) + m.renderContent(p, t, ln, contentW)
+			rows[row] = gutterStyle.Render(gut) + m.renderLine(p, t, ln, contentW, active, syntaxLines)
 		}
-		// Highlight active pane background (subtle)
 		if active && m.layout != splitNone {
 			rows[row] = activePaneStyle.Render(rows[row])
 		}
@@ -175,27 +189,27 @@ func (m Model) sidebarWidth() int {
 }
 
 func (m Model) tabBar() string {
+	var parts []string
+	activeTab := m.activeTabIndex()
 	base := m.baseDir()
-	parts := make([]string, 0, len(m.tabs))
 	for i := range m.tabs {
 		t := &m.tabs[i]
-		label := " " + t.name(base)
+		name := fmt.Sprintf(" %d:%s ", i+1, t.name(base))
 		if t.buf.Dirty() {
-			label += "*"
+			name += "* "
 		}
-		label += " "
-		if i == m.activeTabIndex() {
-			parts = append(parts, statusHiStyle.Render(label))
+		if i == activeTab {
+			parts = append(parts, statusHiStyle.Render(name))
 		} else {
-			parts = append(parts, statusStyle.Render(label))
+			parts = append(parts, statusStyle.Render(name))
 		}
 	}
-	bar := strings.Join(parts, "")
-	fill := m.width - lipgloss.Width(bar)
+	line := strings.Join(parts, "")
+	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
-		bar += statusStyle.Render(strings.Repeat(" ", fill))
+		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
-	return bar
+	return line
 }
 
 func (m Model) treePanel(h int) []string {
@@ -272,6 +286,56 @@ func (m Model) promptLine() string {
 	return line
 }
 
+func (m Model) searchLine() string {
+	line := statusHiStyle.Render(" search: ") + statusStyle.Render(string(m.searchQuery)) + cursorStyle.Render(" ")
+	if len(m.searchQuery) > 0 {
+		if m.searchTotalMatches > 0 {
+			line += hintStyle.Render(fmt.Sprintf(" [%d/%d]", m.searchMatchIdx+1, m.searchTotalMatches))
+		} else {
+			line += hintStyle.Render(" [no matches]")
+		}
+	}
+	hint := "  (Enter/F3: next, Shift+F3: prev, Esc: close)"
+	line += hintStyle.Render(hint)
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+func (m Model) replaceLine() string {
+	findPart := statusHiStyle.Render(" find: ") + statusStyle.Render(string(m.searchQuery))
+	if m.replaceFocusFind {
+		findPart += cursorStyle.Render(" ")
+	} else {
+		findPart += " "
+	}
+
+	repPart := statusHiStyle.Render(" replace: ") + statusStyle.Render(string(m.replaceWith))
+	if !m.replaceFocusFind {
+		repPart += cursorStyle.Render(" ")
+	} else {
+		repPart += " "
+	}
+
+	line := findPart + repPart
+	if len(m.searchQuery) > 0 {
+		if m.searchTotalMatches > 0 {
+			line += hintStyle.Render(fmt.Sprintf(" [%d/%d]", m.searchMatchIdx+1, m.searchTotalMatches))
+		} else {
+			line += hintStyle.Render(" [no matches]")
+		}
+	}
+	hint := "  (Tab: switch, Enter: replace, Ctrl+A: all, Esc: close)"
+	line += hintStyle.Render(hint)
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
 func (m Model) finderPanel() []string {
 	rows := make([]string, 0, len(m.finderHits)+1)
 	for i, hit := range m.finderHits {
@@ -291,12 +355,66 @@ func (m Model) finderPanel() []string {
 	return rows
 }
 
-func (m Model) renderContent(p *pane, t *tab, ln, w int) string {
+func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLines []syntax.HighlightedLine) string {
 	if w <= 0 || ln >= t.buf.LineCount() {
 		return ""
 	}
 	raw := t.buf.LineAt(ln)
-	exp := expandTabs(raw)
+	var rawStyles syntax.HighlightedLine
+	if ln < len(syntaxLines) {
+		rawStyles = syntaxLines[ln]
+	}
+
+	// Expand tabs
+	exp := make([]rune, 0, len(raw))
+	expStyles := make([]lipgloss.Style, 0, len(raw))
+	rawToExp := make([]int, len(raw)+1)
+
+	for i, r := range raw {
+		rawToExp[i] = len(exp)
+		var st lipgloss.Style
+		if i < len(rawStyles) {
+			st = rawStyles[i]
+		}
+		if r == '\t' {
+			for k := 0; k < tabWidth; k++ {
+				exp = append(exp, ' ')
+				expStyles = append(expStyles, st)
+			}
+		} else {
+			exp = append(exp, r)
+			expStyles = append(expStyles, st)
+		}
+	}
+	rawToExp[len(raw)] = len(exp)
+
+	// Search match highlighting
+	type matchInfo struct {
+		start int
+		end   int
+		isCur bool
+	}
+	var matches []matchInfo
+	if len(m.searchQuery) > 0 {
+		qLen := len(m.searchQuery)
+		matchCols := findMatchesInRunes(raw, m.searchQuery)
+		for _, col := range matchCols {
+			expStart := rawToExp[col]
+			expEnd := rawToExp[col+qLen]
+			isCur := (ln == t.buf.CurLine() && col == t.buf.Col())
+			matches = append(matches, matchInfo{start: expStart, end: expEnd, isCur: isCur})
+		}
+	}
+
+	// Cursor position in exp coordinates
+	cx := -1
+	if activePane && ln == t.buf.CurLine() {
+		if t.buf.Col() <= len(raw) {
+			cx = rawToExp[t.buf.Col()]
+		}
+	}
+
+	// Visible window
 	start := p.offsetX
 	if start > len(exp) {
 		start = len(exp)
@@ -305,17 +423,36 @@ func (m Model) renderContent(p *pane, t *tab, ln, w int) string {
 	if end > len(exp) {
 		end = len(exp)
 	}
-	text := exp[start:end]
-	if ln == t.buf.CurLine() {
-		cx := visCol(raw, t.buf.Col()) - start
-		if cx >= 0 && cx < len(text) {
-			return string(text[:cx]) + cursorStyle.Render(string(text[cx])) + string(text[cx+1:])
+
+	var out strings.Builder
+	for i := start; i < end; i++ {
+		r := exp[i]
+		st := expStyles[i]
+
+		for _, mi := range matches {
+			if i >= mi.start && i < mi.end {
+				if mi.isCur {
+					st = curMatchStyle
+				} else {
+					st = matchStyle
+				}
+				break
+			}
 		}
-		if cx == len(text) {
-			return string(text) + cursorStyle.Render(" ")
+
+		if i == cx {
+			st = cursorStyle
 		}
+
+		out.WriteString(st.Render(string(r)))
 	}
-	return string(text)
+
+	// Cursor at end of line
+	if cx == len(exp) && cx >= start && cx < start+w {
+		out.WriteString(cursorStyle.Render(" "))
+	}
+
+	return out.String()
 }
 
 func (m Model) statusBar() string {
@@ -336,7 +473,7 @@ func (m Model) statusBar() string {
 	}
 	right := fmt.Sprintf("Ln %d, Col %d ", t.buf.CurLine()+1, t.buf.Col()+1)
 	hint := ""
-	if !m.promptOpen && !m.finderOpen {
+	if !m.promptOpen && !m.finderOpen && !m.searchOpen {
 		hint = "F1 help "
 		if m.layout != splitNone {
 			hint += "F8 pane "
