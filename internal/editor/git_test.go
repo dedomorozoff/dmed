@@ -225,6 +225,112 @@ func TestEditorGitPanelLeftRail(t *testing.T) {
 	}
 }
 
+func TestQuitKeysWorkInAllModes(t *testing.T) {
+	dir, f := initTestGitRepo(t)
+
+	// Project tree focused: Ctrl+Q must quit
+	m := New(dir)
+	m.width, m.height = 80, 24
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlB}) // focus tree
+	if !m.treeFocus {
+		t.Fatal("setup: tree must be focused")
+	}
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlQ}); cmd == nil {
+		t.Fatal("ctrl+q must quit while tree is focused")
+	}
+
+	// Git panel open (status mode): Ctrl+Q and Ctrl+C must quit
+	m = New(f)
+	m.width, m.height = 80, 24
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlG})
+	if !m.gitOpen {
+		t.Fatal("setup: git panel must be open")
+	}
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlQ}); cmd == nil {
+		t.Fatal("ctrl+q must quit while git panel is open")
+	}
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC}); cmd == nil {
+		t.Fatal("ctrl+c must quit while git panel is open")
+	}
+
+	// Git commit mode: typing 'q'/'c' still enters the message; Ctrl+Q quits
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if m.gitMode != gitModeCommit {
+		t.Fatalf("expected commit mode after 'c', got %d", m.gitMode)
+	}
+	m = typeStr(m, "msg q c")
+	if got := string(m.gitCommitIn); got != "msg q c" {
+		t.Fatalf("commit input corrupted by quit-key letters: %q", got)
+	}
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlQ}); cmd == nil {
+		t.Fatal("ctrl+q must quit from commit mode")
+	}
+
+	// Dirty buffer + Ctrl+Q in git mode → confirm prompt, not silent quit
+	m = New(f)
+	m.width, m.height = 80, 24
+	m.cur().buf.Insert('!')
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlG})
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlQ})
+	m = m2.(Model)
+	if !m.quitConfirm {
+		t.Fatal("dirty buffer must raise quit confirmation")
+	}
+}
+
+func TestCloseTabKeysWorkInAllModes(t *testing.T) {
+	dir, f := initTestGitRepo(t)
+
+	// Git panel open, no selection: Ctrl+X closes the only tab → quit
+	m := New(f)
+	m.width, m.height = 80, 24
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlG})
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX}); cmd == nil {
+		t.Fatal("ctrl+x must close/quit while git panel is open")
+	}
+
+	// Tree focused, single untitled tab: Ctrl+W closes it → quit
+	mt := New(dir)
+	mt.width, mt.height = 80, 24
+	if len(mt.tabs) != 1 {
+		t.Fatalf("setup: want single untitled tab, got %d", len(mt.tabs))
+	}
+	mt = press(mt, tea.KeyMsg{Type: tea.KeyCtrlB})
+	if !mt.treeFocus {
+		t.Fatal("setup: tree must be focused")
+	}
+	if _, cmd := mt.Update(tea.KeyMsg{Type: tea.KeyCtrlW}); cmd == nil {
+		t.Fatal("ctrl+w must close/quit while tree is focused")
+	}
+}
+
+func TestCutWithSelectionInGitMode(t *testing.T) {
+	f := writeTemp(t, t.TempDir(), "cut.txt", "")
+
+	m := New(f)
+	m.width, m.height = 80, 24
+	m = typeStr(m, "hello")
+	m = press(m, tea.KeyMsg{Type: tea.KeyHome}) // select whole word
+	m.cur().buf.StartSelection()
+	m.cur().buf.LineEndWithSelect()
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlG})
+	if !m.gitOpen {
+		t.Fatal("setup: git panel must be open")
+	}
+
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	m = m2.(Model)
+	if m.clipboard != "hello" {
+		t.Fatalf("cut must fill clipboard, got %q", m.clipboard)
+	}
+	if m.msg != "cut to clipboard" {
+		t.Fatalf("unexpected msg %q", m.msg)
+	}
+	if !m.gitOpen {
+		t.Fatal("cut must not close the git panel")
+	}
+}
+
 func TestEditorGitPanelStageToggle(t *testing.T) {
 	dir, f := initTestGitRepo(t)
 

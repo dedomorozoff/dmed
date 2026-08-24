@@ -522,6 +522,28 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 	s := msg.String()
+	// Quit/close keys must work in every mode (tree, git panel, prompts, search...).
+	switch s {
+	case "ctrl+q":
+		return m.requestQuit()
+	case "ctrl+c":
+		if m.cur().buf.HasSelection() {
+			m.clipboard = m.cur().buf.SelectedText()
+			m.msg = "copied to clipboard"
+			return nil
+		}
+		return m.requestQuit()
+	case "ctrl+w":
+		return m.closeActiveTab()
+	case "ctrl+x":
+		if m.cur().buf.HasSelection() {
+			m.clipboard = m.cur().buf.SelectedText()
+			m.cur().buf.DeleteSelection()
+			m.msg = "cut to clipboard"
+			return nil
+		}
+		return m.closeActiveTab()
+	}
 	if m.conflictOpen {
 		switch s {
 		case "r", "R":
@@ -582,16 +604,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	switch s {
-	case "ctrl+q":
-		if m.hasDirty() {
-			m.quitConfirm = true
-			return nil
-		}
-		if m.watcher != nil {
-			_ = m.watcher.Close()
-		}
-		m.saveSession()
-		return tea.Quit
 	case "ctrl+s":
 		t := m.cur()
 		if t.path == "" {
@@ -647,44 +659,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.focusOtherPane()
 	case "ctrl+alt+w":
 		m.closePane()
-	case "ctrl+w":
-		if cmd := m.closeTab(); cmd != nil {
-			if m.hasDirty() {
-				m.quitConfirm = true
-				m.pendingQuit = true
-				return nil
-			}
-			m.saveSession()
-			return cmd
-		}
-	case "ctrl+x":
-		if m.cur().buf.HasSelection() {
-			m.clipboard = m.cur().buf.SelectedText()
-			m.cur().buf.DeleteSelection()
-			m.msg = "cut to clipboard"
-			return nil
-		}
-		if cmd := m.closeTab(); cmd != nil {
-			if m.hasDirty() {
-				m.quitConfirm = true
-				m.pendingQuit = true
-				return nil
-			}
-			m.saveSession()
-			return cmd
-		}
-	case "ctrl+c":
-		if m.cur().buf.HasSelection() {
-			m.clipboard = m.cur().buf.SelectedText()
-			m.msg = "copied to clipboard"
-			return nil
-		}
-		if m.hasDirty() {
-			m.quitConfirm = true
-			return nil
-		}
-		m.saveSession()
-		return tea.Quit
 	case "ctrl+v":
 		if m.clipboard != "" {
 			m.cur().buf.InsertText(m.clipboard)
@@ -751,6 +725,34 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+func (m *Model) requestQuit() tea.Cmd {
+	if m.hasDirty() {
+		m.quitConfirm = true
+		return nil
+	}
+	if m.watcher != nil {
+		_ = m.watcher.Close()
+	}
+	m.saveSession()
+	return tea.Quit
+}
+
+// closeActiveTab closes the tab of the active pane; closing the last tab
+// quits (with a save confirmation when the buffer is dirty).
+func (m *Model) closeActiveTab() tea.Cmd {
+	cmd := m.closeTab()
+	if cmd == nil {
+		return nil
+	}
+	if m.hasDirty() {
+		m.quitConfirm = true
+		m.pendingQuit = true
+		return nil
+	}
+	m.saveSession()
+	return cmd
 }
 
 func (m *Model) saveActive() {
