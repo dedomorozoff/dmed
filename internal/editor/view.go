@@ -160,15 +160,23 @@ func (m Model) editorRows(h int) []string {
 		sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(sepColor))
 		sep := sepStyle.Render("│")
 		for row := 0; row < h; row++ {
-			combined[row] = left[row] + sep + right[row]
+			combined[row] = padTo(left[row], w0) + sep + padTo(right[row], w1)
 		}
 		return m.composeSidebar(combined)
 	}
 	// splitHoriz
 	h0 := m.paneViewHeight(0)
 	h1 := m.paneViewHeight(1)
-	top := m.renderPaneRows(0, h0, m.paneTotalWidth(0))
-	bottom := m.renderPaneRows(1, h1, m.paneTotalWidth(1))
+	w0 := m.paneTotalWidth(0)
+	w1 := m.paneTotalWidth(1)
+	top := m.renderPaneRows(0, h0, w0)
+	bottom := m.renderPaneRows(1, h1, w1)
+	for row := range top {
+		top[row] = padTo(top[row], w0)
+	}
+	for row := range bottom {
+		bottom[row] = padTo(bottom[row], w1)
+	}
 	sepColor := "238"
 	if m.activePane == 0 {
 		sepColor = "61" // highlight top pane separator
@@ -327,6 +335,13 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func padTo(s string, w int) string {
+	if d := w - lipgloss.Width(s); d > 0 {
+		return s + strings.Repeat(" ", d)
+	}
+	return s
 }
 
 func (m Model) helpPanel(h int) []string {

@@ -238,6 +238,13 @@ func (m *Model) closeTab() tea.Cmd {
 	if len(m.tabs) == 1 {
 		return tea.Quit
 	}
+	if m.layout != splitNone {
+		// Closing a tab in a split also collapses the split.
+		other := 1 - m.activePane
+		m.panes = []pane{m.panes[other]}
+		m.activePane = 0
+		m.layout = splitNone
+	}
 	m.tabs = append(m.tabs[:idx], m.tabs[idx+1:]...)
 	m.fixPaneTabsAfterClose(idx)
 	return nil
