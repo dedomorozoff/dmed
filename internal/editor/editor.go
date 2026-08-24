@@ -117,6 +117,15 @@ type Model struct {
 	gitOffset    int
 	gitCommitIn  []rune
 
+	// Side-by-side diff view (opened from the Git panel)
+	diffViewOpen   bool
+	diffPath       string
+	diffRows       []vcs.DiffRow
+	diffHeadLines  []string
+	diffRightLines []string
+	diffOffsetY    int
+	diffOffsetX    int
+
 	// Command palette & Clipboard
 	paletteOpen bool
 	paletteQ    []rune
@@ -568,6 +577,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		return nil
+	}
+	if m.diffViewOpen {
+		return m.handleDiffView(msg)
 	}
 	if m.gitOpen {
 		return m.handleGit(msg)

@@ -183,6 +183,11 @@ func (m *Model) handleTree(msg tea.KeyMsg) tea.Cmd {
 	case "esc", "tab":
 		// Return focus to editor without closing the sidebar
 		m.treeFocus = false
+	case "ctrl+g":
+		// Switch to the Git panel (tree stays visible, loses focus)
+		m.treeFocus = false
+		m.openGitPanel()
+		return nil
 	case "ctrl+b", "f9":
 		m.toggleTree()
 	default:

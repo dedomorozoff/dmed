@@ -327,6 +327,69 @@ func (repo *Repo) DiffBuffer(absPath, bufText string) FileDiff {
 	return FileDiff{Lines: resLines, Hunks: hunks}
 }
 
+// DiffRow is one row of a side-by-side diff: line indices into the HEAD
+// text and the buffer text, -1 when the line exists only on the other side.
+type DiffRow struct {
+	Left  int
+	Right int
+	Type  DiffType
+}
+
+// SideBySide pairs the lines of headText and bufText for a two-column diff.
+// Delete blocks followed by inserts are zipped into Modified rows so changed
+// lines appear side by side; pure additions/deletions get -1 on one side.
+func SideBySide(headText, bufText string) []DiffRow {
+	dmp := diffmatchpatch.New()
+	a, b, _ := dmp.DiffLinesToRunes(headText, bufText)
+	diffs := dmp.DiffMainRunes(a, b, false)
+
+	var rows []DiffRow
+	li, ri := 0, 0
+	pendingDel := 0
+
+	flushDel := func() {
+		for k := 0; k < pendingDel; k++ {
+			rows = append(rows, DiffRow{Left: li + k, Right: -1, Type: DiffDeleted})
+		}
+		li += pendingDel
+		pendingDel = 0
+	}
+
+	for _, d := range diffs {
+		// Each rune in d.Text encodes one whole line (see DiffLinesToRunes).
+		n := len([]rune(d.Text))
+		switch d.Type {
+		case diffmatchpatch.DiffEqual:
+			flushDel()
+			for k := 0; k < n; k++ {
+				rows = append(rows, DiffRow{Left: li + k, Right: ri + k, Type: DiffNone})
+			}
+			li += n
+			ri += n
+		case diffmatchpatch.DiffDelete:
+			pendingDel += n
+		case diffmatchpatch.DiffInsert:
+			mod := pendingDel
+			if mod > n {
+				mod = n
+			}
+			for k := 0; k < mod; k++ {
+				rows = append(rows, DiffRow{Left: li + k, Right: ri + k, Type: DiffModified})
+			}
+			li += mod
+			ri += mod
+			pendingDel -= mod
+			flushDel()
+			for k := mod; k < n; k++ {
+				rows = append(rows, DiffRow{Left: -1, Right: ri + (k - mod), Type: DiffAdded})
+			}
+			ri += n - mod
+		}
+	}
+	flushDel()
+	return rows
+}
+
 // Stage stages a file path relative to repo root or absolute.
 func (repo *Repo) Stage(path string) error {
 	wt, err := repo.r.Worktree()

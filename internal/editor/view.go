@@ -27,6 +27,9 @@ var (
 	gitAddStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
 	gitModStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	gitDelStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	diffAddBg       = lipgloss.NewStyle().Background(lipgloss.Color("22"))
+	diffDelBg       = lipgloss.NewStyle().Background(lipgloss.Color("52"))
+	diffModBg       = lipgloss.NewStyle().Background(lipgloss.Color("58"))
 	selectionStyle  = lipgloss.NewStyle().Background(lipgloss.Color("60")).Foreground(lipgloss.Color("255"))
 )
 
@@ -44,11 +47,12 @@ var helpEntries = []helpEntry{
 	{"", ""},
 	{"Ctrl+F", "search in file (Enter/F3 next, Shift+F3 prev)"},
 	{"Ctrl+H", "search & replace (Tab switch, Enter rep, Ctrl+A all)"},
-	{"Ctrl+G", "Git panel: status, Space stage, C commit"},
+	{"Ctrl+G", "Git panel; Ctrl+B switches back to tree"},
+	{"D (in Git panel)", "side-by-side diff vs HEAD"},
 	{"Alt+[ / Alt+]", "jump to previous / next Git hunk"},
 	{"Ctrl+O", "fuzzy file finder"},
 	{"Ctrl+T", "open file by path"},
-	{"Ctrl+B / F9", "project tree: show, focus, hide"},
+	{"Ctrl+B / F9", "project tree; Ctrl+G switches to Git"},
 	{"↑↓/Enter/←→ in tree", "navigate, open, fold"},
 	{"Alt+←/→", "switch tabs in active pane"},
 	{"Alt+1..9", "jump to tab N"},
@@ -110,13 +114,17 @@ func (m Model) View() string {
 	h := m.viewHeight()
 	rows := make([]string, 0, h+2)
 	rows = append(rows, m.tabBar())
-	if m.helpOpen {
+	if m.diffViewOpen {
+		rows = append(rows, m.diffViewRows(h)...)
+	} else if m.helpOpen {
 		rows = append(rows, m.helpPanel(h)...)
 	} else {
 		rows = append(rows, m.editorRows(h)...)
 	}
 	bottom := m.statusBar()
-	if m.conflictOpen {
+	if m.diffViewOpen {
+		bottom = m.diffBottom()
+	} else if m.conflictOpen {
 		bottom = m.conflictLine()
 	} else if m.quitConfirm {
 		bottom = m.quitLine()
@@ -497,6 +505,113 @@ func (m Model) gitPanel(h int) []string {
 	return rows
 }
 
+// diffViewRows renders the side-by-side HEAD vs buffer view: left column is
+// the old text, right column the current text. The diff rail is drawn over
+// the full editor width (no sidebar while the diff is open).
+func (m Model) diffViewRows(h int) []string {
+	w := m.width
+	half := (w - 1) / 2
+
+	numW := len(strconv.Itoa(maxInt(len(m.diffHeadLines), len(m.diffRightLines)))) + 1
+	if numW < 3 {
+		numW = 3
+	}
+	contentW := half - numW - 2 // number, space, marker, space
+	if contentW < 1 {
+		contentW = 1
+	}
+
+	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	sep := sepStyle.Render("│")
+
+	rows := make([]string, h)
+	for row := 0; row < h; row++ {
+		idx := m.diffOffsetY + row
+		var left, right string
+		if idx < len(m.diffRows) {
+			dr := m.diffRows[idx]
+			left = m.diffCell(dr.Left, dr.Type, false, numW, contentW)
+			right = m.diffCell(dr.Right, dr.Type, true, numW, contentW)
+		} else {
+			left = strings.Repeat(" ", half)
+			right = strings.Repeat(" ", half)
+		}
+		rows[row] = padTo(left+sep+right, w)
+	}
+	return rows
+}
+
+func (m Model) diffCell(lineIdx int, dt vcs.DiffType, rightSide bool, numW, contentW int) string {
+	half := numW + 2 + contentW
+	if lineIdx < 0 {
+		return strings.Repeat(" ", half)
+	}
+	lines := m.diffRightLines
+	if !rightSide {
+		lines = m.diffHeadLines
+	}
+	text := ""
+	if lineIdx < len(lines) {
+		r := []rune(lines[lineIdx])
+		lo := m.diffOffsetX
+		if lo > len(r) {
+			lo = len(r)
+		}
+		hi := lo + contentW
+		if hi > len(r) {
+			hi = len(r)
+		}
+		text = string(r[lo:hi])
+	}
+	marker := ' '
+	var bg *lipgloss.Style
+	switch dt {
+	case vcs.DiffAdded:
+		if rightSide {
+			marker = '+'
+			bg = &diffAddBg
+		}
+	case vcs.DiffDeleted:
+		if !rightSide {
+			marker = '-'
+			bg = &diffDelBg
+		}
+	case vcs.DiffModified:
+		marker = '~'
+		bg = &diffModBg
+	}
+	cell := fmt.Sprintf("%*d %c %s", numW-1, lineIdx+1, marker, text)
+	if pad := half - len([]rune(cell)); pad > 0 {
+		cell += strings.Repeat(" ", pad)
+	}
+	if bg != nil {
+		cell = bg.Render(cell)
+	}
+	return cell
+}
+
+func (m Model) diffBottom() string {
+	added, modified, deleted := 0, 0, 0
+	for _, dr := range m.diffRows {
+		switch dr.Type {
+		case vcs.DiffAdded:
+			added++
+		case vcs.DiffModified:
+			modified++
+		case vcs.DiffDeleted:
+			deleted++
+		}
+	}
+	line := statusHiStyle.Render(" diff ") + statusStyle.Render(m.diffPath) +
+		hintStyle.Render(fmt.Sprintf("  +%d ~%d -%d", added, modified, deleted)) +
+		hintStyle.Render("  (↑↓ scroll, ←→ h-scroll, Esc back)")
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
 func (m Model) conflictLine() string {
 	fname := filepath.Base(m.conflictPath)
 	line := statusHiStyle.Render(" CONFLICT ") + statusStyle.Render(fmt.Sprintf(" File modified on disk: [R]eload / [I]gnore? (%s)", fname))
@@ -753,7 +868,7 @@ func (m Model) statusBar() string {
 	}
 	right := fmt.Sprintf("Ln %d, Col %d ", t.buf.CurLine()+1, t.buf.Col()+1)
 	hint := ""
-	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen {
+	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen {
 		hint = "F1 help "
 		if m.layout != splitNone {
 			hint += "F8 pane "

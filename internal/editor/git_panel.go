@@ -93,7 +93,22 @@ func (m *Model) clampGitScroll() {
 	}
 }
 
+// showTree makes the project tree visible and focused.
+func (m *Model) showTree() {
+	m.treeVisible = true
+	m.treeFocus = true
+	m.rebuildTree()
+}
+
 func (m *Model) handleGit(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "ctrl+b", "f9":
+		// Switch to the project tree
+		m.gitOpen = false
+		m.msg = ""
+		m.showTree()
+		return nil
+	}
 	switch m.gitMode {
 	case gitModeStatus:
 		return m.handleGitStatus(msg)
@@ -153,6 +168,9 @@ func (m *Model) handleGitStatus(msg tea.KeyMsg) tea.Cmd {
 			absPath := filepath.Join(r.Root, filepath.FromSlash(m.gitFiles[m.gitSel].Path))
 			m.focusOrOpen(absPath)
 		}
+	case "d":
+		// Side-by-side diff of the selected file vs HEAD
+		m.openDiffView()
 	case "c":
 		// Switch to commit mode
 		m.gitMode = gitModeCommit

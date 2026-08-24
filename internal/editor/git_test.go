@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -328,6 +329,126 @@ func TestCutWithSelectionInGitMode(t *testing.T) {
 	}
 	if !m.gitOpen {
 		t.Fatal("cut must not close the git panel")
+	}
+}
+
+func TestGitDiffView(t *testing.T) {
+	dir, f := initTestGitRepo(t)
+
+	// HEAD: "package main\n\nfunc main() {}\n"; change main and add many lines
+	// so the diff is taller than the viewport and can actually scroll.
+	var b strings.Builder
+	b.WriteString("package main\n\nfunc main() { changed }\n")
+	for i := 0; i < 40; i++ {
+		fmt.Fprintf(&b, "extra %d\n", i)
+	}
+	if err := os.WriteFile(f, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlG})
+	if len(m.gitFiles) != 1 {
+		t.Fatalf("setup: want 1 changed file, got %d", len(m.gitFiles))
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if !m.diffViewOpen {
+		t.Fatal("'d' must open the side-by-side diff")
+	}
+	if len(m.diffRows) < m.viewHeight()+5 {
+		t.Fatalf("setup: diff must be taller than viewport, rows=%d h=%d", len(m.diffRows), m.viewHeight())
+	}
+
+	half := (m.width - 1) / 2
+	rows := plainRows(m.View())
+	foundOld, foundNew, foundAdded := false, false, false
+	for _, row := range rows {
+		if i := strings.Index(row, "func main() {}"); i >= 0 {
+			if i < half {
+				foundOld = true
+			}
+		}
+		if i := strings.Index(row, "changed"); i >= 0 {
+			if i >= half {
+				foundNew = true
+			}
+		}
+		if strings.Contains(row, "extra") && strings.Index(row, "extra") >= half {
+			foundAdded = true
+		}
+	}
+	if !foundOld {
+		t.Fatal("old text must render in the LEFT column")
+	}
+	if !foundNew {
+		t.Fatal("modified text must render in the RIGHT column")
+	}
+	if !foundAdded {
+		t.Fatal("added line must render in the RIGHT column")
+	}
+
+	// Scrolling moves the shared offset
+	before := m.diffOffsetY
+	m = press(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.diffOffsetY != before+1 {
+		t.Fatalf("down must scroll: %d -> %d", before, m.diffOffsetY)
+	}
+
+	// Esc returns to the git panel state (panel still open)
+	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.diffViewOpen {
+		t.Fatal("esc must close the diff view")
+	}
+	if !m.gitOpen {
+		t.Fatal("git panel must stay open after closing the diff")
+	}
+	_ = dir
+}
+
+func TestSwitchGitTreePanels(t *testing.T) {
+	dir, f := initTestGitRepo(t)
+	_ = f
+
+	m := New(dir)
+	m.width, m.height = 80, 24
+	if !m.treeVisible {
+		t.Fatal("setup: project tree must be visible with a root")
+	}
+
+	// Focus the tree ("project mode"), then Ctrl+G must open the Git panel
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlB})
+	if !m.treeFocus {
+		t.Fatal("setup: tree must be focused")
+	}
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlG})
+	if !m.gitOpen {
+		t.Fatal("ctrl+g from tree mode must open the git panel")
+	}
+	if m.treeFocus {
+		t.Fatal("tree must lose focus when git panel opens")
+	}
+
+	// In Git panel mode, Ctrl+B must switch back to the focused tree
+	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlB})
+	if m.gitOpen {
+		t.Fatal("ctrl+b in git mode must close the git panel")
+	}
+	if !m.treeVisible || !m.treeFocus {
+		t.Fatal("ctrl+b in git mode must show and focus the project tree")
+	}
+
+	// The tree rail actually renders project files again
+	found := false
+	for _, row := range plainRows(m.View()) {
+		if strings.Contains(row, "code.go") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("tree must render project entries after switching back")
 	}
 }
 
