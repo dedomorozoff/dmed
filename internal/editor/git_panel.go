@@ -45,8 +45,9 @@ func (m *Model) refreshGitFiles() {
 	}
 	m.gitFiles = files
 	if m.gitSel >= len(m.gitFiles) {
-		m.gitSel = max(0, len(m.gitFiles)-1)
+		m.gitSel = maxInt(0, len(m.gitFiles)-1)
 	}
+	m.clampGitScroll()
 }
 
 func (m *Model) repoForCur() *vcs.Repo {
@@ -63,11 +64,33 @@ func (m *Model) repoForCur() *vcs.Repo {
 	return r
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
+// gitListHeight is how many file rows fit in the left Git rail.
+func (m Model) gitListHeight() int {
+	n := len(m.gitFiles)
+	if room := m.viewHeight(); n > room {
+		n = room
 	}
-	return b
+	return n
+}
+
+func (m *Model) clampGitScroll() {
+	w := m.gitListHeight()
+	if w <= 0 {
+		m.gitOffset = 0
+		return
+	}
+	if m.gitSel < m.gitOffset {
+		m.gitOffset = m.gitSel
+	}
+	if m.gitSel >= m.gitOffset+w {
+		m.gitOffset = m.gitSel - w + 1
+	}
+	if off := len(m.gitFiles) - w; m.gitOffset > off {
+		m.gitOffset = off
+	}
+	if m.gitOffset < 0 {
+		m.gitOffset = 0
+	}
 }
 
 func (m *Model) handleGit(msg tea.KeyMsg) tea.Cmd {
@@ -88,10 +111,12 @@ func (m *Model) handleGitStatus(msg tea.KeyMsg) tea.Cmd {
 	case "up", "k":
 		if m.gitSel > 0 {
 			m.gitSel--
+			m.clampGitScroll()
 		}
 	case "down", "j":
 		if m.gitSel < len(m.gitFiles)-1 {
 			m.gitSel++
+			m.clampGitScroll()
 		}
 	case " ":
 		// Toggle stage/unstage for selected file
@@ -177,11 +202,13 @@ func (m *Model) handleGitCommit(msg tea.KeyMsg) tea.Cmd {
 		} else {
 			m.msg = "committed: " + hash.String()[:7]
 			m.gitCommitIn = nil
+			m.gitMode = gitModeStatus
 			m.gitOpen = false
-			// Invalidate diff cache for all tabs
+			// Invalidate diff cache for all tabs and refresh file list.
 			for i := range m.tabs {
 				m.tabs[i].diffText = ""
 			}
+			m.refreshGitFiles()
 		}
 	case "backspace":
 		if n := len(m.gitCommitIn); n > 0 {

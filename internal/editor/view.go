@@ -44,7 +44,7 @@ var helpEntries = []helpEntry{
 	{"", ""},
 	{"Ctrl+F", "search in file (Enter/F3 next, Shift+F3 prev)"},
 	{"Ctrl+H", "search & replace (Tab switch, Enter rep, Ctrl+A all)"},
-	{"Ctrl+G", "Git commit panel (Enter commit, Esc close)"},
+	{"Ctrl+G", "Git panel: status, Space stage, C commit"},
 	{"Alt+[ / Alt+]", "jump to previous / next Git hunk"},
 	{"Ctrl+O", "fuzzy file finder"},
 	{"Ctrl+T", "open file by path"},
@@ -121,7 +121,11 @@ func (m Model) View() string {
 	} else if m.quitConfirm {
 		bottom = m.quitLine()
 	} else if m.gitOpen {
-		bottom = m.gitLine()
+		if m.gitMode == gitModeCommit {
+			bottom = m.gitLine()
+		} else {
+			bottom = m.gitStatusLine()
+		}
 	} else if m.promptSave {
 		bottom = m.saveLine()
 	} else if m.promptOpen {
@@ -191,13 +195,18 @@ func (m Model) editorRows(h int) []string {
 }
 
 func (m Model) composeSidebar(editor []string) []string {
-	if !m.sidebarOn() {
+	var rail []string
+	switch {
+	case m.gitOpen:
+		rail = m.gitPanel(len(editor))
+	case m.sidebarOn():
+		rail = m.treePanel(len(editor))
+	default:
 		return editor
 	}
-	tree := m.treePanel(len(editor))
 	out := make([]string, len(editor))
 	for row := range editor {
-		out[row] = tree[row] + editor[row]
+		out[row] = rail[row] + editor[row]
 	}
 	return out
 }
@@ -258,11 +267,23 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	return rows
 }
 
+// gitPanelWidth is the width of the left Git rail (like the project tree).
+const gitPanelWidth = 30
+
 func (m Model) sidebarWidth() int {
 	if m.sidebarOn() {
 		return treeWidth
 	}
 	return 0
+}
+
+// leftRailWidth is the width of the whole left column: the Git panel takes
+// precedence over the project tree while it is open.
+func (m Model) leftRailWidth() int {
+	if m.gitOpen {
+		return gitPanelWidth
+	}
+	return m.sidebarWidth()
 }
 
 func (m Model) tabBar() string {
@@ -402,6 +423,78 @@ func (m Model) gitLine() string {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	return line
+}
+
+func (m Model) gitStatusLine() string {
+	r := m.repoForCur()
+	var line string
+	if r == nil {
+		line = statusHiStyle.Render(" git: ") + statusStyle.Render(" no repository")
+	} else {
+		summary := r.StatusSummary()
+		staged := 0
+		for _, fs := range m.gitFiles {
+			if fs.IsStaged() {
+				staged++
+			}
+		}
+		line = statusHiStyle.Render(" git ") + hintStyle.Render("("+r.Branch()+" "+summary+")") +
+			statusStyle.Render(fmt.Sprintf(" %d changed, %d staged ", len(m.gitFiles), staged))
+	}
+	hint := "(Space: stage, A: all, C: commit, R: refresh, Esc: close)"
+	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line + hintStyle.Render(hint)
+}
+
+// fitPath keeps the tail of long paths (the file name matters most).
+func fitPath(p string, w int) string {
+	r := []rune(p)
+	if len(r) <= w {
+		return p
+	}
+	if w < 1 {
+		return ""
+	}
+	return "…" + string(r[len(r)-(w-1):])
+}
+
+func (m Model) gitPanel(h int) []string {
+	rows := make([]string, 0, h)
+	start := m.gitOffset
+	end := start + m.gitListHeight()
+	for i := start; i < end && len(rows) < h; i++ {
+		fs := m.gitFiles[i]
+		marker := fmt.Sprintf("%c%c", fs.Staging, fs.Worktree)
+		path := fitPath(fs.Path, gitPanelWidth-5)
+		plain := " " + marker + " " + path
+		pad := gitPanelWidth - 1 - lipgloss.Width(plain)
+		if pad < 0 {
+			pad = 0
+		}
+		line := plain + strings.Repeat(" ", pad)
+		var cell string
+		switch {
+		case i == m.gitSel:
+			cell = statusHiStyle.Render(line)
+		case fs.IsStaged():
+			styled := " " + gitAddStyle.Render(marker) + " " + path
+			cell = styled + strings.Repeat(" ", maxInt(0, gitPanelWidth-1-lipgloss.Width(styled)))
+		case fs.Worktree == vcs.StatusUntracked:
+			styled := " " + hintStyle.Render(marker) + " " + path
+			cell = styled + strings.Repeat(" ", maxInt(0, gitPanelWidth-1-lipgloss.Width(styled)))
+		default:
+			styled := " " + gitModStyle.Render(marker) + " " + path
+			cell = styled + strings.Repeat(" ", maxInt(0, gitPanelWidth-1-lipgloss.Width(styled)))
+		}
+		rows = append(rows, cell+" ")
+	}
+	for len(rows) < h {
+		rows = append(rows, strings.Repeat(" ", gitPanelWidth))
+	}
+	return rows
 }
 
 func (m Model) conflictLine() string {

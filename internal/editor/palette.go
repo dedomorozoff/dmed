@@ -24,7 +24,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "replace", title: "Edit: Replace in File...", desc: "Ctrl+H — Find and replace", action: func(m *Model) tea.Cmd { m.startReplace(); return nil }},
 		{id: "undo", title: "Edit: Undo", desc: "Ctrl+Z — Undo change", action: func(m *Model) tea.Cmd { m.cur().buf.Undo(); return nil }},
 		{id: "redo", title: "Edit: Redo", desc: "Ctrl+Y — Redo change", action: func(m *Model) tea.Cmd { m.cur().buf.Redo(); return nil }},
-		{id: "git_commit", title: "Git: Commit Panel", desc: "Ctrl+G — Stage & commit", action: func(m *Model) tea.Cmd { m.gitOpen = true; return nil }},
+		{id: "git_commit", title: "Git: Commit Panel", desc: "Ctrl+G — Status, stage & commit", action: func(m *Model) tea.Cmd { m.openGitPanel(); return nil }},
 		{id: "git_next", title: "Git: Next Hunk", desc: "Alt+] — Jump next hunk", action: func(m *Model) tea.Cmd { m.jumpHunk(1); return nil }},
 		{id: "git_prev", title: "Git: Prev Hunk", desc: "Alt+[ — Jump prev hunk", action: func(m *Model) tea.Cmd { m.jumpHunk(-1); return nil }},
 		{id: "split_v", title: "View: Split Vertical", desc: "Ctrl+\\ — Side-by-side split", action: func(m *Model) tea.Cmd { m.splitVert(); return nil }},

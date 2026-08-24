@@ -114,6 +114,7 @@ type Model struct {
 	gitMode      gitPanelMode
 	gitFiles     []vcs.FileStatus
 	gitSel       int
+	gitOffset    int
 	gitCommitIn  []rune
 
 	// Command palette & Clipboard
@@ -624,8 +625,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "ctrl+h":
 		m.startReplace()
 	case "ctrl+g":
-		m.gitOpen = !m.gitOpen
-		m.gitCommitIn = nil
+		if m.gitOpen {
+			m.gitOpen = false
+			m.msg = ""
+		} else {
+			m.openGitPanel()
+		}
 	case "alt+[":
 		m.jumpHunk(-1)
 	case "alt+]":
