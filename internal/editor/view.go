@@ -53,6 +53,7 @@ var helpEntries = []helpEntry{
 	{"Ctrl+O", "fuzzy file finder"},
 	{"Ctrl+T", "open file by path"},
 	{"Alt+T", "toggle bottom terminal (Esc closes)"},
+	{"Alt+A", "AI chat panel (local Ollama, right side)"},
 	{"Ctrl+B / F9", "project tree; Ctrl+G switches to Git"},
 	{"↑↓/Enter/←→ in tree", "navigate, open, fold"},
 	{"Alt+←/→", "switch tabs in active pane"},
@@ -178,10 +179,11 @@ func (m Model) View() string {
 }
 
 func (m Model) editorRows(h int) []string {
+	var rows []string
 	if m.layout == splitNone {
-		return m.composeSidebar(m.renderPaneRows(0, h, m.paneTotalWidth(0)))
-	}
-	if m.layout == splitVert {
+		rows = m.composeSidebar(m.renderPaneRows(0, h, m.paneTotalWidth(0)))
+		return m.composeChatRail(rows)
+	} else if m.layout == splitVert {
 		w0 := m.paneTotalWidth(0)
 		w1 := m.paneTotalWidth(1)
 		left := m.renderPaneRows(0, h, w0)
@@ -196,7 +198,8 @@ func (m Model) editorRows(h int) []string {
 		for row := 0; row < h; row++ {
 			combined[row] = padTo(left[row], w0) + sep + padTo(right[row], w1)
 		}
-		return m.composeSidebar(combined)
+		rows = m.composeSidebar(combined)
+		return m.composeChatRail(rows)
 	}
 	// splitHoriz
 	h0 := m.paneViewHeight(0)
@@ -221,7 +224,28 @@ func (m Model) editorRows(h int) []string {
 	combined = append(combined, top...)
 	combined = append(combined, sep)
 	combined = append(combined, bottom...)
-	return m.composeSidebar(combined)
+	rows = m.composeSidebar(combined)
+	return m.composeChatRail(rows)
+}
+
+// composeChatRail appends the AI chat panel to the right of every editor
+// row. It is a no-op while the panel is closed.
+func (m Model) composeChatRail(editor []string) []string {
+	if !m.chatOpen {
+		return editor
+	}
+	w := m.chatPanelWidth()
+	panel := m.chatPanel(len(editor))
+	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	if m.chatFocus {
+		sepStyle = sepStyle.Foreground(lipgloss.Color("61"))
+	}
+	sep := sepStyle.Render("│")
+	out := make([]string, len(editor))
+	for row, line := range editor {
+		out[row] = padTo(line, m.width-w-1) + sep + panel[row]
+	}
+	return out
 }
 
 func (m Model) composeSidebar(editor []string) []string {
@@ -672,6 +696,69 @@ func (m Model) terminalPanel() []string {
 	return rows
 }
 
+// chatPanel renders the right-side AI chat rail: header with the model
+// name, scrolling transcript, input line at the bottom.
+func (m Model) chatPanel(h int) []string {
+	w := m.chatPanelWidth()
+	rows := make([]string, 0, h)
+
+	model := m.chatModel
+	if model == "" {
+		model = "no model"
+	}
+	header := statusHiStyle.Render(fmt.Sprintf(" AI · %s ", fitPath(model, w-6)))
+	if m.chatBusy {
+		header += statusStyle.Render(" streaming ")
+	}
+	if fill := w - lipgloss.Width(header); fill > 0 {
+		header += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	rows = append(rows, header)
+
+	bodyH := h - 2 // header + input line
+	total := len(m.chatRows)
+	start := total - bodyH + m.chatScroll
+	if start > total-bodyH {
+		start = total - bodyH
+	}
+	if start < 0 {
+		start = 0
+	}
+	for i := start; i < start+bodyH; i++ {
+		cell := strings.Repeat(" ", w)
+		if i >= 0 && i < total {
+			var st lipgloss.Style
+			switch m.chatRows[i].kind {
+			case "label-you":
+				st = chatUserLabelStyle
+			case "user":
+				st = chatUserTextStyle
+			case "label-ai":
+				st = chatAILabelStyle
+			case "ai":
+				st = chatAITextStyle
+			case "err":
+				st = gitDelStyle
+			default:
+				st = hintStyle
+			}
+			line := st.Render(m.chatRows[i].text)
+			cell = line + strings.Repeat(" ", maxInt(0, w-lipgloss.Width(line)))
+		}
+		rows = append(rows, cell)
+	}
+
+	input := statusHiStyle.Render(" ❯ ") + statusStyle.Render(string(m.chatIn)) + cursorStyle.Render(" ")
+	if m.chatBusy {
+		input += hintStyle.Render("⋯")
+	}
+	if fill := w - lipgloss.Width(input); fill > 0 {
+		input += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	rows = append(rows, input)
+	return rows
+}
+
 func (m Model) conflictLine() string {
 	fname := filepath.Base(m.conflictPath)
 	line := statusHiStyle.Render(" CONFLICT ") + statusStyle.Render(fmt.Sprintf(" File modified on disk: [R]eload / [I]gnore? (%s)", fname))
@@ -928,7 +1015,7 @@ func (m Model) statusBar() string {
 	}
 	right := fmt.Sprintf("Ln %d, Col %d ", t.buf.CurLine()+1, t.buf.Col()+1)
 	hint := ""
-	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen {
+	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen {
 		hint = "F1 help "
 		if m.layout != splitNone {
 			hint += "F8 pane "

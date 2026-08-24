@@ -36,7 +36,9 @@ func (m *Model) setActiveTab(idx int) {
 	}
 }
 
-func (m Model) editorAreaWidth() int { return m.width - m.leftRailWidth() }
+func (m Model) editorAreaWidth() int {
+	return m.width - m.leftRailWidth() - m.rightRailWidth()
+}
 
 func (m Model) paneTotalWidth(paneIdx int) int {
 	ew := m.editorAreaWidth()

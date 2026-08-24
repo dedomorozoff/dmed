@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"dmed/internal/ai"
 	"dmed/internal/buffer"
 	"dmed/internal/events"
 	"dmed/internal/session"
@@ -144,6 +146,21 @@ type Model struct {
 	paletteQ    []rune
 	paletteSel  int
 	clipboard   string
+
+	// Right-side AI chat panel (local Ollama)
+	chatOpen   bool
+	chatFocus  bool
+	chatIn     []rune
+	chatMsgs   []ai.Message
+	chatReply  string // assistant reply being streamed
+	chatErr    string
+	chatBusy   bool
+	chatRows   []chatRow
+	chatScroll int    // lines of scrollback from the bottom (0 = follow)
+	chatModel  string // resolved Ollama model tag
+	ai         *ai.Client
+	chatCh     <-chan chatEvent
+	chatCancel context.CancelFunc
 
 	quitConfirm bool
 	pendingQuit bool
@@ -475,7 +492,7 @@ func waitForFileEvent(ch <-chan string) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh))
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -524,6 +541,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, waitForTermOutput(m.termCh)
+	case ChatOutputMsg:
+		switch {
+		case msg.Err != nil:
+			m.chatBusy = false
+			m.chatErr = msg.Err.Error()
+		case msg.Done:
+			m.chatBusy = false
+			if m.chatReply != "" {
+				m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "assistant", Content: m.chatReply})
+				m.chatReply = ""
+			}
+		default:
+			m.chatReply += msg.Delta
+		}
+		m.rebuildChatRows()
+		if !msg.Done && msg.Err == nil {
+			return m, waitForChatOutput(m.chatCh)
+		}
+		if m.chatCancel != nil {
+			m.chatCancel()
+			m.chatCancel = nil
+		}
+		return m, nil
 	case tea.KeyMsg:
 		if debugKeys {
 			fmt.Fprintf(os.Stderr, "dmed: key %q\n", msg.String())
@@ -600,6 +640,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if m.termOpen {
 		return m.handleTerm(msg)
 	}
+	if m.chatOpen {
+		return m.handleChat(msg)
+	}
 	if m.gitOpen {
 		return m.handleGit(msg)
 	}
@@ -659,6 +702,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if cmd := m.toggleTerminal(); cmd != nil {
 			return cmd
 		}
+	case "alt+a":
+		m.toggleChat()
 	case "ctrl+o":
 		m.startFinder()
 	case "ctrl+p", "ctrl+shift+p", "f2":
@@ -773,6 +818,7 @@ func (m *Model) requestQuit() tea.Cmd {
 
 // shutdown stops background processes and persists the session.
 func (m *Model) shutdown() {
+	m.cancelChat()
 	m.killTerminal()
 	if m.watcher != nil {
 		_ = m.watcher.Close()

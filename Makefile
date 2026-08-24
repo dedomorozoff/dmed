@@ -9,7 +9,7 @@ export GOSUMDB
 .PHONY: build test vet run clean
 
 build:
-	$(GO) build ./
+	$(GO) build .
 
 test:
 	$(GO) test ./...
