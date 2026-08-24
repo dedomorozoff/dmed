@@ -2,7 +2,9 @@ package editor
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -125,6 +127,17 @@ type Model struct {
 	diffRightLines []string
 	diffOffsetY    int
 	diffOffsetX    int
+
+	// Bottom terminal panel
+	termOpen    bool
+	termLines   []string
+	termIn      []rune
+	termScroll  int // lines of scrollback from the bottom (0 = follow)
+	termHist    []string
+	termHistIdx int // 0 = live input, N = N commands back
+	termCmd     *exec.Cmd
+	termStdin   io.WriteCloser
+	termCh      <-chan []string
 
 	// Command palette & Clipboard
 	paletteOpen bool
@@ -386,10 +399,7 @@ func (m *Model) handleSavePrompt(msg tea.KeyMsg) tea.Cmd {
 			m.msg = "saved"
 			if m.pendingQuit {
 				m.pendingQuit = false
-				if m.watcher != nil {
-					_ = m.watcher.Close()
-				}
-				m.saveSession()
+				m.shutdown()
 				return tea.Quit
 			}
 		}
@@ -436,18 +446,12 @@ func (m *Model) handleQuitConfirm(msg tea.KeyMsg) tea.Cmd {
 		}
 		m.quitConfirm = false
 		m.pendingQuit = false
-		if m.watcher != nil {
-			_ = m.watcher.Close()
-		}
-		m.saveSession()
+		m.shutdown()
 		return tea.Quit
 	case "n", "N":
 		m.quitConfirm = false
 		m.pendingQuit = false
-		if m.watcher != nil {
-			_ = m.watcher.Close()
-		}
-		m.saveSession()
+		m.shutdown()
 		return tea.Quit
 	}
 	return nil
@@ -471,7 +475,7 @@ func waitForFileEvent(ch <-chan string) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return waitForFileEvent(m.fileEvents)
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -508,6 +512,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Height > 0 {
 			m.height = msg.Height
 		}
+	case TerminalOutputMsg:
+		if len(msg.Lines) > 0 {
+			m.termLines = append(m.termLines, msg.Lines...)
+			maxBack := len(m.termLines) - 1
+			if m.termScroll > maxBack {
+				m.termScroll = maxBack
+			}
+			if m.termScroll < 0 {
+				m.termScroll = 0
+			}
+		}
+		return m, waitForTermOutput(m.termCh)
 	case tea.KeyMsg:
 		if debugKeys {
 			fmt.Fprintf(os.Stderr, "dmed: key %q\n", msg.String())
@@ -581,6 +597,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if m.diffViewOpen {
 		return m.handleDiffView(msg)
 	}
+	if m.termOpen {
+		return m.handleTerm(msg)
+	}
 	if m.gitOpen {
 		return m.handleGit(msg)
 	}
@@ -636,6 +655,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	case "ctrl+t":
 		m.startPrompt()
+	case "alt+t":
+		if cmd := m.toggleTerminal(); cmd != nil {
+			return cmd
+		}
 	case "ctrl+o":
 		m.startFinder()
 	case "ctrl+p", "ctrl+shift+p", "f2":
@@ -744,11 +767,17 @@ func (m *Model) requestQuit() tea.Cmd {
 		m.quitConfirm = true
 		return nil
 	}
+	m.shutdown()
+	return tea.Quit
+}
+
+// shutdown stops background processes and persists the session.
+func (m *Model) shutdown() {
+	m.killTerminal()
 	if m.watcher != nil {
 		_ = m.watcher.Close()
 	}
 	m.saveSession()
-	return tea.Quit
 }
 
 // closeActiveTab closes the tab of the active pane; closing the last tab
@@ -763,7 +792,7 @@ func (m *Model) closeActiveTab() tea.Cmd {
 		m.pendingQuit = true
 		return nil
 	}
-	m.saveSession()
+	m.shutdown()
 	return cmd
 }
 

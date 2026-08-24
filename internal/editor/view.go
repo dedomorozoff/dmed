@@ -52,6 +52,7 @@ var helpEntries = []helpEntry{
 	{"Alt+[ / Alt+]", "jump to previous / next Git hunk"},
 	{"Ctrl+O", "fuzzy file finder"},
 	{"Ctrl+T", "open file by path"},
+	{"Alt+T", "toggle bottom terminal (Esc closes)"},
 	{"Ctrl+B / F9", "project tree; Ctrl+G switches to Git"},
 	{"↑↓/Enter/←→ in tree", "navigate, open, fold"},
 	{"Alt+←/→", "switch tabs in active pane"},
@@ -89,8 +90,26 @@ func (m Model) paletteExtraRows() int {
 	return len(hits) + 1
 }
 
+func (m Model) termPanelHeight() int {
+	h := m.height / 3
+	if h < 6 {
+		h = 6
+	}
+	if h > 16 {
+		h = 16
+	}
+	return h
+}
+
+func (m Model) termExtraRows() int {
+	if !m.termOpen {
+		return 0
+	}
+	return m.termPanelHeight()
+}
+
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows()
+	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.termExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -151,6 +170,9 @@ func (m Model) View() string {
 	}
 	if m.paletteOpen {
 		rows = append(rows, m.palettePanel()...)
+	}
+	if m.termOpen {
+		rows = append(rows, m.terminalPanel()...)
 	}
 	return lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n"))
 }
@@ -612,6 +634,44 @@ func (m Model) diffBottom() string {
 	return line
 }
 
+func (m Model) terminalPanel() []string {
+	h := m.termPanelHeight()
+	w := m.width
+	rows := make([]string, 0, h)
+
+	outH := h - 1 // last row is the input line
+	lines := m.termLines
+	start := len(lines) - outH + m.termScroll
+	if start < 0 {
+		start = 0
+	}
+	end := start + outH
+	if end > len(lines) {
+		end = len(lines)
+		if start > len(lines)-outH {
+			start = maxInt(0, len(lines)-outH)
+		}
+	}
+	for i := start; i < end; i++ {
+		r := []rune(stripANSI(lines[i]))
+		if len(r) > w {
+			r = r[len(r)-w:] // keep the tail of long lines
+		}
+		rows = append(rows, string(r))
+	}
+	for len(rows) < outH {
+		rows = append(rows, "")
+	}
+
+	input := statusHiStyle.Render(" > ") + statusStyle.Render(string(m.termIn)) + cursorStyle.Render(" ")
+	fill := w - lipgloss.Width(input)
+	if fill > 0 {
+		input += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	rows = append(rows, input)
+	return rows
+}
+
 func (m Model) conflictLine() string {
 	fname := filepath.Base(m.conflictPath)
 	line := statusHiStyle.Render(" CONFLICT ") + statusStyle.Render(fmt.Sprintf(" File modified on disk: [R]eload / [I]gnore? (%s)", fname))
@@ -868,7 +928,7 @@ func (m Model) statusBar() string {
 	}
 	right := fmt.Sprintf("Ln %d, Col %d ", t.buf.CurLine()+1, t.buf.Col()+1)
 	hint := ""
-	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen {
+	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen {
 		hint = "F1 help "
 		if m.layout != splitNone {
 			hint += "F8 pane "

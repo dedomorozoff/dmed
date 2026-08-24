@@ -33,6 +33,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "pane_focus", title: "View: Focus Other Pane", desc: "Ctrl+Alt+P — Switch pane", action: func(m *Model) tea.Cmd { m.focusOtherPane(); return nil }},
 		{id: "pane_close", title: "View: Close Current Pane", desc: "Ctrl+Alt+W — Unsplit", action: func(m *Model) tea.Cmd { m.closePane(); return nil }},
 		{id: "tree_toggle", title: "View: Toggle Project Tree", desc: "Ctrl+B — Sidebar tree", action: func(m *Model) tea.Cmd { m.toggleTree(); return nil }},
+		{id: "terminal", title: "View: Toggle Terminal", desc: "Alt+T — Shell panel at the bottom", action: func(m *Model) tea.Cmd { return m.toggleTerminal() }},
 		{id: "help", title: "Help: Show Keybindings", desc: "F1 / Ctrl+E — Help panel", action: func(m *Model) tea.Cmd { m.helpOpen = true; return nil }},
 		{id: "quit", title: "App: Quit Editor", desc: "Ctrl+Q — Exit", action: func(m *Model) tea.Cmd { return tea.Quit }},
 	}
