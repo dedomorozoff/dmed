@@ -12,15 +12,18 @@ const (
 	finderMaxShown = 8
 )
 
-func collectFiles(base string) []string {
+func collectFiles(base string, skipDirs []string) []string {
+	skip := make(map[string]bool, len(skipDirs))
+	for _, d := range skipDirs {
+		skip[d] = true
+	}
 	var out []string
 	filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "node_modules":
+			if skip[d.Name()] {
 				return filepath.SkipDir
 			}
 			return nil

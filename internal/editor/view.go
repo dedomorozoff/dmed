@@ -12,8 +12,6 @@ import (
 	"dmed/internal/vcs"
 )
 
-const tabWidth = 4
-
 var (
 	gutterStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	curGutterStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
@@ -69,6 +67,7 @@ var helpEntries = []helpEntry{
 	{"Enter/Backspace/Delete/Tab", "edit text"},
 	{"Ctrl+Z / Ctrl+R", "undo / redo"},
 	{"Ctrl+Y", "delete line"},
+	{"Alt+↑ / Alt+↓", "move line up / down"},
 	{"", ""},
 	{"F1 or Ctrl+E", "toggle this help"},
 	{"Ctrl+Q / Ctrl+C", "quit"},
@@ -337,7 +336,7 @@ const gitPanelWidth = 30
 
 func (m Model) sidebarWidth() int {
 	if m.sidebarOn() {
-		return treeWidth
+		return m.cfg.UI.TreeWidth
 	}
 	return 0
 }
@@ -376,7 +375,7 @@ func (m Model) tabBar() string {
 }
 
 func (m Model) treePanel(h int) []string {
-	inner := treeWidth - 2
+	inner := m.cfg.UI.TreeWidth - 2
 	rows := make([]string, 0, h)
 	for row := 0; row < h; row++ {
 		i := m.treeOffset + row
@@ -935,7 +934,7 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 			st = rawStyles[i]
 		}
 		if r == '\t' {
-			for k := 0; k < tabWidth; k++ {
+			for k := 0; k < m.cfg.Editor.TabWidth; k++ {
 				exp = append(exp, ' ')
 				expStyles = append(expStyles, st)
 			}
@@ -1104,11 +1103,11 @@ func (m Model) statusBar() string {
 	return left + mid + rightBar
 }
 
-func expandTabs(l []rune) []rune {
+func expandTabs(l []rune, tw int) []rune {
 	out := make([]rune, 0, len(l))
 	for _, r := range l {
 		if r == '\t' {
-			for i := 0; i < tabWidth; i++ {
+			for i := 0; i < tw; i++ {
 				out = append(out, ' ')
 			}
 		} else {
@@ -1118,11 +1117,11 @@ func expandTabs(l []rune) []rune {
 	return out
 }
 
-func visCol(l []rune, col int) int {
+func visCol(l []rune, col int, tw int) int {
 	x := 0
 	for _, r := range l[:col] {
 		if r == '\t' {
-			x += tabWidth
+			x += tw
 		} else {
 			x++
 		}

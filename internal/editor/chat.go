@@ -15,8 +15,6 @@ import (
 // While the panel is open it owns keyboard focus; Esc closes it. A running
 // stream keeps appending while the panel is hidden and is cancelled on quit.
 
-const chatFileContextMax = 6000 // chars of buffer text sent as context
-
 var (
 	chatUserLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true)
 	chatAILabelStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("176")).Bold(true)
@@ -56,7 +54,11 @@ func waitForChatOutput(ch <-chan chatEvent) tea.Cmd {
 }
 
 func (m Model) chatPanelWidth() int {
-	w := m.width * 2 / 5
+	pct := m.cfg.UI.ChatWidthPct
+	if pct <= 0 {
+		pct = 40
+	}
+	w := m.width * pct / 100
 	if w < 24 {
 		w = 24
 	}
@@ -86,7 +88,12 @@ func (m *Model) toggleChat() tea.Cmd {
 	m.chatFocus = m.chatOpen
 	m.msg = ""
 	if m.ai == nil {
-		m.ai = ai.DefaultClient()
+		m.ai = ai.NewProvider(ai.Config{
+			Type:   ai.ProviderType(m.cfg.AI.Provider),
+			URL:    m.cfg.AI.OllamaURL,
+			Model:  m.cfg.AI.Model,
+			APIKey: m.cfg.AI.APIKey,
+		})
 	}
 	if m.chatOpen && m.chatModel == "" {
 		m.pickChatModel()
@@ -95,10 +102,10 @@ func (m *Model) toggleChat() tea.Cmd {
 }
 
 // pickChatModel resolves the model once: DMED_MODEL wins, otherwise the
-// first model reported by the local Ollama server.
+// first model reported by the server.
 func (m *Model) pickChatModel() {
-	if m.ai.Model != "" {
-		m.chatModel = m.ai.Model
+	if m.cfg.AI.Model != "" {
+		m.chatModel = m.cfg.AI.Model
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -106,9 +113,9 @@ func (m *Model) pickChatModel() {
 	models, err := m.ai.Models(ctx)
 	switch {
 	case err != nil:
-		m.msg = "ollama offline (" + err.Error() + ")"
+		m.msg = "provider offline (" + err.Error() + ")"
 	case len(models) == 0:
-		m.msg = "ollama: no models (try: ollama pull llama3.2)"
+		m.msg = "no models available"
 	default:
 		m.chatModel = models[0]
 	}
@@ -170,7 +177,6 @@ func (m *Model) chatSubmit() {
 	m.rebuildChatRows()
 
 	msgs := m.chatRequestMessages()
-	url, model, hc := m.ai.URL, m.chatModel, m.ai.HTTP
 
 	if m.chatCancel != nil {
 		m.chatCancel()
@@ -182,9 +188,7 @@ func (m *Model) chatSubmit() {
 	m.chatCh = ch
 	go func() {
 		defer close(ch)
-		client := ai.NewClient(url, model)
-		client.HTTP = hc
-		err := client.ChatStream(ctx, msgs, func(d string) {
+		err := m.ai.ChatStream(ctx, msgs, func(d string) {
 			select {
 			case ch <- chatEvent{delta: d}:
 			case <-ctx.Done():
@@ -203,14 +207,13 @@ func (m *Model) chatSubmit() {
 // carries the active file (or selection) as context.
 func (m *Model) chatRequestMessages() []ai.Message {
 	var b strings.Builder
-	b.WriteString("You are an AI assistant embedded in dmed, a terminal code editor.")
-	b.WriteString(" Answer concisely; use code blocks for code.")
+	b.WriteString(m.cfg.AI.SystemPrompt)
 	if t := m.cur(); t != nil && t.path != "" {
 		b.WriteString("\n\nCurrent file: " + t.path + "\n```")
 		content := t.buf.Text()
 		truncated := false
-		if r := []rune(content); len(r) > chatFileContextMax {
-			content = string(r[:chatFileContextMax])
+		if r := []rune(content); len(r) > m.cfg.AI.ContextMax {
+			content = string(r[:m.cfg.AI.ContextMax])
 			truncated = true
 		}
 		b.WriteString(content + "\n```")
@@ -219,8 +222,8 @@ func (m *Model) chatRequestMessages() []ai.Message {
 		}
 		if sel := t.buf.SelectedText(); sel != "" {
 			sr := []rune(sel)
-			if len(sr) > chatFileContextMax {
-				sr = sr[:chatFileContextMax]
+			if len(sr) > m.cfg.AI.ContextMax {
+				sr = sr[:m.cfg.AI.ContextMax]
 			}
 			b.WriteString("\n\nSelected text:\n" + string(sr))
 		}

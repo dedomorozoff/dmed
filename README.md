@@ -1,71 +1,201 @@
 # dmed
 
-A terminal-native code editor with AI agents as first-class participants.
+Terminal-native code editor with AI agents as first-class participants.
 
-The idea: an editor like Zed, but living entirely in your shell. Core concepts:
+Think Zed, but living entirely in your shell. AI agents read, propose and
+apply changes to your code — but **humans approve every diff**. Nothing is
+modified behind your back.
 
-- **AI agents** that read, propose and apply changes to your code
-- **Change tracking** — every file modification is watched and reviewable
-- One strict rule: *agents propose diffs, humans approve them*. Nothing is
-  ever modified behind your back.
+## Features
 
-## Status
+### Editor Core
 
-**M0 — working skeleton.** Single-file editing with full cursor/edit/undo
-semantics. No AI yet by design: the editor core comes first.
+- Multi-file editing with **tabs** and **splits** (vertical/horizontal)
+- Fuzzy file finder (`Ctrl+O`) with subsequence scoring
+- Project tree sidebar (`Ctrl+B`) with fold/unfold navigation
+- Syntax highlighting (Chroma) for 100+ languages
+- Find & replace (`Ctrl+F` / `Ctrl+H`) with regex support
+- Move lines up/down (`Alt+↑/↓`) with undo
+- Full undo/redo with typing-run grouping
+- Clipboard: copy (`Ctrl+C`), cut (`Ctrl+X`), paste (`Ctrl+V`)
+- Multi-selection with `Shift+Arrows`
+- Configurable via `.dmed.conf` (INI format, hot-reload on save)
 
-Roadmap (see [ROADMAP.md](ROADMAP.md)):
+### AI Integration
 
-| Milestone | Scope |
-|-----------|-------|
-| M1 | Multi-file: tabs/splits, fuzzy finder, syntax highlighting |
-| M2 | Change tracking: fsnotify watchers, git gutter, event bus |
-| M3 | AI v1: chat panel, inline edit → diff preview → accept/reject |
-| M4 | Background agents: multi-file tasks, task queue, atomic patches |
-| M5 | Polish: LSP client, plugins, sessions |
+- **Chat panel** (`Alt+A`) — streaming conversation with your code
+- **Inline rewrite** (`Alt+I`) — select text, describe change, review diff, accept/reject
+- Supports multiple providers:
+  - **Ollama** (local, free)
+  - **OpenAI-compatible** (OpenAI, DeepSeek, Groq, Together, vLLM, LM Studio)
 
-## Build
+### Change Tracking
 
-Requires Go ≥ 1.24.
+- **fsnotify** file watcher — detects external changes, offers reload/auto-merge
+- **Git integration** (pure Go, no git binary required):
+  - Gutter indicators: added `+`, modified `~`, deleted `_`
+  - Side-by-side diff view vs HEAD
+  - Stage/unstage/commit from the Git panel (`Ctrl+G`)
+  - Hunk navigation (`Alt+[` / `Alt+]`)
+
+### Developer Tools
+
+- Built-in **terminal** (`Alt+T`) — persistent shell session at the bottom
+- **LSP client** — diagnostics, go-to-definition, go-to-references
+- **Sessions** — auto-save/restore open files across restarts
+- **Command palette** (`Ctrl+P` / `F2`) — fuzzy search all commands
+
+## Install
 
 ```sh
-make build        # produces ./dmed.exe
-make test         # unit tests
-make vet          # static checks
+# Requires Go >= 1.24
+git clone https://github.com/user/dmed.git
+cd dmed
+make build        # produces ./dmed.exe (or ./dmed on Linux/macOS)
+```
+
+Or install directly:
+
+```sh
+go install github.com/user/dmed@latest
 ```
 
 ## Usage
 
 ```sh
-./dmed.exe path/to/file.txt          # opens, or creates if missing
-./dmed.exe a.txt b.txt               # multiple files → tabs
+dmed path/to/file.txt          # open file (creates if missing)
+dmed dir/                      # open folder — shows project tree
+dmed a.txt b.txt               # multiple files → tabs
 ```
 
-Keybindings:
+## Keybindings
+
+### Navigation
 
 | Keys | Action |
 |------|--------|
-| Arrows, Home/End, PgUp/PgDn | Cursor movement |
-| Ctrl+S | Save active tab |
-| Ctrl+Z / Ctrl+Y (or Ctrl+R) | Undo / Redo |
-| Ctrl+T | Open file by path (prompt) |
-| Ctrl+O or F3 | Fuzzy file finder |
-| Ctrl+B or F9 | Project tree: show/focus → hide (Esc = back to editor) |
-| Ctrl+W or Ctrl+X | Close tab (last one quits) |
-| Alt+← / Alt+→, Alt+1..9 | Switch tabs |
-| F1 or Ctrl+E | Help overlay |
-| Ctrl+Q or Ctrl+C | Quit |
+| `Arrows` | Move cursor |
+| `Home` / `End` | Line start / end |
+| `PgUp` / `PgDn` | Page up / down |
+| `Ctrl+↑/↓` | Scroll without moving cursor |
 
-Consecutive typing collapses into a single undo step; any other operation
-starts a new one.
+### Editing
 
-## Layout
+| Keys | Action |
+|------|--------|
+| `Shift+Arrows` | Select text |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |
+| `Ctrl+Z` / `Ctrl+R` | Undo / redo |
+| `Ctrl+Y` | Delete line |
+| `Alt+↑` / `Alt+↓` | Move line up / down |
+| `Enter` / `Backspace` / `Delete` | Standard editing |
+
+### Files & Tabs
+
+| Keys | Action |
+|------|--------|
+| `Ctrl+S` | Save (untitled: Save As) |
+| `Ctrl+T` | Open file by path |
+| `Ctrl+O` / `F3` | Fuzzy file finder |
+| `Ctrl+W` / `Ctrl+X` | Close tab (last quits) |
+| `Alt+←` / `Alt+→` | Switch tabs |
+| `Alt+1..9` | Jump to tab N |
+
+### Splits & Panels
+
+| Keys | Action |
+|------|--------|
+| `Ctrl+\` / `F6` | Split vertical |
+| `Ctrl+Alt+H` / `F7` | Split horizontal |
+| `Ctrl+Alt+P` / `F8` | Focus other pane |
+| `Ctrl+Alt+W` | Close pane |
+| `Ctrl+B` / `F9` | Toggle project tree |
+| `Ctrl+G` | Git panel |
+| `Alt+T` | Toggle terminal |
+
+### AI
+
+| Keys | Action |
+|------|--------|
+| `Alt+A` | Toggle AI chat panel |
+| `Alt+I` | Inline rewrite (select text first) |
+| `Ctrl+U` | Clear chat history |
+
+### Search
+
+| Keys | Action |
+|------|--------|
+| `Ctrl+F` | Find in file |
+| `Ctrl+H` | Find & replace |
+| `F3` / `Shift+F3` | Next / previous match |
+
+### Git
+
+| Keys | Action |
+|------|--------|
+| `D` (in panel) | Side-by-side diff vs HEAD |
+| `Alt+[` / `Alt+]` | Previous / next hunk |
+
+### General
+
+| Keys | Action |
+|------|--------|
+| `Ctrl+P` / `F2` | Command palette |
+| `F1` / `Ctrl+E` | Help overlay |
+| `Ctrl+Q` / `Ctrl+C` | Quit |
+
+## Configuration
+
+Create `.dmed.conf` in your home directory (global) or project root (overrides global).
+Settings hot-reload on save.
+
+```ini
+[editor]
+tab_width = 4
+syntax_theme = monokai      # any chroma style name
+line_numbers = true
+skipped_dirs = .git,node_modules,vendor
+
+[ai]
+provider = ollama            # ollama | openai
+model =                      # e.g. gpt-4, qwen2.5-coder:7b
+ollama_url = http://localhost:11434
+api_key =                    # for OpenAI-compatible providers
+context_max = 6000           # max lines sent as file context
+system_prompt = You are a helpful coding assistant...
+
+[ui]
+tree_width = 25
+chat_width_pct = 40          # percentage of screen width
+```
+
+## Architecture
 
 ```
-internal/buffer/    pure text buffer + undo engine (unit tested)
-internal/editor/   Bubbletea model: tabs, finder, rendering
-main.go             CLI entry point
+internal/buffer/     pure text buffer + undo/redo (no TUI deps)
+internal/editor/     Bubbletea model: keys, tabs, splits, rendering
+internal/ai/         provider interface: Ollama + OpenAI-compatible
+internal/config/     INI parser, hot-reload, defaults
+internal/syntax/     Chroma-based highlighting
+internal/vcs/        pure-Go git operations (go-git)
+internal/lsp/        JSON-RPC 2.0 LSP client
+internal/events/     internal event bus
+internal/watcher/    fsnotify file watcher
+main.go              CLI entry point
 ```
+
+## Roadmap
+
+| Milestone | Status |
+|-----------|--------|
+| M0 — Editor skeleton | ✅ Done |
+| M1 — Multi-file, tabs, splits, finder, tree, move lines | ✅ Done |
+| M2 — fsnotify, git gutter, event bus | ✅ Done |
+| M3 — AI chat, inline rewrite, OpenAI-compatible providers | ✅ Done |
+| M4 — Background agents (multi-file tasks, task queue) | 🔜 Next |
+| M5 — LSP, terminal, plugins, sessions, config | ✅ Done |
+
+See [ROADMAP.md](ROADMAP.md) for full details.
 
 ## License
 

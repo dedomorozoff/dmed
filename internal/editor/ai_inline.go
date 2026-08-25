@@ -84,10 +84,18 @@ func (m *Model) submitInlineRequest() {
 	if instruction == "" || m.aiInlineBusy {
 		return
 	}
+	if m.ai == nil {
+		m.ai = ai.NewProvider(ai.Config{
+			Type:   ai.ProviderType(m.cfg.AI.Provider),
+			URL:    m.cfg.AI.OllamaURL,
+			Model:  m.cfg.AI.Model,
+			APIKey: m.cfg.AI.APIKey,
+		})
+	}
 	if m.chatModel == "" {
 		m.pickChatModel()
 		if m.chatModel == "" {
-			m.msg = "no model available; start ollama"
+			m.msg = "no model available; check provider config"
 			return
 		}
 	}
@@ -107,8 +115,6 @@ func (m *Model) submitInlineRequest() {
 		{Role: "user", Content: userMsg},
 	}
 
-	url, model, hc := m.ai.URL, m.chatModel, m.ai.HTTP
-
 	if m.aiInlineCancel != nil {
 		m.aiInlineCancel()
 	}
@@ -119,9 +125,7 @@ func (m *Model) submitInlineRequest() {
 	m.aiInlineCh = ch
 	go func() {
 		defer close(ch)
-		client := ai.NewClient(url, model)
-		client.HTTP = hc
-		err := client.ChatStream(ctx, msgs, func(d string) {
+		err := m.ai.ChatStream(ctx, msgs, func(d string) {
 			select {
 			case ch <- chatEvent{delta: d}:
 			case <-ctx.Done():

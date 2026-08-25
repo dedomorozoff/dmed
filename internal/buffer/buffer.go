@@ -477,6 +477,62 @@ func (b *Buffer) MoveDownWithSelect() {
 	b.clampCol()
 }
 
+// MoveLineUp moves the current line (or all selected lines) up by one position.
+func (b *Buffer) MoveLineUp() {
+	b.beginChange()
+	b.pushUndo()
+	sl, _, el, _ := b.SelectionRange()
+	if !b.HasSelection() {
+		sl = b.line
+		el = b.line
+	}
+	if sl == 0 {
+		return
+	}
+	// swap lines[sl-1] with lines[sl..el]
+	above := b.lines[sl-1]
+	group := b.lines[sl : el+1]
+	newLines := make([][]rune, 0, len(b.lines))
+	newLines = append(newLines, b.lines[:sl-1]...)
+	newLines = append(newLines, group...)
+	newLines = append(newLines, above)
+	if el+1 < len(b.lines) {
+		newLines = append(newLines, b.lines[el+1:]...)
+	}
+	b.lines = newLines
+	b.line = sl - 1
+	b.goalCol = b.col
+	b.hasSelection = false
+}
+
+// MoveLineDown moves the current line (or all selected lines) down by one position.
+func (b *Buffer) MoveLineDown() {
+	b.beginChange()
+	b.pushUndo()
+	sl, _, el, _ := b.SelectionRange()
+	if !b.HasSelection() {
+		sl = b.line
+		el = b.line
+	}
+	if el >= len(b.lines)-1 {
+		return
+	}
+	// swap lines[el+1] with lines[sl..el]
+	below := b.lines[el+1]
+	group := b.lines[sl : el+1]
+	newLines := make([][]rune, 0, len(b.lines))
+	newLines = append(newLines, b.lines[:sl]...)
+	newLines = append(newLines, below)
+	newLines = append(newLines, group...)
+	if el+2 < len(b.lines) {
+		newLines = append(newLines, b.lines[el+2:]...)
+	}
+	b.lines = newLines
+	b.line = sl + 1
+	b.goalCol = b.col
+	b.hasSelection = false
+}
+
 func (b *Buffer) clampCol() {
 	n := len(b.lines[b.line])
 	if b.goalCol < n {

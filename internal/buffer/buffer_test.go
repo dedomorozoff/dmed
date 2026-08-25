@@ -307,3 +307,70 @@ func TestSelectionDeleteUndo(t *testing.T) {
 		t.Fatalf("after undo: %q", b.Text())
 	}
 }
+
+func TestMoveLineDown(t *testing.T) {
+	b := Load("aaa\nbbb\nccc\n")
+	b.SetCursor(0, 0)
+	b.MoveLineDown()
+	if b.Text() != "bbb\naaa\nccc\n" {
+		t.Fatalf("MoveLineDown: %q", b.Text())
+	}
+	if b.CurLine() != 1 {
+		t.Fatalf("cursor after move down: line=%d", b.CurLine())
+	}
+}
+
+func TestMoveLineUp(t *testing.T) {
+	b := Load("aaa\nbbb\nccc\n")
+	b.SetCursor(1, 0)
+	b.MoveLineUp()
+	if b.Text() != "bbb\naaa\nccc\n" {
+		t.Fatalf("MoveLineUp: %q", b.Text())
+	}
+	if b.CurLine() != 0 {
+		t.Fatalf("cursor after move up: line=%d", b.CurLine())
+	}
+}
+
+func TestMoveLineUpFirstLine(t *testing.T) {
+	b := Load("aaa\nbbb\n")
+	b.SetCursor(0, 0)
+	b.MoveLineUp() // no-op
+	if b.Text() != "aaa\nbbb\n" {
+		t.Fatalf("MoveLineUp first line: %q", b.Text())
+	}
+}
+
+func TestMoveLineDownLastLine(t *testing.T) {
+	b := Load("aaa\nbbb\n")
+	b.SetCursor(1, 0)
+	b.MoveLineDown() // no-op
+	if b.Text() != "aaa\nbbb\n" {
+		t.Fatalf("MoveLineDown last line: %q", b.Text())
+	}
+}
+
+func TestMoveLineSelection(t *testing.T) {
+	b := Load("aaa\nbbb\nccc\nddd\n")
+	b.SetCursor(1, 0)
+	b.StartSelection()
+	b.MoveDownWithSelect() // select lines 1-2
+	b.MoveLineDown()
+	// selection moves: lines 1-2 (bbb,ccc) swap with ddd → aaa,ddd,bbb,ccc
+	if b.Text() != "aaa\nddd\nbbb\nccc\n" {
+		t.Fatalf("MoveLineDown selection: %q", b.Text())
+	}
+}
+
+func TestMoveLineUndo(t *testing.T) {
+	b := Load("aaa\nbbb\nccc\n")
+	b.SetCursor(0, 0)
+	b.MoveLineDown()
+	if b.Text() != "bbb\naaa\nccc\n" {
+		t.Fatalf("after move: %q", b.Text())
+	}
+	b.Undo()
+	if b.Text() != "aaa\nbbb\nccc\n" {
+		t.Fatalf("after undo: %q", b.Text())
+	}
+}

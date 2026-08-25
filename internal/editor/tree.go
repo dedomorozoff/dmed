@@ -11,7 +11,6 @@ import (
 
 const (
 	treeMaxRows  = 1000
-	treeWidth    = 25
 	treeMinWidth = 60
 )
 
@@ -70,7 +69,14 @@ func (m *Model) buildTree() []treeEntry {
 		})
 		for _, d := range dents {
 			name := d.Name()
-			if name == ".git" || name == "node_modules" {
+			skip := false
+			for _, s := range m.cfg.Editor.SkippedDirs {
+				if name == s {
+					skip = true
+					break
+				}
+			}
+			if skip {
 				continue
 			}
 			childRel := name

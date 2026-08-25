@@ -19,8 +19,8 @@ func TestModels(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "")
-	models, err := c.Models(context.Background())
+	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL})
+	models, err := p.Models(context.Background())
 	if err != nil {
 		t.Fatalf("Models: %v", err)
 	}
@@ -45,10 +45,10 @@ func TestChatStream(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "test-model")
+	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL, Model: "test-model"})
 	var got strings.Builder
 	msgs := []Message{{Role: "user", Content: "hi"}}
-	err := c.ChatStream(context.Background(), msgs, func(d string) { got.WriteString(d) })
+	err := p.ChatStream(context.Background(), msgs, func(d string) { got.WriteString(d) })
 	if err != nil {
 		t.Fatalf("ChatStream: %v", err)
 	}
@@ -64,8 +64,8 @@ func TestChatStreamServerError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "missing")
-	err := c.ChatStream(context.Background(), nil, func(string) {})
+	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL, Model: "missing"})
+	err := p.ChatStream(context.Background(), nil, func(string) {})
 	if err == nil || !strings.Contains(err.Error(), "model not found") {
 		t.Fatalf("want server error, got %v", err)
 	}
@@ -77,8 +77,8 @@ func TestChatStreamInBandError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "m")
-	err := c.ChatStream(context.Background(), nil, func(string) {})
+	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL, Model: "m"})
+	err := p.ChatStream(context.Background(), nil, func(string) {})
 	if err == nil || !strings.Contains(err.Error(), "oom") {
 		t.Fatalf("want in-band error, got %v", err)
 	}
@@ -101,16 +101,69 @@ func TestChatStreamContextCancel(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()
-	c := NewClient(srv.URL, "m")
-	err := c.ChatStream(ctx, nil, func(string) {})
+	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL, Model: "m"})
+	err := p.ChatStream(ctx, nil, func(string) {})
 	if err == nil {
 		t.Fatal("want context error after cancel")
 	}
 }
 
 func TestDefaultURL(t *testing.T) {
-	c := NewClient("", "")
-	if c.URL != "http://localhost:11434" {
-		t.Fatalf("default url = %q", c.URL)
+	p := NewProvider(Config{Type: OllamaProvider})
+	ollama := p.(*ollamaProvider)
+	if ollama.url != "http://localhost:11434" {
+		t.Fatalf("default url = %q", ollama.url)
+	}
+}
+
+func TestOpenAIStream(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-key" {
+			t.Errorf("missing Authorization header")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, chunk := range []string{
+			`{"choices":[{"delta":{"content":"Hello"}}]}`,
+			`{"choices":[{"delta":{"content":" world"}}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		} {
+			_, _ = w.Write([]byte("data: " + chunk + "\n\n"))
+		}
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p := NewProvider(Config{Type: OpenAIProvider, URL: srv.URL, Model: "gpt-4", APIKey: "test-key"})
+	var got strings.Builder
+	msgs := []Message{{Role: "user", Content: "hi"}}
+	err := p.ChatStream(context.Background(), msgs, func(d string) { got.WriteString(d) })
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	if got.String() != "Hello world" {
+		t.Fatalf("streamed %q", got.String())
+	}
+}
+
+func TestOpenAIModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4"},{"id":"gpt-3.5-turbo"}]}`))
+	}))
+	defer srv.Close()
+
+	p := NewProvider(Config{Type: OpenAIProvider, URL: srv.URL})
+	models, err := p.Models(context.Background())
+	if err != nil {
+		t.Fatalf("Models: %v", err)
+	}
+	if len(models) != 2 || models[0] != "gpt-4" {
+		t.Fatalf("got %v", models)
 	}
 }

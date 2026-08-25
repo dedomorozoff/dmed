@@ -13,6 +13,7 @@ import (
 
 	"dmed/internal/ai"
 	"dmed/internal/buffer"
+	"dmed/internal/config"
 	"dmed/internal/events"
 	"dmed/internal/session"
 	"dmed/internal/syntax"
@@ -70,6 +71,7 @@ func (t *tab) getDiff(repo *vcs.Repo) vcs.FileDiff {
 
 type Model struct {
 	root   string
+	cfg    config.Config
 	tabs   []tab
 	panes  []pane
 	layout splitLayout
@@ -163,7 +165,7 @@ type Model struct {
 	chatRows   []chatRow
 	chatScroll int    // lines of scrollback from the bottom (0 = follow)
 	chatModel  string // resolved Ollama model tag
-	ai         *ai.Client
+	ai         ai.Provider
 	chatCh     <-chan chatEvent
 	chatCancel context.CancelFunc
 
@@ -246,6 +248,8 @@ func New(paths ...string) Model {
 	if len(m.tabs) == 0 {
 		m.tabs = append(m.tabs, tab{buf: buffer.New()})
 	}
+	m.cfg = config.Load(m.root)
+	syntax.SetDefault(m.cfg.Editor.SyntaxTheme)
 	m.initPanes()
 	if m.root != "" {
 		m.treeVisible = true
@@ -253,6 +257,13 @@ func New(paths ...string) Model {
 	}
 	if repo, err := vcs.Open(m.baseDir()); err == nil {
 		m.repo = repo
+	}
+	// Watch config files for hot-reload
+	if p := config.ConfigPath(); m.watcher != nil {
+		m.watcher.Watch(p)
+	}
+	if p := config.ProjectConfigPath(m.root); p != "" && m.watcher != nil {
+		m.watcher.Watch(p)
 	}
 	return m
 }
@@ -344,8 +355,39 @@ func (m *Model) startFinder() {
 	m.finderOpen = true
 	m.finderQ = nil
 	m.finderSel = 0
-	m.finderFiles = collectFiles(m.baseDir())
+	m.finderFiles = collectFiles(m.baseDir(), m.cfg.Editor.SkippedDirs)
 	m.finderHits = searchFiles(m.finderFiles, "")
+}
+
+// openConfigFile opens the .dmed.conf file in a new tab for editing.
+// Creates the file with defaults if it doesn't exist.
+func (m *Model) openConfigFile() {
+	path := config.ConfigPath()
+	if m.root != "" {
+		path = config.ProjectConfigPath(m.root)
+	}
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		// Create with defaults
+		content := "# dmed configuration\n" +
+			"# Uncomment settings to override defaults.\n\n" +
+			"[editor]\n" +
+			"# tab_width = 4\n" +
+			"# syntax_theme = monokai\n" +
+			"# line_numbers = true\n" +
+			"# skipped_dirs = .git,node_modules\n\n" +
+			"[ai]\n" +
+			"# provider = ollama  # ollama | openai\n" +
+			"# model =\n" +
+			"# ollama_url = http://localhost:11434\n" +
+			"# api_key =  # for OpenAI-compatible providers\n" +
+			"# context_max = 6000\n\n" +
+			"[ui]\n" +
+			"# tree_width = 25\n" +
+			"# chat_width_pct = 40\n"
+		os.WriteFile(path, []byte(content), 0o644)
+	}
+	m.openPath(path)
+	m.msg = "edit config, save to apply"
 }
 
 func (m *Model) refind() {
@@ -539,6 +581,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case FileChangedMsg:
 		path := msg.Path
+		// Hot-reload config when .dmed.conf changes
+		if strings.HasSuffix(path, ".dmed.conf") {
+			m.cfg = config.Load(m.root)
+			syntax.SetDefault(m.cfg.Editor.SyntaxTheme)
+			m.msg = "config reloaded"
+			return m, waitForFileEvent(m.fileEvents)
+		}
 		for i := range m.tabs {
 			t := &m.tabs[i]
 			if t.path == "" {
@@ -851,6 +900,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.switchTab(-1)
 	case "alt+right":
 		m.switchTab(1)
+	case "alt+up":
+		m.cur().buf.MoveLineUp()
+	case "alt+down":
+		m.cur().buf.MoveLineDown()
 	case "shift+up":
 		m.cur().buf.MoveUpWithSelect()
 	case "shift+down":
@@ -982,7 +1035,7 @@ func (m *Model) clampScroll() {
 	if w <= 0 {
 		return
 	}
-	x := visCol(t.buf.LineAt(cur), t.buf.Col())
+	x := visCol(t.buf.LineAt(cur), t.buf.Col(), m.cfg.Editor.TabWidth)
 	if x < p.offsetX {
 		p.offsetX = x
 	}

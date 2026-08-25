@@ -28,6 +28,12 @@ func Default() *Highlighter {
 	return defaultHighlighter
 }
 
+// SetDefault changes the default highlighter to the named chroma style.
+func SetDefault(styleName string) {
+	h := New(styleName)
+	defaultHighlighter = h
+}
+
 func New(styleName string) *Highlighter {
 	s := styles.Get(styleName)
 	if s == nil {

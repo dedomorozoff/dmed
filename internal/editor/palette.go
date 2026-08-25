@@ -36,6 +36,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "terminal", title: "View: Toggle Terminal", desc: "Alt+T — Shell panel at the bottom", action: func(m *Model) tea.Cmd { return m.toggleTerminal() }},
 		{id: "ai_chat", title: "AI: Toggle Chat Panel", desc: "Alt+A — Local Ollama chat on the right", action: func(m *Model) tea.Cmd { m.toggleChat(); return nil }},
 		{id: "ai_inline", title: "AI: Inline Request", desc: "Alt+I — Rewrite selected text with AI", action: func(m *Model) tea.Cmd { m.startInlineRequest(); return nil }},
+		{id: "settings", title: "Settings: Open Config", desc: "Open .dmed.conf for editing", action: func(m *Model) tea.Cmd { m.openConfigFile(); return nil }},
 		{id: "help", title: "Help: Show Keybindings", desc: "F1 / Ctrl+E — Help panel", action: func(m *Model) tea.Cmd { m.helpOpen = true; return nil }},
 		{id: "quit", title: "App: Quit Editor", desc: "Ctrl+Q — Exit", action: func(m *Model) tea.Cmd { return tea.Quit }},
 	}
