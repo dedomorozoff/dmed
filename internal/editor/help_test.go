@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestHelpToggle(t *testing.T) {
@@ -13,22 +13,22 @@ func TestHelpToggle(t *testing.T) {
 	if m.helpOpen {
 		t.Fatal("help must start closed")
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyF1})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyF1})
 	if !m.helpOpen {
 		t.Fatal("f1 must open help")
 	}
 	v := m.View()
 	for _, want := range []string{"dmed — keys", "Ctrl+S", "Ctrl+F", "Ctrl+H", "Ctrl+O", "Ctrl+W"} {
-		if !strings.Contains(v, want) {
+		if !strings.Contains(v.Content, want) {
 			t.Fatalf("help view missing %q", want)
 		}
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.helpOpen {
 		t.Fatal("esc must close help")
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyF1})
-	m = press(m, tea.KeyMsg{Type: tea.KeyF1})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyF1})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyF1})
 	if m.helpOpen {
 		t.Fatal("f1 again must close help")
 	}
@@ -37,7 +37,7 @@ func TestHelpToggle(t *testing.T) {
 func TestHelpSwallowsTyping(t *testing.T) {
 	m := New()
 	m.width, m.height = 80, 24
-	m = press(m, tea.KeyMsg{Type: tea.KeyF1})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyF1})
 	typeStr(m, "hello world")
 	if m.tabs[0].buf.Text() != "\n" {
 		t.Fatalf("typing while help open must not edit buffer, got %q", m.tabs[0].buf.Text())
@@ -47,7 +47,7 @@ func TestHelpSwallowsTyping(t *testing.T) {
 func TestStatusBarShowsHint(t *testing.T) {
 	m := New()
 	m.width, m.height = 80, 24
-	if v := m.View(); !strings.Contains(v, "F1 help") {
+	if v := m.View(); !strings.Contains(v.Content, "F1 help") {
 		t.Fatal("status bar must hint F1 help by default")
 	}
 }
@@ -55,7 +55,7 @@ func TestStatusBarShowsHint(t *testing.T) {
 func TestNulByteIsIgnored(t *testing.T) {
 	m := New()
 	m.width, m.height = 80, 24
-	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\x00'}})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyRunes, Text: string('\x00')})
 	if m.helpOpen {
 		t.Fatal("bare NUL (some stacks send it for bare Ctrl) must not toggle help")
 	}

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestCommandPaletteOpenFilterExecute(t *testing.T) {
@@ -15,7 +15,7 @@ func TestCommandPaletteOpenFilterExecute(t *testing.T) {
 	m.width, m.height = 80, 24
 
 	// Open palette (Ctrl+P / F2)
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlP})
 	if !m.paletteOpen {
 		t.Fatal("palette must be open after Ctrl+P")
 	}
@@ -29,12 +29,12 @@ func TestCommandPaletteOpenFilterExecute(t *testing.T) {
 
 	// View rendering
 	v := m.View()
-	if !strings.Contains(v, "File: Save") {
+	if !strings.Contains(v.Content, "File: Save") {
 		t.Fatalf("view must render palette panel with File: Save:\n%s", v)
 	}
 
 	// Execute command (Enter)
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.paletteOpen {
 		t.Fatal("palette must close after executing command")
 	}

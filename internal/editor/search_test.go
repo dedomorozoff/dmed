@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestSearchFindNextAndPrev(t *testing.T) {
@@ -15,7 +15,7 @@ func TestSearchFindNextAndPrev(t *testing.T) {
 	m.width, m.height = 80, 24
 
 	// Open search
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlF})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlF})
 	if !m.searchOpen {
 		t.Fatal("search must be open after Ctrl+F")
 	}
@@ -33,7 +33,7 @@ func TestSearchFindNextAndPrev(t *testing.T) {
 	}
 
 	// Next match (Enter)
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.searchMatchIdx != 1 {
 		t.Fatalf("expected searchMatchIdx 1, got %d", m.searchMatchIdx)
 	}
@@ -42,7 +42,7 @@ func TestSearchFindNextAndPrev(t *testing.T) {
 	}
 
 	// Next match (F3)
-	m = press(m, tea.KeyMsg{Type: tea.KeyF3})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyF3})
 	if m.searchMatchIdx != 2 {
 		t.Fatalf("expected searchMatchIdx 2, got %d", m.searchMatchIdx)
 	}
@@ -51,13 +51,13 @@ func TestSearchFindNextAndPrev(t *testing.T) {
 	}
 
 	// Previous match (Up / Ctrl+P)
-	m = press(m, tea.KeyMsg{Type: tea.KeyUp})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.searchMatchIdx != 1 {
 		t.Fatalf("expected searchMatchIdx 1 after up, got %d", m.searchMatchIdx)
 	}
 
 	// Close search (Esc)
-	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.searchOpen {
 		t.Fatal("search must be closed after Esc")
 	}
@@ -71,7 +71,7 @@ func TestSearchReplaceOneAndAll(t *testing.T) {
 	m.width, m.height = 80, 24
 
 	// Open Replace (Ctrl+H)
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlH})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlH})
 	if !m.replaceOpen || !m.searchOpen {
 		t.Fatal("replace and search must be open after Ctrl+H")
 	}
@@ -84,27 +84,27 @@ func TestSearchReplaceOneAndAll(t *testing.T) {
 	}
 
 	// Switch to replace field
-	m = press(m, tea.KeyMsg{Type: tea.KeyTab})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.replaceFocusFind {
 		t.Fatal("expected replaceFocusFind false after Tab")
 	}
 	m = typeStr(m, "banana")
 
 	// Replace first match (Enter)
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !strings.HasPrefix(m.cur().buf.Text(), "banana orange apple") {
 		t.Fatalf("after replace 1: %q", m.cur().buf.Text())
 	}
 
 	// Replace all remaining (Ctrl+A)
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlA})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlA})
 	expected := "banana orange banana\nbanana pie\n"
 	if m.cur().buf.Text() != expected {
 		t.Fatalf("after replace all: want %q, got %q", expected, m.cur().buf.Text())
 	}
 
 	// Undo (Ctrl+Z)
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlZ})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlZ})
 	if m.cur().buf.Text() != "banana orange apple\napple pie\n" {
 		t.Fatalf("after undo replace all: %q", m.cur().buf.Text())
 	}
@@ -117,14 +117,14 @@ func TestSearchViewHighlight(t *testing.T) {
 	m := New(f)
 	m.width, m.height = 80, 24
 
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlF})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlF})
 	m = typeStr(m, "main")
 
 	v := m.View()
-	if !strings.Contains(v, "search: main") {
+	if !strings.Contains(v.Content, "search: main") {
 		t.Fatalf("view must show search bar with query, got:\n%s", v)
 	}
-	if !strings.Contains(v, "[1/2]") {
+	if !strings.Contains(v.Content, "[1/2]") {
 		t.Fatalf("view must show match count [1/2], got:\n%s", v)
 	}
 }

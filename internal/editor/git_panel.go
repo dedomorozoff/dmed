@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"dmed/internal/vcs"
 )
 
@@ -100,7 +100,7 @@ func (m *Model) showTree() {
 	m.rebuildTree()
 }
 
-func (m *Model) handleGit(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleGit(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "ctrl+b", "f9":
 		// Switch to the project tree
@@ -118,7 +118,7 @@ func (m *Model) handleGit(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-func (m *Model) handleGitStatus(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc", "q", "ctrl+g":
 		m.gitOpen = false
@@ -198,7 +198,7 @@ func (m *Model) handleGitStatus(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-func (m *Model) handleGitCommit(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleGitCommit(msg tea.KeyPressMsg) tea.Cmd {
 	r := m.repoForCur()
 	switch msg.String() {
 	case "esc":
@@ -233,8 +233,8 @@ func (m *Model) handleGitCommit(msg tea.KeyMsg) tea.Cmd {
 			m.gitCommitIn = m.gitCommitIn[:n-1]
 		}
 	default:
-		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-			m.gitCommitIn = append(m.gitCommitIn, msg.Runes...)
+		if len(msg.Text) > 0 {
+			m.gitCommitIn = append(m.gitCommitIn, []rune(msg.Text)...)
 		}
 	}
 	return nil

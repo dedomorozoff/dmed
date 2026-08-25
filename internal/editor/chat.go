@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"dmed/internal/ai"
 )
@@ -121,7 +121,7 @@ func (m *Model) pickChatModel() {
 	}
 }
 
-func (m *Model) handleChat(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		m.chatOpen = false
@@ -147,8 +147,8 @@ func (m *Model) handleChat(msg tea.KeyMsg) tea.Cmd {
 		m.chatBusy = false
 		m.chatScroll = 0
 	default:
-		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-			m.chatIn = append(m.chatIn, msg.Runes...)
+		if len(msg.Text) > 0 {
+			m.chatIn = append(m.chatIn, []rune(msg.Text)...)
 		}
 	}
 	return nil

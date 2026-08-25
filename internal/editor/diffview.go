@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"dmed/internal/vcs"
 )
@@ -90,7 +90,7 @@ func (m *Model) clampDiffScroll(h int) {
 	}
 }
 
-func (m *Model) handleDiffView(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleDiffView(msg tea.KeyPressMsg) tea.Cmd {
 	h := m.viewHeight()
 	switch msg.String() {
 	case "esc", "q", "d":

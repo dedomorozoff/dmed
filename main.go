@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"dmed/internal/editor"
 )
@@ -23,7 +23,7 @@ func main() {
 			return
 		}
 	}
-	p := tea.NewProgram(editor.New(os.Args[1:]...), tea.WithAltScreen())
+	p := tea.NewProgram(editor.New(os.Args[1:]...))
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

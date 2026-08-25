@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 const (
@@ -117,7 +117,7 @@ func (m *Model) clampTreeScroll(h int) {
 	}
 }
 
-func (m *Model) handleTree(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleTree(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "up":
 		if m.treeSel > 0 {

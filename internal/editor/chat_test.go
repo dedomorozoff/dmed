@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestWrapRunes(t *testing.T) {
@@ -69,7 +69,7 @@ func TestToggleChatOpensWithFocusAndCloses(t *testing.T) {
 	if w := m.rightRailWidth(); w != m.chatPanelWidth() {
 		t.Fatalf("rail width = %d", w)
 	}
-	msg := tea.KeyMsg{Type: tea.KeyEscape}
+	msg := tea.KeyPressMsg{Code: tea.KeyEscape}
 	m.handleKey(msg)
 	if m.chatOpen || m.chatFocus {
 		t.Fatal("esc should close the panel")
@@ -83,20 +83,20 @@ func TestHandleChatTypingAndSubmitGuard(t *testing.T) {
 	m := newChatModel()
 	m.toggleChat()
 	for _, r := range "hi there" {
-		m.handleChat(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m.handleChat(tea.KeyPressMsg{Text: string(r)})
 	}
 	if string(m.chatIn) != "hi there" {
 		t.Fatalf("input = %q", string(m.chatIn))
 	}
 	m.chatBusy = true // stream running: enter must not submit
 	m.chatIn = []rune("second")
-	m.handleChat(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleChat(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if len(m.chatMsgs) != 0 || m.chatIn == nil {
 		t.Fatalf("busy submit must be ignored; msgs=%d input=%v", len(m.chatMsgs), m.chatIn)
 	}
 	m.chatBusy = false
 	m.chatModel = "test-model" // pretend ollama resolved a model
-	m.handleChat(tea.KeyMsg{Type: tea.KeyEnter})
+	m.handleChat(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if len(m.chatMsgs) != 1 || m.chatMsgs[0].Role != "user" || m.chatMsgs[0].Content != "second" {
 		t.Fatalf("msgs = %+v", m.chatMsgs)
 	}

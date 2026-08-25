@@ -6,17 +6,17 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
-func press(m Model, k tea.KeyMsg) Model {
+func press(m Model, k tea.KeyPressMsg) Model {
 	next, _ := m.Update(k)
 	return next.(Model)
 }
 
 func typeStr(m Model, s string) Model {
 	for _, r := range s {
-		m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = press(m, tea.KeyPressMsg{Text: string(r)})
 	}
 	return m
 }
@@ -42,7 +42,7 @@ func TestTabsOpenSwitchClose(t *testing.T) {
 	if got := m.activeTab().buf.Text(); got != "bravo\n" {
 		t.Fatalf("active content = %q", got)
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyLeft, Alt: true})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModAlt})
 	if m.activeTabIndex() != 0 || m.activeTab().buf.Text() != "alpha\n" {
 		t.Fatalf("alt+left: activeTabIndex=%d content=%q", m.activeTabIndex(), m.activeTab().buf.Text())
 	}
@@ -50,11 +50,11 @@ func TestTabsOpenSwitchClose(t *testing.T) {
 	if !m.tabs[0].buf.Dirty() || m.tabs[1].buf.Dirty() {
 		t.Fatal("dirty must be per-tab")
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyRight, Alt: true})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModAlt})
 	if m.activeTabIndex() != 1 {
 		t.Fatalf("alt+right: activeTabIndex=%d", m.activeTabIndex())
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlW})
+	m = press(m, tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
 	if len(m.tabs) != 1 || m.activeTabIndex() != 0 || m.activeTab().path != f1 {
 		t.Fatalf("ctrl+w: %d tabs activeTabIndex=%d path=%q", len(m.tabs), m.activeTabIndex(), m.activeTab().path)
 	}
@@ -66,17 +66,17 @@ func TestPromptOpensAndCancels(t *testing.T) {
 	target := writeTemp(t, dir, "two.txt", "two lines\n")
 
 	m := New(f1)
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlT})
+	m = press(m, tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if !m.promptOpen {
 		t.Fatal("ctrl+t must open prompt")
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.promptOpen || len(m.tabs) != 1 {
 		t.Fatal("esc must cancel prompt")
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlT})
+	m = press(m, tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	m = typeStr(m, target)
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.promptOpen || len(m.tabs) != 2 || m.activeTabIndex() != 1 {
 		t.Fatalf("enter: prompt=%v tabs=%d activeTabIndex=%d", m.promptOpen, len(m.tabs), m.activeTabIndex())
 	}
@@ -91,7 +91,7 @@ func TestPromptOpensAndCancels(t *testing.T) {
 func TestCloseLastTabReturnsQuit(t *testing.T) {
 	m := New()
 	m.width, m.height = 80, 24
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
 	nm := next.(Model)
 	if nm.lenTabs() != 1 {
 		t.Fatal("last tab must stay until program exits")
@@ -113,11 +113,11 @@ func TestViewShowsTabNames(t *testing.T) {
 	m := New(f1, f2)
 	m.width, m.height = 80, 24
 	v := m.View()
-	if !strings.Contains(v, "aa.txt") || !strings.Contains(v, "bb.txt") {
+	if !strings.Contains(v.Content, "aa.txt") || !strings.Contains(v.Content, "bb.txt") {
 		t.Fatal("view must show both tab names")
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlT})
-	if !strings.Contains(m.View(), "open file:") {
+	m = press(m, tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	if !strings.Contains(m.View().Content, "open file:") {
 		t.Fatal("prompt line must be visible while open")
 	}
 }
@@ -125,7 +125,7 @@ func TestViewShowsTabNames(t *testing.T) {
 func TestUntitledCannotSave(t *testing.T) {
 	m := New()
 	m.width, m.height = 80, 24
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = press(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if !m.promptSave {
 		t.Fatalf("untitled ctrl+s must open save prompt, msg = %q", m.msg)
 	}
@@ -138,12 +138,12 @@ func TestSaveAsWritesNewPath(t *testing.T) {
 	m := New()
 	m.width, m.height = 80, 24
 	typeStr(m, "hello")
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = press(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if !m.promptSave {
 		t.Fatal("untitled ctrl+s must open save prompt")
 	}
 	m = typeStr(m, target)
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.cur().path != target {
 		t.Fatalf("path = %q", m.cur().path)
 	}
@@ -165,7 +165,7 @@ func TestQuitDirtyPrompts(t *testing.T) {
 	m := New(f1)
 	m.width, m.height = 80, 24
 	typeStr(m, "X")
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlQ})
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl})
 	nm := next.(Model)
 	if !nm.quitConfirm {
 		t.Fatalf("dirty ctrl+q must open quit confirm, msg = %q", nm.msg)
@@ -178,12 +178,12 @@ func TestQuitDirtySaveAndQuit(t *testing.T) {
 	m := New(f1)
 	m.width, m.height = 80, 24
 	typeStr(m, "X")
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlQ})
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl})
 	nm := next.(Model)
 	if !nm.quitConfirm {
 		t.Fatal("dirty ctrl+q must open quit confirm")
 	}
-	next, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	next, cmd := nm.Update(tea.KeyPressMsg{Text: "y"})
 	nm = next.(Model)
 	if cmd == nil {
 		t.Fatal("confirming quit must return Quit")
@@ -199,11 +199,11 @@ func TestQuitDirtyCancel(t *testing.T) {
 	m := New(f1)
 	m.width, m.height = 80, 24
 	typeStr(m, "X")
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlQ})
+	m = press(m, tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl})
 	if !m.quitConfirm {
 		t.Fatal("dirty ctrl+q must open quit confirm")
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.quitConfirm {
 		t.Fatal("esc must cancel quit confirm")
 	}
@@ -220,7 +220,7 @@ func TestQuitCopySkipsConfirm(t *testing.T) {
 	m.cur().buf.StartSelection()
 	m.cur().buf.MoveDownWithSelect()
 	m.cur().buf.LineEndWithSelect()
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	nm := next.(Model)
 	if nm.quitConfirm {
 		t.Fatal("copy with selection must not quit")
@@ -236,7 +236,7 @@ func TestQuitCopyOnDirtyQuits(t *testing.T) {
 	m := New(f1)
 	m.width, m.height = 80, 24
 	typeStr(m, "X")
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	nm := next.(Model)
 	if !nm.quitConfirm {
 		t.Fatal("ctrl+c on dirty without selection must confirm quit")
@@ -249,11 +249,11 @@ func TestCtrlXCloseTab(t *testing.T) {
 	f2 := writeTemp(t, dir, "b.txt", "bravo\n")
 
 	m := New(f1, f2)
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlX})
+	m = press(m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	if len(m.tabs) != 1 || m.activeTab().path != f1 {
 		t.Fatalf("ctrl+x must close active tab, tabs=%d", len(m.tabs))
 	}
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	if nm := next.(Model); len(nm.tabs) != 1 || cmd == nil {
 		t.Fatal("ctrl+x on last tab must quit without emptying tabs")
 	}
@@ -265,12 +265,12 @@ func TestCtrlXCloseLastDirtyConfirm(t *testing.T) {
 	m := New(f1)
 	m.width, m.height = 80, 24
 	typeStr(m, "X")
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	nm := next.(Model)
 	if !nm.quitConfirm {
 		t.Fatalf("dirty ctrl+x on last tab must confirm quit, msg = %q", nm.msg)
 	}
-	next, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	next, cmd := nm.Update(tea.KeyPressMsg{Text: "n"})
 	nm = next.(Model)
 	if cmd == nil {
 		t.Fatal("confirming discard must return Quit")
@@ -286,12 +286,12 @@ func TestCtrlWCloseLastDirtyConfirm(t *testing.T) {
 	m := New(f1)
 	m.width, m.height = 80, 24
 	typeStr(m, "X")
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
 	nm := next.(Model)
 	if !nm.quitConfirm {
 		t.Fatalf("dirty ctrl+w on last tab must confirm quit, msg = %q", nm.msg)
 	}
-	next, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	next, cmd := nm.Update(tea.KeyPressMsg{Text: "y"})
 	nm = next.(Model)
 	if cmd == nil {
 		t.Fatal("confirming save+quit must return Quit")
@@ -327,7 +327,7 @@ func TestSaveWritesActiveTab(t *testing.T) {
 
 	m := New(f1, f2)
 	typeStr(m, "hello")
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = press(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	data, err := os.ReadFile(f2)
 	if err != nil {
 		t.Fatal(err)

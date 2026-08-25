@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Bottom terminal panel: a persistent shell session rendered as the last
@@ -197,7 +197,7 @@ func (m *Model) termHistory(d int) {
 	m.termIn = []rune(m.termHist[n-m.termHistIdx])
 }
 
-func (m *Model) handleTerm(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleTerm(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		m.termOpen = false
@@ -229,8 +229,8 @@ func (m *Model) handleTerm(msg tea.KeyMsg) tea.Cmd {
 			m.termLines = nil
 			m.termScroll = 0
 		default:
-			if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-				m.termIn = append(m.termIn, msg.Runes...)
+			if len(msg.Text) > 0 {
+				m.termIn = append(m.termIn, []rune(msg.Text)...)
 			}
 		}
 	}

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func chdir(t *testing.T, dir string) {
@@ -57,34 +57,34 @@ func TestFinderOpensAndRefocuses(t *testing.T) {
 
 	m := New(f1)
 	m.width, m.height = 80, 24
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	m = press(m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	if !m.finderOpen || len(m.finderHits) != 2 {
 		t.Fatalf("finder: open=%v hits=%v", m.finderOpen, m.finderHits)
 	}
 	if m.finderHits[0] != "a.txt" {
 		t.Fatalf("empty-query order: %v", m.finderHits)
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyDown})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.finderSel != 1 {
 		t.Fatalf("sel after down = %d", m.finderSel)
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.finderOpen || len(m.tabs) != 2 || m.activeTab().path != filepath.Join(dir, "b.txt") {
 		t.Fatalf("enter: open=%v tabs=%d active=%q", m.finderOpen, len(m.tabs), m.activeTab().path)
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	m = press(m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	for _, r := range ".tx" {
-		m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = press(m, tea.KeyPressMsg{Text: string(r)})
 	}
 	if len(m.finderHits) != 2 {
 		t.Fatalf("query '.tx' must match both files, got %v", m.finderHits)
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyUp})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.finderSel != 1 {
 		t.Fatalf("up must wrap to last hit, sel=%d", m.finderSel)
 	}
 	m.finderSel = 0
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if len(m.tabs) != 2 {
 		t.Fatalf("enter on open file must not duplicate tab, tabs=%d", len(m.tabs))
 	}
@@ -100,23 +100,23 @@ func TestFinderCancelPaths(t *testing.T) {
 
 	m := New(f1)
 	m.width, m.height = 80, 24
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlO})
-	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = press(m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.finderOpen || len(m.tabs) != 1 {
 		t.Fatal("esc must close finder")
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	m = press(m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	for _, r := range "zzz" {
-		m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = press(m, tea.KeyPressMsg{Text: string(r)})
 	}
 	if len(m.finderHits) != 0 {
 		t.Fatalf("expected no hits, got %v", m.finderHits)
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyBackspace})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if string(m.finderQ) != "zz" {
 		t.Fatalf("backspace: q=%q", string(m.finderQ))
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.finderOpen || len(m.tabs) != 1 {
 		t.Fatal("enter without hits must just close finder")
 	}
@@ -128,11 +128,11 @@ func TestCtrlChordFromMangledStack(t *testing.T) {
 	chdir(t, dir)
 
 	m := New(f1)
-	m = press(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\x0f'}})
+	m = press(m, tea.KeyPressMsg{Text: "\x0f"})
 	if !m.finderOpen {
 		t.Fatal("lone 0x0f rune must be normalized to ctrl+o")
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.tabs[0].buf.Dirty() {
 		t.Fatal("mangled chord must not insert into buffer")
 	}
@@ -146,12 +146,12 @@ func TestViewShowsFinderPanel(t *testing.T) {
 	m := New(f1)
 	m.width, m.height = 80, 24
 	v := m.View()
-	if strings.Contains(v, "find file:") {
+	if strings.Contains(v.Content, "find file:") {
 		t.Fatal("finder panel must be hidden while closed")
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	m = press(m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	v = m.View()
-	if !strings.Contains(v, "find file:") || !strings.Contains(v, "visible.txt") {
+	if !strings.Contains(v.Content, "find file:") || !strings.Contains(v.Content, "visible.txt") {
 		t.Fatal("finder panel with candidates must be visible")
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"dmed/internal/ai"
 	"dmed/internal/buffer"
@@ -472,7 +472,7 @@ func (m *Model) refind() {
 	}
 }
 
-func (m *Model) handleFinder(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleFinder(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		m.finderOpen = false
@@ -498,15 +498,15 @@ func (m *Model) handleFinder(msg tea.KeyMsg) tea.Cmd {
 			m.refind()
 		}
 	default:
-		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-			m.finderQ = append(m.finderQ, msg.Runes...)
+		if len(msg.Text) > 0 {
+			m.finderQ = append(m.finderQ, []rune(msg.Text)...)
 			m.refind()
 		}
 	}
 	return nil
 }
 
-func (m *Model) handleHelp(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleHelp(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc", "f1", "ctrl+e", "q":
 		m.helpOpen = false
@@ -525,7 +525,7 @@ func (m *Model) focusOrOpen(rawPath string) {
 	m.openPath(path)
 }
 
-func (m *Model) handlePrompt(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handlePrompt(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		m.promptOpen = false
@@ -540,14 +540,14 @@ func (m *Model) handlePrompt(msg tea.KeyMsg) tea.Cmd {
 			m.promptIn = m.promptIn[:n-1]
 		}
 	default:
-		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-			m.promptIn = append(m.promptIn, msg.Runes...)
+		if len(msg.Text) > 0 {
+			m.promptIn = append(m.promptIn, []rune(msg.Text)...)
 		}
 	}
 	return nil
 }
 
-func (m *Model) handleSavePrompt(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleSavePrompt(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		m.promptSave = false
@@ -583,8 +583,8 @@ func (m *Model) handleSavePrompt(msg tea.KeyMsg) tea.Cmd {
 			m.promptSaveIn = m.promptSaveIn[:n-1]
 		}
 	default:
-		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-			m.promptSaveIn = append(m.promptSaveIn, msg.Runes...)
+		if len(msg.Text) > 0 {
+			m.promptSaveIn = append(m.promptSaveIn, []rune(msg.Text)...)
 		}
 	}
 	return nil
@@ -599,7 +599,7 @@ func (m Model) hasDirty() bool {
 	return false
 }
 
-func (m *Model) handleQuitConfirm(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleQuitConfirm(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		m.quitConfirm = false
@@ -778,7 +778,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case InlineOutputMsg:
 		cmd := m.handleInlineOutput(msg)
 		return m, cmd
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if debugKeys {
 			fmt.Fprintf(os.Stderr, "dmed: key %q\n", msg.String())
 		}
@@ -794,19 +794,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
-	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
-		if r := msg.Runes[0]; r < 32 && r != '\t' {
-			msg = tea.KeyMsg{Type: tea.KeyType(r)}
+func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
+	if len(msg.Text) == 1 {
+		if r := rune(msg.Text[0]); r < 32 && r != '\t' {
+			msg = tea.KeyPressMsg{Code: r}
 		}
 	}
 	// Normalize Russian ЙЦУКЕН → English QWERTY for layout-independent keys.
-	if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
-		nr := make([]rune, len(msg.Runes))
-		for i, r := range msg.Runes {
+	if len(msg.Text) > 0 {
+		nr := make([]rune, len(msg.Text))
+		for i, r := range msg.Text {
 			nr[i] = normalizeKey(r)
 		}
-		msg = tea.KeyMsg{Type: msg.Type, Runes: nr, Alt: msg.Alt}
+		msg = tea.KeyPressMsg{Code: nr[0], Text: string(nr), Mod: msg.Mod}
 	}
 	s := msg.String()
 	// Quit/close keys must work in every mode (tree, git panel, prompts, search...).
@@ -1067,8 +1067,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.cur().buf.Insert('\t')
 		m.msg = ""
 	default:
-		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-			for _, r := range msg.Runes {
+		if len(msg.Text) > 0 {
+			for _, r := range msg.Text {
 				m.cur().buf.Insert(r)
 			}
 			m.msg = ""
@@ -1203,7 +1203,7 @@ func (m *Model) startReplace() {
 	}
 }
 
-func (m *Model) handleSearch(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleSearch(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		m.searchOpen = false
@@ -1225,15 +1225,15 @@ func (m *Model) handleSearch(msg tea.KeyMsg) tea.Cmd {
 			m.updateSearchMatches(false)
 		}
 	default:
-		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-			m.searchQuery = append(m.searchQuery, msg.Runes...)
+		if len(msg.Text) > 0 {
+			m.searchQuery = append(m.searchQuery, []rune(msg.Text)...)
 			m.updateSearchMatches(false)
 		}
 	}
 	return nil
 }
 
-func (m *Model) handleReplace(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleReplace(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		m.searchOpen = false
@@ -1265,12 +1265,12 @@ func (m *Model) handleReplace(msg tea.KeyMsg) tea.Cmd {
 			}
 		}
 	default:
-		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+		if len(msg.Text) > 0 {
 			if m.replaceFocusFind {
-				m.searchQuery = append(m.searchQuery, msg.Runes...)
+				m.searchQuery = append(m.searchQuery, []rune(msg.Text)...)
 				m.updateSearchMatches(false)
 			} else {
-				m.replaceWith = append(m.replaceWith, msg.Runes...)
+				m.replaceWith = append(m.replaceWith, []rune(msg.Text)...)
 			}
 		}
 	}

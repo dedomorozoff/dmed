@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"dmed/internal/ai"
 	"dmed/internal/vcs"
@@ -55,7 +55,7 @@ func (m *Model) startInlineRequest() {
 
 // handleInlineRequest handles keys while the inline prompt is active (before
 // the AI has responded).
-func (m *Model) handleInlineRequest(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleInlineRequest(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		if m.aiInlineCancel != nil {
@@ -71,8 +71,8 @@ func (m *Model) handleInlineRequest(msg tea.KeyMsg) tea.Cmd {
 			m.aiInlineInput = m.aiInlineInput[:n-1]
 		}
 	default:
-		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-			m.aiInlineInput = append(m.aiInlineInput, msg.Runes...)
+		if len(msg.Text) > 0 {
+			m.aiInlineInput = append(m.aiInlineInput, []rune(msg.Text)...)
 		}
 	}
 	return nil
@@ -183,7 +183,7 @@ func (m *Model) startInlineReview() {
 }
 
 // handleInlineReview handles keys while the AI diff preview is shown.
-func (m *Model) handleInlineReview(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleInlineReview(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "y", "enter":
 		m.applyInlineProposal()

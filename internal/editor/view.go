@@ -6,7 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"dmed/internal/syntax"
 	"dmed/internal/vcs"
@@ -130,7 +131,7 @@ func (m Model) paneContentWidth(paneIdx int) int {
 	return m.paneTotalWidth(paneIdx) - m.gutterWidthForTab(t)
 }
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
 	h := m.viewHeight()
 	rows := make([]string, 0, h+2)
 	rows = append(rows, m.tabBar())
@@ -185,7 +186,10 @@ func (m Model) View() string {
 	if m.termOpen {
 		rows = append(rows, m.terminalPanel()...)
 	}
-	return lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n"))
+	var v tea.View
+	v.SetContent(lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n")))
+	v.AltScreen = true
+	return v
 }
 
 func (m Model) editorRows(h int) []string {

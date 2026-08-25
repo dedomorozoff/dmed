@@ -3,7 +3,7 @@ package editor
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 type commandItem struct {
@@ -57,7 +57,7 @@ func (m *Model) filterPalette() []commandItem {
 	return res
 }
 
-func (m *Model) handlePalette(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handlePalette(msg tea.KeyPressMsg) tea.Cmd {
 	hits := m.filterPalette()
 	switch msg.String() {
 	case "esc":
@@ -87,8 +87,8 @@ func (m *Model) handlePalette(msg tea.KeyMsg) tea.Cmd {
 			m.paletteSel = 0
 		}
 	default:
-		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-			m.paletteQ = append(m.paletteQ, msg.Runes...)
+		if len(msg.Text) > 0 {
+			m.paletteQ = append(m.paletteQ, []rune(msg.Text)...)
 			m.paletteSel = 0
 		}
 	}
