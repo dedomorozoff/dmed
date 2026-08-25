@@ -170,6 +170,7 @@ pkg: build-linux-amd64 ## Build .pkg.tar.zst (Arch, x86_64)
 # Termux (.deb for Android)
 termux: build-linux-arm64 ## Build Termux .deb (aarch64)
 	@mkdir -p dist/termux/dmed_$(VERSION)_aarch64/DEBIAN
+	chmod 755 dist/termux/dmed_$(VERSION)_aarch64/DEBIAN
 	@mkdir -p dist/termux/dmed_$(VERSION)_aarch64/data/data/com.termux/files/usr/bin
 	cp dist/dmed-linux-arm64 dist/termux/dmed_$(VERSION)_aarch64/data/data/com.termux/files/usr/bin/dmed
 	chmod 755 dist/termux/dmed_$(VERSION)_aarch64/data/data/com.termux/files/usr/bin/dmed

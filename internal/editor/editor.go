@@ -251,6 +251,7 @@ type Model struct {
 	aiReviewOffX     int
 
 	quitConfirm bool
+	quitTab     bool  // true if confirming close of a single tab (not quit)
 	pendingQuit bool
 }
 
@@ -321,6 +322,10 @@ func New(paths ...string) Model {
 	}
 	if repo, err := vcs.Open(m.baseDir()); err == nil {
 		m.repo = repo
+	}
+	// Watch root directory for tree updates
+	if m.root != "" && m.watcher != nil {
+		m.watcher.Watch(m.root)
 	}
 	// Watch config files for hot-reload
 	if p := config.ConfigPath(); m.watcher != nil {
@@ -599,6 +604,7 @@ func (m *Model) handleQuitConfirm(msg tea.KeyMsg) tea.Cmd {
 	case "esc":
 		m.quitConfirm = false
 		m.pendingQuit = false
+		m.quitTab = false
 	case "y", "Y":
 		t := m.cur()
 		if t.path == "" {
@@ -611,16 +617,40 @@ func (m *Model) handleQuitConfirm(msg tea.KeyMsg) tea.Cmd {
 		if t.buf.Dirty() {
 			m.quitConfirm = false
 			m.pendingQuit = false
-			m.msg = "save failed, not quitting"
+			m.quitTab = false
+			m.msg = "save failed"
+			if m.quitTab {
+				m.quitTab = false
+			}
 			return nil
 		}
 		m.quitConfirm = false
 		m.pendingQuit = false
+		m.quitTab = false
+		if m.quitTab {
+			// Just close the tab after saving
+			cmd := m.closeTab()
+			if cmd == nil {
+				return nil
+			}
+			m.shutdown()
+			return cmd
+		}
 		m.shutdown()
 		return tea.Quit
 	case "n", "N":
 		m.quitConfirm = false
 		m.pendingQuit = false
+		m.quitTab = false
+		if m.quitTab {
+			// Close the tab without saving
+			cmd := m.closeTab()
+			if cmd == nil {
+				return nil
+			}
+			m.shutdown()
+			return cmd
+		}
 		m.shutdown()
 		return tea.Quit
 	}
@@ -688,6 +718,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.msg = "file modified externally: (r)eload or (i)gnore?"
 				}
 				break
+			}
+		}
+		// Refresh Git panel if open to show updated file status
+		if m.gitOpen {
+			m.refreshGitFiles()
+		}
+		// Rebuild tree if the change is in the project root
+		if m.treeVisible && m.root != "" {
+			absRoot, _ := filepath.Abs(m.root)
+			absPath, _ := filepath.Abs(path)
+			if strings.HasPrefix(absPath, absRoot) {
+				m.rebuildTree()
 			}
 		}
 		return m, waitForFileEvent(m.fileEvents)
@@ -1059,13 +1101,34 @@ func (m *Model) shutdown() {
 // closeActiveTab closes the tab of the active pane; closing the last tab
 // quits (with a save confirmation when the buffer is dirty).
 func (m *Model) closeActiveTab() tea.Cmd {
-	cmd := m.closeTab()
-	if cmd == nil {
+	t := m.cur()
+	if t == nil {
 		return nil
 	}
-	if m.hasDirty() {
-		m.quitConfirm = true
+
+	// If this is the last tab, quit (with save prompt if dirty)
+	if len(m.tabs) == 1 {
+		if t.buf.Dirty() {
+			m.quitConfirm = true
+			m.pendingQuit = true
+			m.quitTab = false // This is a quit, not a tab close
+			return nil
+		}
+		m.shutdown()
+		return tea.Quit
+	}
+
+	// Multiple tabs: check if the tab being closed is dirty
+	if t.buf.Dirty() {
+		m.quitTab = true
 		m.pendingQuit = true
+		m.quitConfirm = true
+		return nil
+	}
+
+	// Tab is clean, just close it
+	cmd := m.closeTab()
+	if cmd == nil {
 		return nil
 	}
 	m.shutdown()
