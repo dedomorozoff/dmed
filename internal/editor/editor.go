@@ -114,6 +114,11 @@ type Model struct {
 	repo         *vcs.Repo
 	conflictOpen bool
 	conflictPath string
+	conflictRows       []vcs.DiffRow
+	conflictLeftLines  []string
+	conflictRightLines []string
+	conflictOffY       int
+	conflictOffX       int
 	gitOpen      bool
 	gitMode      gitPanelMode
 	gitFiles     []vcs.FileStatus
@@ -162,11 +167,46 @@ type Model struct {
 	chatCh     <-chan chatEvent
 	chatCancel context.CancelFunc
 
+	// Inline AI request (Ctrl+I)
+	aiInlineOpen     bool
+	aiInlineInput    []rune
+	aiInlineOriginal string
+	aiInlineSelStart [2]int
+	aiInlineSelEnd   [2]int
+	aiInlineProposal string
+	aiInlineBusy     bool
+	aiInlineCh       <-chan chatEvent
+	aiInlineCancel   context.CancelFunc
+	aiReviewMode     bool
+	aiReviewRows     []vcs.DiffRow
+	aiReviewLeft     []string
+	aiReviewRight    []string
+	aiReviewOffY     int
+	aiReviewOffX     int
+
 	quitConfirm bool
 	pendingQuit bool
 }
 
 var debugKeys = os.Getenv("DMED_DEBUG_KEYS") != ""
+
+// Russian ЙЦУКЕН → English QWERTY mapping for layout-independent keybindings.
+var ruToEn = map[rune]rune{
+	'й': 'q', 'ц': 'w', 'у': 'e', 'к': 'r', 'е': 't', 'н': 'y',
+	'г': 'u', 'ш': 'i', 'щ': 'o', 'з': 'p', 'х': '[', 'ъ': ']',
+	'ф': 'a', 'ы': 's', 'в': 'd', 'а': 'f', 'п': 'g', 'р': 'h',
+	'о': 'j', 'л': 'k', 'д': 'l', 'ж': ';', 'э': '\'',
+	'я': 'z', 'ч': 'x', 'с': 'c', 'м': 'v', 'и': 'b', 'т': 'n',
+	'ь': 'm', 'б': ',', 'ю': '.',
+	'ё': '`',
+}
+
+func normalizeKey(r rune) rune {
+	if en, ok := ruToEn[r]; ok {
+		return en
+	}
+	return r
+}
 
 func New(paths ...string) Model {
 	fe := make(chan string, 16)
@@ -492,7 +532,7 @@ func waitForFileEvent(ch <-chan string) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh))
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh), waitForInlineOutput(m.aiInlineCh))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -514,6 +554,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.msg = "reloaded: " + t.name(m.baseDir())
 					}
 				} else {
+					if data, err := os.ReadFile(t.path); err == nil {
+						diskText := strings.ReplaceAll(string(data), "\r\n", "\n")
+						bufText := t.buf.Text()
+						m.conflictRows = vcs.SideBySide(bufText, diskText)
+						m.conflictLeftLines = strings.Split(strings.TrimRight(bufText, "\n"), "\n")
+						m.conflictRightLines = strings.Split(strings.TrimRight(diskText, "\n"), "\n")
+						m.conflictOffY = 0
+						m.conflictOffX = 0
+					}
 					m.conflictOpen = true
 					m.conflictPath = path
 					m.msg = "file modified externally: (r)eload or (i)gnore?"
@@ -564,6 +613,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chatCancel = nil
 		}
 		return m, nil
+	case InlineOutputMsg:
+		cmd := m.handleInlineOutput(msg)
+		return m, cmd
 	case tea.KeyMsg:
 		if debugKeys {
 			fmt.Fprintf(os.Stderr, "dmed: key %q\n", msg.String())
@@ -585,6 +637,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if r := msg.Runes[0]; r < 32 && r != '\t' {
 			msg = tea.KeyMsg{Type: tea.KeyType(r)}
 		}
+	}
+	// Normalize Russian ЙЦУКЕН → English QWERTY for layout-independent keys.
+	if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+		nr := make([]rune, len(msg.Runes))
+		for i, r := range msg.Runes {
+			nr[i] = normalizeKey(r)
+		}
+		msg = tea.KeyMsg{Type: msg.Type, Runes: nr, Alt: msg.Alt}
 	}
 	s := msg.String()
 	// Quit/close keys must work in every mode (tree, git panel, prompts, search...).
@@ -626,11 +686,46 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 				}
 			}
 			m.conflictOpen = false
+			m.conflictRows = nil
 			return nil
 		case "i", "I", "esc":
 			m.conflictOpen = false
+			m.conflictRows = nil
 			m.msg = "kept buffer changes"
 			return nil
+		case "up", "k":
+			if m.conflictOffY > 0 {
+				m.conflictOffY--
+			}
+		case "down", "j":
+			if m.conflictOffY < len(m.conflictRows)-1 {
+				m.conflictOffY++
+			}
+		case "pgup":
+			m.conflictOffY -= m.paneViewHeight(m.activePane) / 2
+			if m.conflictOffY < 0 {
+				m.conflictOffY = 0
+			}
+		case "pgdn":
+			m.conflictOffY += m.paneViewHeight(m.activePane) / 2
+			maxOff := len(m.conflictRows) - 1
+			if m.conflictOffY > maxOff {
+				m.conflictOffY = maxOff
+			}
+		case "home", "g":
+			m.conflictOffY = 0
+		case "end", "G":
+			m.conflictOffY = len(m.conflictRows) - 1
+			if m.conflictOffY < 0 {
+				m.conflictOffY = 0
+			}
+		case "left", "h":
+			m.conflictOffX -= 8
+			if m.conflictOffX < 0 {
+				m.conflictOffX = 0
+			}
+		case "right", "l":
+			m.conflictOffX += 8
 		}
 		return nil
 	}
@@ -670,6 +765,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return m.handleSearch(msg)
 	}
+	if m.aiReviewMode {
+		return m.handleInlineReview(msg)
+	}
+	if m.aiInlineOpen {
+		return m.handleInlineRequest(msg)
+	}
 	if m.quitConfirm {
 		return m.handleQuitConfirm(msg)
 	}
@@ -704,6 +805,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	case "alt+a":
 		m.toggleChat()
+	case "alt+i":
+		m.startInlineRequest()
 	case "ctrl+o":
 		m.startFinder()
 	case "ctrl+p", "ctrl+shift+p", "f2":

@@ -54,6 +54,7 @@ var helpEntries = []helpEntry{
 	{"Ctrl+T", "open file by path"},
 	{"Alt+T", "toggle bottom terminal (Esc closes)"},
 	{"Alt+A", "AI chat panel (local Ollama, right side)"},
+	{"Alt+I", "AI inline rewrite (select text, describe change)"},
 	{"Ctrl+B / F9", "project tree; Ctrl+G switches to Git"},
 	{"↑↓/Enter/←→ in tree", "navigate, open, fold"},
 	{"Alt+←/→", "switch tabs in active pane"},
@@ -136,6 +137,10 @@ func (m Model) View() string {
 	rows = append(rows, m.tabBar())
 	if m.diffViewOpen {
 		rows = append(rows, m.diffViewRows(h)...)
+	} else if m.aiReviewMode {
+		rows = append(rows, renderSideBySide(m.aiReviewLeft, m.aiReviewRight, m.aiReviewRows, m.aiReviewOffY, m.aiReviewOffX, m.width, h)...)
+	} else if m.conflictOpen && len(m.conflictRows) > 0 {
+		rows = append(rows, renderSideBySide(m.conflictLeftLines, m.conflictRightLines, m.conflictRows, m.conflictOffY, m.conflictOffX, m.width, h)...)
 	} else if m.helpOpen {
 		rows = append(rows, m.helpPanel(h)...)
 	} else {
@@ -144,6 +149,12 @@ func (m Model) View() string {
 	bottom := m.statusBar()
 	if m.diffViewOpen {
 		bottom = m.diffBottom()
+	} else if m.aiReviewMode {
+		bottom = m.aiReviewBottom()
+	} else if m.aiInlineOpen {
+		bottom = m.aiInlinePrompt()
+	} else if m.aiInlineBusy {
+		bottom = m.aiInlineBusyLine()
 	} else if m.conflictOpen {
 		bottom = m.conflictLine()
 	} else if m.quitConfirm {
@@ -555,10 +566,15 @@ func (m Model) gitPanel(h int) []string {
 // the old text, right column the current text. The diff rail is drawn over
 // the full editor width (no sidebar while the diff is open).
 func (m Model) diffViewRows(h int) []string {
-	w := m.width
+	return renderSideBySide(m.diffHeadLines, m.diffRightLines, m.diffRows, m.diffOffsetY, m.diffOffsetX, m.width, h)
+}
+
+// renderSideBySide renders a two-column diff view. Used by git diff, AI inline
+// review, and conflict preview.
+func renderSideBySide(leftLines, rightLines []string, diffRows []vcs.DiffRow, offsetY, offsetX, w, h int) []string {
 	half := (w - 1) / 2
 
-	numW := len(strconv.Itoa(maxInt(len(m.diffHeadLines), len(m.diffRightLines)))) + 1
+	numW := len(strconv.Itoa(maxInt(len(leftLines), len(rightLines)))) + 1
 	if numW < 3 {
 		numW = 3
 	}
@@ -572,12 +588,12 @@ func (m Model) diffViewRows(h int) []string {
 
 	rows := make([]string, h)
 	for row := 0; row < h; row++ {
-		idx := m.diffOffsetY + row
+		idx := offsetY + row
 		var left, right string
-		if idx < len(m.diffRows) {
-			dr := m.diffRows[idx]
-			left = m.diffCell(dr.Left, dr.Type, false, numW, contentW)
-			right = m.diffCell(dr.Right, dr.Type, true, numW, contentW)
+		if idx < len(diffRows) {
+			dr := diffRows[idx]
+			left = renderDiffCell(leftLines, dr.Left, dr.Type, false, numW, contentW, offsetX)
+			right = renderDiffCell(rightLines, dr.Right, dr.Type, true, numW, contentW, offsetX)
 		} else {
 			left = strings.Repeat(" ", half)
 			right = strings.Repeat(" ", half)
@@ -587,19 +603,15 @@ func (m Model) diffViewRows(h int) []string {
 	return rows
 }
 
-func (m Model) diffCell(lineIdx int, dt vcs.DiffType, rightSide bool, numW, contentW int) string {
+func renderDiffCell(lines []string, lineIdx int, dt vcs.DiffType, rightSide bool, numW, contentW, offsetX int) string {
 	half := numW + 2 + contentW
 	if lineIdx < 0 {
 		return strings.Repeat(" ", half)
 	}
-	lines := m.diffRightLines
-	if !rightSide {
-		lines = m.diffHeadLines
-	}
 	text := ""
 	if lineIdx < len(lines) {
 		r := []rune(lines[lineIdx])
-		lo := m.diffOffsetX
+		lo := offsetX
 		if lo > len(r) {
 			lo = len(r)
 		}
@@ -762,6 +774,21 @@ func (m Model) chatPanel(h int) []string {
 func (m Model) conflictLine() string {
 	fname := filepath.Base(m.conflictPath)
 	line := statusHiStyle.Render(" CONFLICT ") + statusStyle.Render(fmt.Sprintf(" File modified on disk: [R]eload / [I]gnore? (%s)", fname))
+	if len(m.conflictRows) > 0 {
+		added, modified, deleted := 0, 0, 0
+		for _, dr := range m.conflictRows {
+			switch dr.Type {
+			case vcs.DiffAdded:
+				added++
+			case vcs.DiffModified:
+				modified++
+			case vcs.DiffDeleted:
+				deleted++
+			}
+		}
+		line += hintStyle.Render(fmt.Sprintf("  +%d ~%d -%d", added, modified, deleted))
+		line += hintStyle.Render("  (↑↓ scroll)")
+	}
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -812,6 +839,54 @@ func (m Model) replaceLine() string {
 	}
 	hint := "  (Tab: switch, Enter: replace, Ctrl+A: all, Esc: close)"
 	line += hintStyle.Render(hint)
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+func (m Model) aiInlinePrompt() string {
+	line := statusHiStyle.Render(" AI instruction: ") + statusStyle.Render(string(m.aiInlineInput)) + cursorStyle.Render(" ")
+	hint := "  (Enter: submit, Esc: cancel)"
+	line += hintStyle.Render(hint)
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+func (m Model) aiInlineBusyLine() string {
+	preview := m.aiInlineProposal
+	if len(preview) > 60 {
+		preview = preview[:60] + "..."
+	}
+	line := statusHiStyle.Render(" AI thinking... ") + hintStyle.Render(preview)
+	hint := "  (Esc to cancel)"
+	line += hintStyle.Render(hint)
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+func (m Model) aiReviewBottom() string {
+	added, modified, deleted := 0, 0, 0
+	for _, dr := range m.aiReviewRows {
+		switch dr.Type {
+		case vcs.DiffAdded:
+			added++
+		case vcs.DiffModified:
+			modified++
+		case vcs.DiffDeleted:
+			deleted++
+		}
+	}
+	line := statusHiStyle.Render(" AI diff ") +
+		hintStyle.Render(fmt.Sprintf("  +%d ~%d -%d", added, modified, deleted)) +
+		hintStyle.Render("  (y: accept, n: reject, ↑↓ scroll)")
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -1015,7 +1090,7 @@ func (m Model) statusBar() string {
 	}
 	right := fmt.Sprintf("Ln %d, Col %d ", t.buf.CurLine()+1, t.buf.Col()+1)
 	hint := ""
-	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen {
+	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode {
 		hint = "F1 help "
 		if m.layout != splitNone {
 			hint += "F8 pane "
