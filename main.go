@@ -10,7 +10,7 @@ import (
 )
 
 // version is set via ldflags: -X main.version=0.3.0
-var version = "0.3.0"
+var version = "dev"
 
 func main() {
 	if len(os.Args) > 1 {
