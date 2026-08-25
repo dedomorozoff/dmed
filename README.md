@@ -1,7 +1,9 @@
 # dmed (Developer-Machine Editor)
 
-[![Go Version](https://shields.io)](https://github.com/dedomorozoff/dmed)
-[![License](https://shields.io)](https://github.com)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/dedomorozoff/dmed)](https://github.com/dedomorozoff/dmed)
+[![License](https://img.shields.io/github/license/dedomorozoff/dmed)](https://github.com/dedomorozoff/dmed/blob/main/LICENSE)
+[![Last Commit](https://img.shields.io/github/last-commit/dedomorozoff/dmed)](https://github.com/dedomorozoff/dmed)
+[![Issues](https://img.shields.io/github/issues/dedomorozoff/dmed)](https://github.com/dedomorozoff/dmed/issues)
 
 **dmed** is a terminal-native, keyboard-driven code editor designed for the era of AI-assisted development. Built entirely in Go, it treats AI agents not as plugins, but as **first-class participants** in your workflow. 
 
