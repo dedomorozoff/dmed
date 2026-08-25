@@ -125,6 +125,8 @@ rpm: build-linux-amd64 ## Build .rpm package (x86_64)
 	echo 'Summary:        Terminal code editor with AI agents' >> dist/rpm/SPECS/dmed.spec
 	echo 'License:        BSD-3-Clause' >> dist/rpm/SPECS/dmed.spec
 	echo 'URL:            https://github.com/user/dmed' >> dist/rpm/SPECS/dmed.spec
+	echo 'Source0:        dmed' >> dist/rpm/SPECS/dmed.spec
+	echo 'Source1:        dmed.1' >> dist/rpm/SPECS/dmed.spec
 	echo '' >> dist/rpm/SPECS/dmed.spec
 	echo '%description' >> dist/rpm/SPECS/dmed.spec
 	echo 'A terminal-native code editor with AI agents as first-class' >> dist/rpm/SPECS/dmed.spec
@@ -157,9 +159,10 @@ pkg: build-linux-amd64 ## Build .pkg.tar.zst (Arch, x86_64)
 	echo 'license=("BSD-3-Clause")' >> dist/pkg/dmed/PKGBUILD
 	echo 'source=()' >> dist/pkg/dmed/PKGBUILD
 	echo 'sha256sums=()' >> dist/pkg/dmed/PKGBUILD
-	echo 'package()' >> dist/pkg/dmed/PKGBUILD
-	echo '  install -D -m 755 "$srcdir/usr/bin/dmed" "$pkgdir/usr/bin/dmed"' >> dist/pkg/dmed/PKGBUILD
-	echo '  install -D -m 644 "$srcdir/usr/share/man/man1/dmed.1" "$pkgdir/usr/share/man/man1/dmed.1"' >> dist/pkg/dmed/PKGBUILD
+	echo 'package() {' >> dist/pkg/dmed/PKGBUILD
+	echo '  install -D -m 755 "$startdir/usr/bin/dmed" "$pkgdir/usr/bin/dmed"' >> dist/pkg/dmed/PKGBUILD
+	echo '  install -D -m 644 "$startdir/usr/share/man/man1/dmed.1" "$pkgdir/usr/share/man/man1/dmed.1"' >> dist/pkg/dmed/PKGBUILD
+	echo '}' >> dist/pkg/dmed/PKGBUILD
 	cd dist/pkg/dmed && makepkg -f --noarchive
 	mv dist/pkg/dmed/*.pkg.tar.zst dist/
 	@echo "Built: dist/dmed-$(VERSION)-1-x86_64.pkg.tar.zst"
@@ -176,7 +179,7 @@ termux: build-linux-arm64 ## Build Termux .deb (aarch64)
 	echo "Homepage: https://github.com/user/dmed" >> dist/termux/dmed_$(VERSION)_aarch64/DEBIAN/control
 	echo "Maintainer: dmed contributors" >> dist/termux/dmed_$(VERSION)_aarch64/DEBIAN/control
 	echo "Description: Terminal code editor with AI agents" >> dist/termux/dmed_$(VERSION)_aarch64/DEBIAN/control
-	echo " Version: $(VERSION)" >> dist/termux/dmed_$(VERSION)_aarch64/DEBIAN/control
+	echo "Version: $(VERSION)" >> dist/termux/dmed_$(VERSION)_aarch64/DEBIAN/control
 	dpkg-deb --build dist/termux/dmed_$(VERSION)_aarch64 dist/dmed_$(VERSION)_aarch64-termux.deb
 	@echo "Built: dist/dmed_$(VERSION)_aarch64-termux.deb"
 
