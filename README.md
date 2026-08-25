@@ -1,9 +1,19 @@
-# dmed
+# dmed (Developer-Machine Editor)
 
-Terminal-native code editor with AI agents as first-class participants.
+[![Go Version](https://shields.io)](https://golang.org)
+[![License](https://shields.io)](LICENSE)
 
-AI agents read, propose and apply changes to your code — but **humans approve
-every diff**. Nothing is modified behind your back.
+**dmed** is a terminal-native, keyboard-driven code editor designed for the era of AI-assisted development. Built entirely in Go, it treats AI agents not as plugins, but as **first-class participants** in your workflow. 
+
+AI agents can read, propose, and apply changes directly to your codebase — but **humans approve every single diff**. Nothing ever happens behind your back.
+
+## Key Highlights
+
+*   **Keyboard-First & Terminal-Native:** Fast, lightweight, and works seamlessly over SSH.
+*   **Human-in-the-Loop AI:** High-level autonomy for agents (Ollama, OpenAI, DeepSeek, etc.) with 100% human control via explicit diff reviews.
+*   **Zero-Dependency Git:** Native side-by-side diffs, gutter indicators, and staging directly from the editor without needing an external git binary.
+*   **All-in-One Dev Environment:** Built-in persistent terminal, LSP diagnostics, and smart fuzzy searching out of the box.
+
 
 ## Features
 
