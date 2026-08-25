@@ -66,7 +66,7 @@ var helpEntries = []helpEntry{
 	{"Arrows/Home/End/PgUp/PgDn", "move cursor"},
 	{"Enter/Backspace/Delete/Tab", "edit text"},
 	{"Ctrl+Z / Ctrl+R", "undo / redo"},
-	{"Ctrl+Y", "delete line"},
+	{"Ctrl+Y / Ctrl+D", "delete line / duplicate line"},
 	{"Alt+↑ / Alt+↓", "move line up / down"},
 	{"", ""},
 	{"F1 or Ctrl+E", "toggle this help"},
@@ -1088,6 +1088,12 @@ func (m Model) statusBar() string {
 		mid = statusStyle.Render("  " + m.msg)
 	}
 	right := fmt.Sprintf("Ln %d, Col %d ", t.buf.CurLine()+1, t.buf.Col()+1)
+	fileInfo := ""
+	if t.path != "" {
+		endings := map[string]string{"lf": "LF", "crlf": "CRLF"}
+		enc := strings.ToUpper(t.encoding)
+		fileInfo = fmt.Sprintf("%s %s ", endings[t.lineEnding], enc)
+	}
 	hint := ""
 	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode {
 		hint = "F1 help "
@@ -1095,7 +1101,7 @@ func (m Model) statusBar() string {
 			hint += "F8 pane "
 		}
 	}
-	rightBar := hintStyle.Render(hint) + statusStyle.Render(right)
+	rightBar := hintStyle.Render(hint) + statusStyle.Render(fileInfo) + statusStyle.Render(right)
 	fill := m.width - lipgloss.Width(left) - lipgloss.Width(mid) - lipgloss.Width(rightBar)
 	if fill > 0 {
 		return left + mid + statusStyle.Render(strings.Repeat(" ", fill)) + rightBar

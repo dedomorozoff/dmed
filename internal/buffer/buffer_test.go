@@ -374,3 +374,48 @@ func TestMoveLineUndo(t *testing.T) {
 		t.Fatalf("after undo: %q", b.Text())
 	}
 }
+
+func TestDuplicateLine(t *testing.T) {
+	b := Load("aaa\nbbb\nccc\n")
+	b.SetCursor(1, 0)
+	b.DuplicateLine()
+	if b.Text() != "aaa\nbbb\nbbb\nccc\n" {
+		t.Fatalf("DuplicateLine: %q", b.Text())
+	}
+	if b.CurLine() != 2 {
+		t.Fatalf("cursor after dup: line=%d", b.CurLine())
+	}
+}
+
+func TestDuplicateFirstLine(t *testing.T) {
+	b := Load("aaa\nbbb\n")
+	b.SetCursor(0, 0)
+	b.DuplicateLine()
+	if b.Text() != "aaa\naaa\nbbb\n" {
+		t.Fatalf("DuplicateFirstLine: %q", b.Text())
+	}
+}
+
+func TestDuplicateSelection(t *testing.T) {
+	b := Load("aaa\nbbb\nccc\n")
+	b.SetCursor(0, 0)
+	b.StartSelection()
+	b.MoveDownWithSelect() // select lines 0-1
+	b.DuplicateLine()
+	if b.Text() != "aaa\nbbb\naaa\nbbb\nccc\n" {
+		t.Fatalf("DuplicateSelection: %q", b.Text())
+	}
+}
+
+func TestDuplicateLineUndo(t *testing.T) {
+	b := Load("aaa\nbbb\n")
+	b.SetCursor(0, 0)
+	b.DuplicateLine()
+	if b.Text() != "aaa\naaa\nbbb\n" {
+		t.Fatalf("after dup: %q", b.Text())
+	}
+	b.Undo()
+	if b.Text() != "aaa\nbbb\n" {
+		t.Fatalf("after undo: %q", b.Text())
+	}
+}

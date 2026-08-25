@@ -389,6 +389,32 @@ func (b *Buffer) DeleteLine() {
 	b.goalCol = 0
 }
 
+// DuplicateLine duplicates the current line (or selected lines) below.
+func (b *Buffer) DuplicateLine() {
+	b.beginChange()
+	b.pushUndo()
+	sl, _, el, _ := b.SelectionRange()
+	if !b.HasSelection() {
+		sl = b.line
+		el = b.line
+	}
+	// Copy lines[sl..el] and insert after el
+	dup := make([][]rune, el-sl+1)
+	for i := sl; i <= el; i++ {
+		dup[i-sl] = append([]rune(nil), b.lines[i]...)
+	}
+	newLines := make([][]rune, 0, len(b.lines)+len(dup))
+	newLines = append(newLines, b.lines[:el+1]...)
+	newLines = append(newLines, dup...)
+	if el+1 < len(b.lines) {
+		newLines = append(newLines, b.lines[el+1:]...)
+	}
+	b.lines = newLines
+	b.line = el + 1
+	b.goalCol = b.col
+	b.hasSelection = false
+}
+
 func (b *Buffer) MoveLeft() {
 	b.hasSelection = false
 	b.breakGroup()

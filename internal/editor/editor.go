@@ -28,6 +28,8 @@ type tab struct {
 	syntaxText   string
 	diffCached   vcs.FileDiff
 	diffText     string
+	lineEnding   string // "lf" or "crlf"
+	encoding     string // "utf-8", "utf-16le", "utf-16be", "latin-1"
 }
 
 func (t *tab) name(base string) string {
@@ -35,6 +37,68 @@ func (t *tab) name(base string) string {
 		return "[untitled]"
 	}
 	return shortenPath(base, t.path)
+}
+
+// detectFileInfo analyzes raw bytes to determine line endings and encoding.
+func detectFileInfo(data []byte) (lineEnding, encoding string) {
+	lineEnding = "lf"
+	encoding = "utf-8"
+
+	// Detect BOM
+	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+		encoding = "utf-8"
+		data = data[3:]
+	} else if len(data) >= 2 && data[0] == 0xFF && data[1] == 0xFE {
+		encoding = "utf-16le"
+		data = data[2:]
+	} else if len(data) >= 2 && data[0] == 0xFE && data[1] == 0xFF {
+		encoding = "utf-16be"
+		data = data[2:]
+	}
+
+	// Detect CRLF
+	for _, b := range data {
+		if b == '\r' {
+			lineEnding = "crlf"
+			break
+		}
+	}
+
+	// Check for non-ASCII bytes that aren't valid UTF-8
+	if encoding == "utf-8" {
+		for i := 0; i < len(data); {
+			b := data[i]
+			if b < 0x80 {
+				i++
+			} else if b < 0xC0 {
+				encoding = "latin-1"
+				break
+			} else if b < 0xE0 {
+				if i+1 >= len(data) || data[i+1]&0xC0 != 0x80 {
+					encoding = "latin-1"
+					break
+				}
+				i += 2
+			} else if b < 0xF0 {
+				if i+2 >= len(data) || data[i+1]&0xC0 != 0x80 || data[i+2]&0xC0 != 0x80 {
+					encoding = "latin-1"
+					break
+				}
+				i += 3
+			} else if b < 0xF8 {
+				if i+3 >= len(data) || data[i+1]&0xC0 != 0x80 || data[i+2]&0xC0 != 0x80 || data[i+3]&0xC0 != 0x80 {
+					encoding = "latin-1"
+					break
+				}
+				i += 4
+			} else {
+				encoding = "latin-1"
+				break
+			}
+		}
+	}
+
+	return
 }
 
 func (t *tab) getSyntaxLines() []syntax.HighlightedLine {
@@ -291,7 +355,7 @@ func (m *Model) cur() *tab {
 func (m *Model) openPath(rawPath string) {
 	path := normalizePath(m.baseDir(), rawPath)
 	data, err := os.ReadFile(path)
-	t := tab{path: path, buf: buffer.New()}
+	t := tab{path: path, buf: buffer.New(), lineEnding: "lf", encoding: "utf-8"}
 	if err != nil {
 		if os.IsNotExist(err) {
 			m.msg = "new file: " + path
@@ -299,6 +363,9 @@ func (m *Model) openPath(rawPath string) {
 			m.msg = "open failed: " + err.Error()
 		}
 	} else {
+		le, enc := detectFileInfo(data)
+		t.lineEnding = le
+		t.encoding = enc
 		t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
 	}
 	if m.watcher != nil && path != "" {
@@ -490,7 +557,11 @@ func (m *Model) handleSavePrompt(msg tea.KeyMsg) tea.Cmd {
 			if m.watcher != nil {
 				_ = m.watcher.Watch(path)
 			}
-			if err := os.WriteFile(t.path, []byte(t.buf.Text()), 0o644); err != nil {
+			text := t.buf.Text()
+			if t.lineEnding == "crlf" {
+				text = strings.ReplaceAll(text, "\n", "\r\n")
+			}
+			if err := os.WriteFile(t.path, []byte(text), 0o644); err != nil {
 				m.msg = "save failed: " + err.Error()
 				return nil
 			}
@@ -842,6 +913,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "ctrl+y":
 		m.cur().buf.DeleteLine()
 		m.msg = ""
+	case "ctrl+d":
+		m.cur().buf.DuplicateLine()
+		m.msg = ""
 	case "ctrl+r":
 		if m.cur().buf.Redo() {
 			m.msg = ""
@@ -1004,7 +1078,11 @@ func (m *Model) saveActive() {
 		m.msg = "cannot save: no file name"
 		return
 	}
-	if err := os.WriteFile(t.path, []byte(t.buf.Text()), 0o644); err != nil {
+	text := t.buf.Text()
+	if t.lineEnding == "crlf" {
+		text = strings.ReplaceAll(text, "\n", "\r\n")
+	}
+	if err := os.WriteFile(t.path, []byte(text), 0o644); err != nil {
 		m.msg = "save failed: " + err.Error()
 		return
 	}
