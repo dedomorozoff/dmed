@@ -1,0 +1,214 @@
+.Dd August 24, 2026
+.Dt DMED 1
+.Os
+.Sh NAME
+.Nm dmed
+.Nd terminal code editor with AI agents
+.Sh SYNOPSIS
+.Nm
+.Op Fl h
+.Op Ar file ...
+.Nm
+.Op Fl h
+.Op Ar directory
+.Sh DESCRIPTION
+.Nm
+is a terminal-native code editor with AI agents as first-class participants.
+AI agents read, propose and apply changes to your code, but humans approve
+every diff via diff-preview before anything is modified.
+.Pp
+When invoked with
+.Ar file
+arguments, those files are opened in tabs.
+When invoked with a
+.Ar directory
+argument, the project tree sidebar is shown and the fuzzy finder searches
+within that directory.
+.Pp
+If no arguments are given,
+.Nm
+opens an empty buffer.
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl h , -help
+Show help message and exit.
+.El
+.Sh KEYBINDINGS
+.Ss Navigation
+.Bl -tag -width "Alt+1..9"
+.It Sy Arrows
+Move cursor
+.It Sy Home / End
+Line start / line end
+.It Sy PgUp / PgDn
+Page up / page down
+.It Sy Ctrl+Up/Down
+Scroll without moving cursor
+.El
+.Ss Editing
+.Bl -tag -width "Alt+Up/Down"
+.It Sy Shift+Arrows
+Select text
+.It Sy Ctrl+C / Ctrl+X / Ctrl+V
+Copy / cut / paste
+.It Sy Ctrl+Z / Ctrl+R
+Undo / redo
+.It Sy Ctrl+Y
+Delete line
+.It Sy Alt+Up / Alt+Down
+Move line up / down
+.It Sy Enter / Backspace / Delete
+Standard editing
+.El
+.Ss Files and Tabs
+.Bl -tag -width "Ctrl+O"
+.It Sy Ctrl+S
+Save active tab (untitled: Save As)
+.It Sy Ctrl+T
+Open file by path
+.It Sy Ctrl+O / F3
+Fuzzy file finder
+.It Sy Ctrl+W / Ctrl+X
+Close tab (last tab quits)
+.It Sy Alt+Left / Alt+Right
+Switch tabs
+.It Sy Alt+1..9
+Jump to tab N
+.El
+.Ss Splits and Panels
+.Bl -tag -width "Ctrl+Alt+P"
+.It Sy Ctrl+\e / F6
+Split vertical
+.It Sy Ctrl+Alt+H / F7
+Split horizontal
+.It Sy Ctrl+Alt+P / F8
+Focus other pane
+.It Sy Ctrl+Alt+W
+Close pane
+.It Sy Ctrl+B / F9
+Toggle project tree
+.It Sy Ctrl+G
+Git panel
+.It Sy Alt+T
+Toggle terminal
+.El
+.Ss AI
+.Bl -tag -width "Alt+I"
+.It Sy Alt+A
+Toggle AI chat panel
+.It Sy Alt+I
+Inline rewrite (select text first)
+.It Sy Ctrl+U
+Clear chat history
+.El
+.Ss Search
+.Bl -tag -width "Ctrl+H"
+.It Sy Ctrl+F
+Find in file
+.It Sy Ctrl+H
+Find and replace
+.It Sy F3 / Shift+F3
+Next / previous match
+.El
+.Ss Git
+.Bl -tag -width "Alt+]"
+.It Sy D (in panel)
+Side-by-side diff vs HEAD
+.It Sy Alt+[ / Alt+]
+Previous / next hunk
+.El
+.Ss General
+.Bl -tag -width "Ctrl+P"
+.It Sy Ctrl+P / F2
+Command palette
+.It Sy F1 / Ctrl+E
+Help overlay
+.It Sy Ctrl+Q / Ctrl+C
+Quit
+.El
+.Sh CONFIGURATION
+.Nm
+reads configuration from
+.Pa ~/.dmed.conf
+(global) and
+.Pa .dmed.conf
+in the project root (overrides global).
+Settings hot-reload on save.
+.Pp
+The configuration file uses INI format with the following sections:
+.Ss [editor]
+.Bl -tag -width "syntax_theme"
+.It Sy tab_width Ns = Ns Ar N
+Tab display width (default: 4).
+.It Sy syntax_theme Ns = Ns Ar name
+Chroma syntax theme name (default: monokai).
+.It Sy line_numbers Ns = Ns Ar bool
+Show line numbers (default: true).
+.It Sy skipped_dirs Ns = Ns Ar list
+Comma-separated directories to skip in tree/finder
+(default: .git,node_modules).
+.El
+.Ss [ai]
+.Bl -tag -width "ollama_url"
+.It Sy provider Ns = Ns Ar type
+AI backend: ollama or openai (default: ollama).
+.It Sy model Ns = Ns Ar name
+Model tag (e.g. gpt-4, qwen2.5-coder:7b).
+.It Sy ollama_url Ns = Ns Ar url
+Ollama server URL (default: http://localhost:11434).
+.It Sy api_key Ns = Ns Ar key
+API key for OpenAI-compatible providers.
+.It Sy system_prompt Ns = Ns Ar text
+System prompt for AI conversations.
+.It Sy context_max Ns = Ns Ar N
+Max lines sent as file context (default: 6000).
+.El
+.Ss [ui]
+.Bl -tag -width "chat_width_pct"
+.It Sy tree_width Ns = Ns Ar N
+Project tree sidebar width in columns (default: 25).
+.It Sy chat_width_pct Ns = Ns Ar N
+Chat panel width as percentage of screen (default: 40).
+.El
+.Sh FILES
+.Bl -tag -width "~/.dmed.conf"
+.It Pa ~/.dmed.conf
+Global configuration file.
+.It Pa ./.dmed.conf
+Project-level configuration (overrides global).
+.It Pa ./.dmed-session.json
+Session state (open tabs, cursor positions).
+.El
+.Sh ENVIRONMENT
+.Bl -tag -width "DMED_MODEL"
+.It Ev DMED_MODEL
+Override the default AI model.
+.It Ev DMED_OLLAMA_URL
+Override the Ollama server URL.
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh EXAMPLES
+Open a file:
+.Pp
+.Dl $ dmed main.go
+.Pp
+Open a project directory:
+.Pp
+.Dl $ dmed .
+.Pp
+Open multiple files:
+.Pp
+.Dl $ dmed src/*.go
+.Pp
+With AI configured for OpenAI:
+.Bd -literal -offset indent
+[ai]
+provider = openai
+model = gpt-4
+api_key = sk-...
+.Ed
+.Sh AUTHORS
+.An dmed contributors
+.Sh LICENSE
+BSD 3-Clause. See the LICENSE file for details.
