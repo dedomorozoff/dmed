@@ -133,11 +133,9 @@ rpm: build-linux-amd64 ## Build .rpm package (x86_64)
 	echo 'participants. Supports Ollama and OpenAI-compatible backends.' >> dist/rpm/SPECS/dmed.spec
 	echo '' >> dist/rpm/SPECS/dmed.spec
 	echo '%install' >> dist/rpm/SPECS/dmed.spec
-	echo 'mkdir -p %{buildroot}/usr/bin %{buildroot}/usr/share/man/man1' >> dist/rpm/SPECS/dmed.spec
-	echo 'cp %{_topdir}/SOURCES/dmed %{buildroot}/usr/bin/dmed' >> dist/rpm/SPECS/dmed.spec
-	echo 'cp %{_topdir}/SOURCES/dmed.1 %{buildroot}/usr/share/man/man1/dmed.1' >> dist/rpm/SPECS/dmed.spec
-	echo 'chmod 755 %{buildroot}/usr/bin/dmed' >> dist/rpm/SPECS/dmed.spec
-	echo 'chmod 644 %{buildroot}/usr/share/man/man1/dmed.1' >> dist/rpm/SPECS/dmed.spec
+	echo 'mkdir -p %{buildroot}%{_prefix}/bin %{buildroot}%{_prefix}/share/man/man1' >> dist/rpm/SPECS/dmed.spec
+	echo 'install -D -m 755 %{_topdir}/SOURCES/dmed %{buildroot}%{_prefix}/bin/dmed' >> dist/rpm/SPECS/dmed.spec
+	echo 'install -D -m 644 %{_topdir}/SOURCES/dmed.1 %{buildroot}%{_prefix}/share/man/man1/dmed.1' >> dist/rpm/SPECS/dmed.spec
 	echo '' >> dist/rpm/SPECS/dmed.spec
 	echo '%files' >> dist/rpm/SPECS/dmed.spec
 	echo '/usr/bin/dmed' >> dist/rpm/SPECS/dmed.spec
