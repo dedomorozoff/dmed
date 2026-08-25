@@ -142,7 +142,7 @@ rpm: build-linux-amd64 ## Build .rpm package (x86_64)
 	echo '%files' >> dist/rpm/SPECS/dmed.spec
 	echo '/usr/bin/dmed' >> dist/rpm/SPECS/dmed.spec
 	echo '/usr/share/man/man1/dmed.1' >> dist/rpm/SPECS/dmed.spec
-	rpmbuild --define "_topdir $(CURDIR)/dist/rpm" --define "_buildrootdir %{_topdir}/BUILD" -ba dist/rpm/SPECS/dmed.spec
+	rpmbuild --define "_topdir $(CURDIR)/dist/rpm" -ba dist/rpm/SPECS/dmed.spec
 	@echo "Built: dist/rpm/RPMS/x86_64/dmed-$(VERSION)-1.*.rpm"
 
 # Arch Linux (.pkg.tar.zst)
@@ -166,7 +166,7 @@ pkg: build-linux-amd64 ## Build .pkg.tar.zst (Arch, x86_64)
 	echo '  install -D -m 755 "$$startdir/usr/bin/dmed" "$$pkgdir/usr/bin/dmed"' >> dist/pkg/dmed/PKGBUILD
 	echo '  install -D -m 644 "$$startdir/usr/share/man/man1/dmed.1" "$$pkgdir/usr/share/man/man1/dmed.1"' >> dist/pkg/dmed/PKGBUILD
 	echo '}' >> dist/pkg/dmed/PKGBUILD
-	cd dist/pkg/dmed && makepkg -f --noarchive
+	cd dist/pkg/dmed && makepkg -f
 	mv dist/pkg/dmed/*.pkg.tar.zst dist/
 	@echo "Built: dist/dmed-$(VERSION)-1-x86_64.pkg.tar.zst"
 
