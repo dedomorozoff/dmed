@@ -386,9 +386,9 @@ func (m Model) treePanel(h int) []string {
 			label := e.name
 			if e.isDir {
 				if m.expanded[e.rel] {
-					label = "▾ " + label
+					label = "- " + label
 				} else {
-					label = "▸ " + label
+					label = "+ " + label
 				}
 			} else {
 				label = "  " + label

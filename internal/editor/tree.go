@@ -11,7 +11,7 @@ import (
 
 const (
 	treeMaxRows  = 1000
-	treeMinWidth = 60
+	treeMinWidth = 36
 )
 
 type treeEntry struct {

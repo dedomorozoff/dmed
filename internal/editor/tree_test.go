@@ -145,7 +145,7 @@ func TestSidebarFocusLifecycle(t *testing.T) {
 		t.Fatal("ctrl+b twice more must hide panel")
 	}
 	v := m.View()
-	if strings.Contains(v, "▸ sub") {
+	if strings.Contains(v, "+ sub") {
 		t.Fatal("hidden sidebar must not render")
 	}
 }
@@ -157,7 +157,7 @@ func TestViewRendersTreePanel(t *testing.T) {
 	m := New(root)
 	m.width, m.height = 100, 24
 	v := m.View()
-	if !strings.Contains(v, "▸ sub") || !strings.Contains(v, "b.txt") {
+	if !strings.Contains(v, "+ sub") || !strings.Contains(v, "b.txt") {
 		t.Fatalf("sidebar must render entries, got:\n%s", v)
 	}
 }
