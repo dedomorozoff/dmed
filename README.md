@@ -2,9 +2,8 @@
 
 Terminal-native code editor with AI agents as first-class participants.
 
-Think Zed, but living entirely in your shell. AI agents read, propose and
-apply changes to your code — but **humans approve every diff**. Nothing is
-modified behind your back.
+AI agents read, propose and apply changes to your code — but **humans approve
+every diff**. Nothing is modified behind your back.
 
 ## Features
 
@@ -199,4 +198,4 @@ See [ROADMAP.md](ROADMAP.md) for full details.
 
 ## License
 
-TBD
+BSD 3-Clause. See [LICENSE](LICENSE).
