@@ -339,3 +339,112 @@ func TestSaveWritesActiveTab(t *testing.T) {
 		t.Fatal("must be clean after save")
 	}
 }
+
+func TestWindowTitle(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "foo.go", "package main\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+	v := m.View()
+	if v.WindowTitle == "" {
+		t.Fatal("window title must not be empty")
+	}
+	if !strings.Contains(v.WindowTitle, "foo.go") {
+		t.Fatalf("window title must contain file name, got %q", v.WindowTitle)
+	}
+}
+
+func TestTerminalCursor(t *testing.T) {
+	m := New()
+	m.width, m.height = 80, 24
+	// Cursor should start at (0,0) — gutter + col 0, tab bar offset 1.
+	x, y := m.cursorScreenPos()
+	if x < 0 || y != 1 {
+		t.Fatalf("initial cursor pos: x=%d y=%d, want x>=0 y=1", x, y)
+	}
+	// Move right a few times.
+	for i := 0; i < 5; i++ {
+		m.cur().buf.MoveRight()
+	}
+	x, y = m.cursorScreenPos()
+	if x < 0 {
+		t.Fatalf("cursor x must be >= 0 after move right, got %d", x)
+	}
+}
+
+func TestOSC52Clipboard(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "clip.txt", "hello world\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	// Select "hello".
+	for i := 0; i < 5; i++ {
+		m.cur().buf.MoveRightWithSelect()
+	}
+
+	// Copy.
+	m = press(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if m.clipboard != "hello" {
+		t.Fatalf("clipboard = %q, want 'hello'", m.clipboard)
+	}
+
+	// Move to end of line (clears selection).
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnd})
+
+	// Paste.
+	m = press(m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
+	if !strings.HasPrefix(m.cur().buf.Text(), "hello worldhello") {
+		t.Fatalf("after paste: %q", m.cur().buf.Text())
+	}
+}
+
+func TestMouseScroll(t *testing.T) {
+	dir := t.TempDir()
+	lines := ""
+	for i := 0; i < 50; i++ {
+		lines += "line " + string(rune('a'+i%26)) + "\n"
+	}
+	f := writeTemp(t, dir, "scroll.txt", lines)
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	p := m.curPane()
+	if p.offsetY != 0 {
+		t.Fatalf("initial scroll offset must be 0, got %d", p.offsetY)
+	}
+
+	// Simulate mouse wheel down.
+	_ = m.handleMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	if p.offsetY != 1 {
+		t.Fatalf("after wheel down: offset=%d, want 1", p.offsetY)
+	}
+
+	// Simulate mouse wheel up.
+	_ = m.handleMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if p.offsetY != 0 {
+		t.Fatalf("after wheel up: offset=%d, want 0", p.offsetY)
+	}
+}
+
+func TestMouseClick(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "click.txt", "hello\nworld\nfoo\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	// Click on the first editor row, at the gutter+space after leftRail.
+	// Row 1 = first editor line (y=1 in 0-indexed). x must skip gutter.
+	gw := m.gutterWidthForTab(&m.tabs[0])
+	leftW := m.leftRailWidth()
+	_ = m.handleMouseClick(tea.MouseClickMsg{X: leftW + gw + 2, Y: 1})
+
+	// Cursor should be on line 0.
+	if m.cur().buf.CurLine() != 0 {
+		t.Fatalf("curLine = %d, want 0", m.cur().buf.CurLine())
+	}
+	// Column should be 2 (at 'l' in "hello").
+	if m.cur().buf.Col() != 2 {
+		t.Fatalf("col = %d, want 2", m.cur().buf.Col())
+	}
+}

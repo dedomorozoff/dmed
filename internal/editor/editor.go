@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/atotto/clipboard"
 
 	"dmed/internal/ai"
 	"dmed/internal/buffer"
@@ -253,6 +254,9 @@ type Model struct {
 	quitConfirm bool
 	quitTab     bool  // true if confirming close of a single tab (not quit)
 	pendingQuit bool
+
+	// Mouse state
+	mouseDown bool
 }
 
 var debugKeys = os.Getenv("DMED_DEBUG_KEYS") != ""
@@ -778,6 +782,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case InlineOutputMsg:
 		cmd := m.handleInlineOutput(msg)
 		return m, cmd
+	case tea.MouseClickMsg:
+		cmd := m.handleMouseClick(msg)
+		return m, cmd
+	case tea.MouseWheelMsg:
+		cmd := m.handleMouseWheel(msg)
+		return m, cmd
+	case tea.MouseReleaseMsg:
+		m.mouseDown = false
+	case tea.MouseMotionMsg:
+		if m.mouseDown {
+			cmd := m.handleMouseMotion(msg)
+			return m, cmd
+		}
+	case tea.PasteMsg:
+		text := msg.String()
+		if text != "" {
+			m.cur().buf.InsertText(text)
+			m.msg = "pasted"
+		}
 	case tea.KeyPressMsg:
 		if debugKeys {
 			fmt.Fprintf(os.Stderr, "dmed: key %q\n", msg.String())
@@ -816,6 +839,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+c":
 		if m.cur().buf.HasSelection() {
 			m.clipboard = m.cur().buf.SelectedText()
+			clipboard.WriteAll(m.clipboard)
 			m.msg = "copied to clipboard"
 			return nil
 		}
@@ -825,6 +849,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+x":
 		if m.cur().buf.HasSelection() {
 			m.clipboard = m.cur().buf.SelectedText()
+			clipboard.WriteAll(m.clipboard)
 			m.cur().buf.DeleteSelection()
 			m.msg = "cut to clipboard"
 			return nil
@@ -1008,10 +1033,14 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+alt+w":
 		m.closePane()
 	case "ctrl+v":
+		if sysClip, err := clipboard.ReadAll(); err == nil && sysClip != "" {
+			m.clipboard = sysClip
+		}
 		if m.clipboard != "" {
 			m.cur().buf.InsertText(m.clipboard)
 			m.msg = ""
 		}
+		return nil
 	case "alt+left":
 		m.switchTab(-1)
 	case "alt+right":
@@ -1461,4 +1490,201 @@ func (m *Model) saveSession() {
 		ActivePane: m.activePane,
 	}
 	_ = session.Save(session.DefaultPath(m.root), sess)
+}
+
+func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
+	y := msg.Y
+	x := msg.X
+
+	// Ignore clicks on the tab bar (row 0), status bar (row viewHeight+1),
+	// finder/palette/terminal panels.  Only handle the editor area.
+	h := m.viewHeight()
+	if y < 1 || y > h {
+		return nil
+	}
+
+	// Map y to a buffer line via the active pane's scroll offset.
+	editorRow := y - 1
+	p := m.curPane()
+	t := &m.tabs[p.tabIdx]
+	ln := editorRow + p.offsetY
+
+	// Clamp line before accessing buffer.
+	if ln >= t.buf.LineCount() {
+		ln = t.buf.LineCount() - 1
+	}
+	if ln < 0 {
+		ln = 0
+	}
+
+	// Map x to a column, accounting for the left rail, gutter, and scroll.
+	leftW := m.leftRailWidth()
+	gw := m.gutterWidthForTab(t)
+
+	clickX := x - leftW - gw + p.offsetX
+	if clickX < 0 {
+		clickX = 0
+	}
+
+	// Convert expanded column back to raw column (accounting for tabs).
+	rawCol := expandedToRawCol(t.buf.LineAt(ln), clickX, m.cfg.Editor.TabWidth)
+
+	lineLen := t.buf.LineLen(ln)
+	if rawCol > lineLen {
+		rawCol = lineLen
+	}
+
+	t.buf.SetCursor(ln, rawCol)
+	t.buf.Deselect()
+
+	// Start mouse drag for potential selection.
+	m.mouseDown = true
+
+	return nil
+}
+
+func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
+	p := m.curPane()
+	if msg.Button == tea.MouseWheelUp {
+		if p.offsetY > 0 {
+			p.offsetY--
+		}
+	} else if msg.Button == tea.MouseWheelDown {
+		t := &m.tabs[p.tabIdx]
+		maxOff := t.buf.LineCount() - m.paneViewHeight(m.activePane)
+		if maxOff < 0 {
+			maxOff = 0
+		}
+		if p.offsetY < maxOff {
+			p.offsetY++
+		}
+	}
+	return nil
+}
+
+func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
+	if !m.mouseDown {
+		return nil
+	}
+	y := msg.Y
+	x := msg.X
+
+	h := m.viewHeight()
+	if y < 1 {
+		y = 1
+	}
+	if y > h {
+		y = h
+	}
+
+	p := m.curPane()
+	t := &m.tabs[p.tabIdx]
+	editorRow := y - 1
+	ln := editorRow + p.offsetY
+
+	// Clamp line before accessing buffer.
+	if ln >= t.buf.LineCount() {
+		ln = t.buf.LineCount() - 1
+	}
+	if ln < 0 {
+		ln = 0
+	}
+
+	leftW := m.leftRailWidth()
+	gw := m.gutterWidthForTab(t)
+	clickX := x - leftW - gw + p.offsetX
+	if clickX < 0 {
+		clickX = 0
+	}
+	rawCol := expandedToRawCol(t.buf.LineAt(ln), clickX, m.cfg.Editor.TabWidth)
+
+	lineLen := t.buf.LineLen(ln)
+	if rawCol > lineLen {
+		rawCol = lineLen
+	}
+
+	t.buf.DragSelect(ln, rawCol)
+	return nil
+}
+
+// expandedToRawCol converts an expanded (tab-expanded) column back to a raw
+// character index, reversing the tab expansion done during rendering.
+func expandedToRawCol(line []rune, expCol, tabWidth int) int {
+	return expandedToRaw(line, expCol, tabWidth)
+}
+
+func expandedToRaw(line []rune, expCol, tabWidth int) int {
+	col := 0
+	for i, r := range line {
+		if r == '\t' {
+			next := ((col / tabWidth) + 1) * tabWidth
+			if expCol < next {
+				return i
+			}
+			col = next
+		} else {
+			if expCol <= col {
+				return i
+			}
+			col++
+		}
+	}
+	return len(line)
+}
+
+// cursorScreenPos returns the (x, y) position of the editor cursor in
+// the terminal content, accounting for the tab bar, left rail, gutter,
+// scroll offsets, and split layout.
+func (m Model) cursorScreenPos() (int, int) {
+	p := m.curPane()
+	t := &m.tabs[p.tabIdx]
+	curLine := t.buf.CurLine()
+	curRawCol := t.buf.Col()
+
+	// Expand cursor column for tabs.
+	raw := t.buf.LineAt(curLine)
+	expCol := 0
+	for i := 0; i < curRawCol && i < len(raw); i++ {
+		if raw[i] == '\t' {
+			expCol += m.cfg.Editor.TabWidth
+		} else {
+			expCol++
+		}
+	}
+
+	gw := m.gutterWidthForTab(t)
+	leftW := m.leftRailWidth()
+
+	// X position within the pane content area.
+	paneX := gw + (expCol - p.offsetX)
+
+	// Determine the screen X based on which pane we're in.
+	var screenX int
+	switch m.layout {
+	case splitVert:
+		if m.activePane == 0 {
+			screenX = leftW + paneX
+		} else {
+			screenX = leftW + m.paneTotalWidth(0) + 1 + paneX
+		}
+	default:
+		screenX = leftW + paneX
+	}
+
+	// Y position: tab bar (1 row) + line offset within the pane.
+	screenY := 1 + (curLine - p.offsetY)
+
+	// For horizontal split, the second pane starts lower.
+	if m.layout == splitHoriz && m.activePane == 1 {
+		screenY += m.paneViewHeight(0) + 1 // +1 for separator
+	}
+
+	// Clamp to valid range.
+	if screenX < 0 {
+		screenX = 0
+	}
+	if screenY < 0 {
+		screenY = 0
+	}
+	return screenX, screenY
 }

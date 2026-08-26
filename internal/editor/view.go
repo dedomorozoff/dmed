@@ -189,6 +189,15 @@ func (m Model) View() tea.View {
 	var v tea.View
 	v.SetContent(lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n")))
 	v.AltScreen = true
+	v.WindowTitle = "dmed — " + m.activeTab().name(m.baseDir())
+	v.MouseMode = tea.MouseModeCellMotion
+
+	// Terminal cursor: positioned at the editor cursor location.
+	if !m.gitOpen && !m.paletteOpen && !m.helpOpen && !m.searchOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
+		cx, cy := m.cursorScreenPos()
+		v.Cursor = tea.NewCursor(cx, cy)
+	}
+
 	return v
 }
 

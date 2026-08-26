@@ -95,12 +95,38 @@ func (b *Buffer) ClearSelection() {
 	b.hasSelection = false
 }
 
+// Deselect clears any active selection.
+func (b *Buffer) Deselect() {
+	b.hasSelection = false
+}
+
+// StartSelection ensures a selection anchor exists at the current cursor.
 func (b *Buffer) StartSelection() {
 	if !b.hasSelection {
 		b.hasSelection = true
 		b.selLine = b.line
 		b.selCol = b.col
 	}
+}
+
+// DragSelect moves the cursor and extends the selection anchor.
+func (b *Buffer) DragSelect(line, col int) {
+	if !b.hasSelection {
+		b.hasSelection = true
+		b.selLine = b.line
+		b.selCol = b.col
+	}
+	b.line = line
+	b.col = col
+	b.clampCol()
+}
+
+// LineLen returns the number of runes in the given line.
+func (b *Buffer) LineLen(i int) int {
+	if i < 0 || i >= len(b.lines) {
+		return 0
+	}
+	return len(b.lines[i])
 }
 
 func (b *Buffer) SelectionRange() (startLine, startCol, endLine, endCol int) {
