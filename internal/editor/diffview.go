@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"dmed/internal/syntax"
 	"dmed/internal/vcs"
 )
 
@@ -63,6 +64,8 @@ func (m *Model) openDiffView() {
 	m.diffHeadLines = splitLines(headText)
 	m.diffRightLines = splitLines(right)
 	m.diffRows = vcs.SideBySide(headText, right)
+	m.diffHeadSyntax = syntax.Default().HighlightBuffer(fs.Path, headText)
+	m.diffRightSyntax = syntax.Default().HighlightBuffer(fs.Path, right)
 	m.diffOffsetY = 0
 	m.diffOffsetX = 0
 	m.diffViewOpen = true

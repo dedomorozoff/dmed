@@ -137,10 +137,15 @@ func (m Model) View() tea.View {
 	rows = append(rows, m.tabBar())
 	if m.diffViewOpen {
 		rows = append(rows, m.diffViewRows(h)...)
+	} else if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0 {
+		// Inline diff preview: show side-by-side diff of selected file/commit
+		// in the editor area while the git panel is open.
+		diffRows := renderSideBySide(m.diffHeadLines, m.diffRightLines, m.diffRows, m.diffOffsetY, m.diffOffsetX, m.editorAreaWidth(), h, m.diffHeadSyntax, m.diffRightSyntax)
+		rows = append(rows, m.composeSidebar(diffRows)...)
 	} else if m.aiReviewMode {
-		rows = append(rows, renderSideBySide(m.aiReviewLeft, m.aiReviewRight, m.aiReviewRows, m.aiReviewOffY, m.aiReviewOffX, m.width, h)...)
+		rows = append(rows, renderSideBySide(m.aiReviewLeft, m.aiReviewRight, m.aiReviewRows, m.aiReviewOffY, m.aiReviewOffX, m.width, h, nil, nil)...)
 	} else if m.conflictOpen && len(m.conflictRows) > 0 {
-		rows = append(rows, renderSideBySide(m.conflictLeftLines, m.conflictRightLines, m.conflictRows, m.conflictOffY, m.conflictOffX, m.width, h)...)
+		rows = append(rows, renderSideBySide(m.conflictLeftLines, m.conflictRightLines, m.conflictRows, m.conflictOffY, m.conflictOffX, m.width, h, nil, nil)...)
 	} else if m.helpOpen {
 		rows = append(rows, m.helpPanel(h)...)
 	} else {
@@ -148,6 +153,8 @@ func (m Model) View() tea.View {
 	}
 	bottom := m.statusBar()
 	if m.diffViewOpen {
+		bottom = m.diffBottom()
+	} else if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0 {
 		bottom = m.diffBottom()
 	} else if m.aiReviewMode {
 		bottom = m.aiReviewBottom()
@@ -539,6 +546,9 @@ func fitPath(p string, w int) string {
 }
 
 func (m Model) gitPanel(h int) []string {
+	if m.gitMode == gitModeLog {
+		return m.gitLogPanel(h)
+	}
 	rows := make([]string, 0, h)
 	start := m.gitOffset
 	end := start + m.gitListHeight()
@@ -574,16 +584,57 @@ func (m Model) gitPanel(h int) []string {
 	return rows
 }
 
+func (m Model) gitLogPanel(h int) []string {
+	rows := make([]string, 0, h)
+	start := m.gitLogOffset
+	end := start + m.gitLogListHeight()
+	for i := start; i < end && len(rows) < h; i++ {
+		entry := m.gitLogEntries[i]
+		// Two-line entry: " hash  subject" on first line, "         author time" on second
+		hashStr := entry.Hash
+		subject := fitPath(entry.Subject, gitPanelWidth-lipgloss.Width(hashStr)-3)
+		first := " " + gitAddStyle.Render(hashStr) + " " + subject
+		// Pad first line
+		visW := lipgloss.Width(first)
+		if pad := gitPanelWidth - 1 - visW; pad > 0 {
+			first += strings.Repeat(" ", pad)
+		}
+		// Second line: relative time + author
+		relTime := entry.When.Format("Jan 02 15:04")
+		if len(entry.Author) > 10 {
+			entry.Author = entry.Author[:10]
+		}
+		second := " " + hintStyle.Render(entry.Author+" "+relTime)
+		visW2 := lipgloss.Width(second)
+		if pad := gitPanelWidth - 1 - visW2; pad > 0 {
+			second += strings.Repeat(" ", pad)
+		}
+
+		if i == m.gitLogSel {
+			rows = append(rows, statusHiStyle.Render(first))
+			rows = append(rows, statusHiStyle.Render(second))
+		} else {
+			rows = append(rows, first)
+			rows = append(rows, second)
+		}
+	}
+	for len(rows) < h {
+		rows = append(rows, strings.Repeat(" ", gitPanelWidth))
+	}
+	return rows
+}
+
 // diffViewRows renders the side-by-side HEAD vs buffer view: left column is
 // the old text, right column the current text. The diff rail is drawn over
 // the full editor width (no sidebar while the diff is open).
 func (m Model) diffViewRows(h int) []string {
-	return renderSideBySide(m.diffHeadLines, m.diffRightLines, m.diffRows, m.diffOffsetY, m.diffOffsetX, m.width, h)
+	return renderSideBySide(m.diffHeadLines, m.diffRightLines, m.diffRows, m.diffOffsetY, m.diffOffsetX, m.width, h, m.diffHeadSyntax, m.diffRightSyntax)
 }
 
 // renderSideBySide renders a two-column diff view. Used by git diff, AI inline
-// review, and conflict preview.
-func renderSideBySide(leftLines, rightLines []string, diffRows []vcs.DiffRow, offsetY, offsetX, w, h int) []string {
+// review, and conflict preview. Pass nil for leftSyntax/rightSyntax to disable
+// syntax highlighting.
+func renderSideBySide(leftLines, rightLines []string, diffRows []vcs.DiffRow, offsetY, offsetX, w, h int, leftSyntax, rightSyntax []syntax.HighlightedLine) []string {
 	half := (w - 1) / 2
 
 	numW := len(strconv.Itoa(maxInt(len(leftLines), len(rightLines)))) + 1
@@ -604,8 +655,15 @@ func renderSideBySide(leftLines, rightLines []string, diffRows []vcs.DiffRow, of
 		var left, right string
 		if idx < len(diffRows) {
 			dr := diffRows[idx]
-			left = renderDiffCell(leftLines, dr.Left, dr.Type, false, numW, contentW, offsetX)
-			right = renderDiffCell(rightLines, dr.Right, dr.Type, true, numW, contentW, offsetX)
+			var ls, rs syntax.HighlightedLine
+			if leftSyntax != nil && idx < len(leftSyntax) {
+				ls = leftSyntax[idx]
+			}
+			if rightSyntax != nil && idx < len(rightSyntax) {
+				rs = rightSyntax[idx]
+			}
+			left = renderDiffCell(leftLines, dr.Left, dr.Type, false, numW, contentW, offsetX, ls)
+			right = renderDiffCell(rightLines, dr.Right, dr.Type, true, numW, contentW, offsetX, rs)
 		} else {
 			left = strings.Repeat(" ", half)
 			right = strings.Repeat(" ", half)
@@ -615,23 +673,25 @@ func renderSideBySide(leftLines, rightLines []string, diffRows []vcs.DiffRow, of
 	return rows
 }
 
-func renderDiffCell(lines []string, lineIdx int, dt vcs.DiffType, rightSide bool, numW, contentW, offsetX int) string {
+func renderDiffCell(lines []string, lineIdx int, dt vcs.DiffType, rightSide bool, numW, contentW, offsetX int, syntaxLine syntax.HighlightedLine) string {
 	half := numW + 2 + contentW
 	if lineIdx < 0 {
 		return strings.Repeat(" ", half)
 	}
 	text := ""
+	var runes []rune
 	if lineIdx < len(lines) {
-		r := []rune(lines[lineIdx])
+		runes = []rune(lines[lineIdx])
 		lo := offsetX
-		if lo > len(r) {
-			lo = len(r)
+		if lo > len(runes) {
+			lo = len(runes)
 		}
 		hi := lo + contentW
-		if hi > len(r) {
-			hi = len(r)
+		if hi > len(runes) {
+			hi = len(runes)
 		}
-		text = string(r[lo:hi])
+		runes = runes[lo:hi]
+		text = string(runes)
 	}
 	marker := ' '
 	var bg *lipgloss.Style
@@ -650,12 +710,42 @@ func renderDiffCell(lines []string, lineIdx int, dt vcs.DiffType, rightSide bool
 		marker = '~'
 		bg = &diffModBg
 	}
-	cell := fmt.Sprintf("%*d %c %s", numW-1, lineIdx+1, marker, text)
+
+	// Build the prefix: line number + marker + space
+	prefix := fmt.Sprintf("%*d %c ", numW-1, lineIdx+1, marker)
+	needed := half - lipgloss.Width(prefix)
+	if needed < 0 {
+		needed = 0
+	}
+
+	if syntaxLine != nil || bg != nil {
+		var out strings.Builder
+		out.WriteString(prefix)
+		for i := 0; i < len(runes) && i < needed; i++ {
+			var st lipgloss.Style
+			if syntaxLine != nil && i+offsetX < len(syntaxLine) {
+				st = syntaxLine[i+offsetX]
+			}
+			if bg != nil {
+				st = st.Background(bg.GetBackground())
+			}
+			out.WriteString(st.Render(string(runes[i])))
+		}
+		// Pad remaining space
+		visW := lipgloss.Width(out.String())
+		if pad := half - visW; pad > 0 {
+			if bg != nil {
+				out.WriteString(bg.Render(strings.Repeat(" ", pad)))
+			} else {
+				out.WriteString(strings.Repeat(" ", pad))
+			}
+		}
+		return out.String()
+	}
+
+	cell := prefix + text
 	if pad := half - len([]rune(cell)); pad > 0 {
 		cell += strings.Repeat(" ", pad)
-	}
-	if bg != nil {
-		cell = bg.Render(cell)
 	}
 	return cell
 }
@@ -672,9 +762,19 @@ func (m Model) diffBottom() string {
 			deleted++
 		}
 	}
-	line := statusHiStyle.Render(" diff ") + statusStyle.Render(m.diffPath) +
+	hint := " Space stage  c commit  a stage-all  r refresh  d full-diff  l log  Tab diff"
+	if m.gitDiffFocused {
+		hint = " j/k scroll  h/l h-scroll  Tab/Esc back"
+	} else if m.gitMode == gitModeLog {
+		hint = " j/k commits  Tab diff  Esc files  r refresh"
+	}
+	modeTag := ""
+	if m.gitMode == gitModeLog {
+		modeTag = statusHiStyle.Render(" LOG ") + " "
+	}
+	line := modeTag + statusHiStyle.Render(" diff ") + statusStyle.Render(m.diffPath) +
 		hintStyle.Render(fmt.Sprintf("  +%d ~%d -%d", added, modified, deleted)) +
-		hintStyle.Render("  (↑↓ scroll, ←→ h-scroll, Esc back)")
+		hintStyle.Render(hint)
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))

@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/format/diff"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
@@ -418,4 +419,144 @@ func (repo *Repo) Commit(msg string) (plumbing.Hash, error) {
 			When:  time.Now(),
 		},
 	})
+}
+
+// LogEntry represents one commit in the history.
+type LogEntry struct {
+	Hash    string // short hash (7 chars)
+	FullHash plumbing.Hash
+	Subject string // first line of commit message
+	Author  string
+	When    time.Time
+}
+
+// Log returns the last n commits on the current branch.
+func (repo *Repo) Log(n int) ([]LogEntry, error) {
+	head, err := repo.r.Head()
+	if err != nil {
+		return nil, err
+	}
+	commitIter, err := repo.r.Log(&git.LogOptions{
+		From:  head.Hash(),
+		Order: git.LogOrderCommitterTime,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var entries []LogEntry
+	err = commitIter.ForEach(func(c *object.Commit) error {
+		if len(entries) >= n {
+			return io.EOF
+		}
+		subject := c.Message
+		if i := strings.IndexByte(subject, '\n'); i >= 0 {
+			subject = subject[:i]
+		}
+		subject = strings.TrimSpace(subject)
+		h := c.Hash.String()
+		if len(h) > 7 {
+			h = h[:7]
+		}
+		entries = append(entries, LogEntry{
+			Hash:     h,
+			FullHash: c.Hash,
+			Subject:  subject,
+			Author:   c.Author.Name,
+			When:     c.Author.When,
+		})
+		return nil
+	})
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	return entries, nil
+}
+
+// FileDiffView is the side-by-side diff for a single file at a given commit.
+type FileDiffView struct {
+	Path       string
+	HeadLines  []string
+	RightLines []string
+	DiffRows   []DiffRow
+}
+
+// CommitDiff returns per-file side-by-side diffs for the given commit
+// compared to its parent (or empty tree for the first commit).
+func (repo *Repo) CommitDiff(hash plumbing.Hash) ([]FileDiffView, error) {
+	commit, err := repo.r.CommitObject(hash)
+	if err != nil {
+		return nil, err
+	}
+
+	var parentTree *object.Tree
+	if commit.NumParents() > 0 {
+		parent, perr := commit.Parent(0)
+		if perr != nil {
+			return nil, perr
+		}
+		pt, terr := parent.Tree()
+		if terr != nil {
+			return nil, terr
+		}
+		parentTree = pt
+	} else {
+		parentTree = &object.Tree{}
+	}
+
+	commitTree, err := commit.Tree()
+	if err != nil {
+		return nil, err
+	}
+
+	changes, err := object.DiffTree(parentTree, commitTree)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []FileDiffView
+	for _, ch := range changes {
+		patch, perr := ch.Patch()
+		if perr != nil {
+			continue
+		}
+
+		for _, fp := range patch.FilePatches() {
+			from, to := fp.Files()
+			filePath := ""
+			if to != nil {
+				filePath = to.Path()
+			} else if from != nil {
+				filePath = from.Path()
+			}
+
+			var oldLines, newLines []string
+			for _, chunk := range fp.Chunks() {
+				lines := strings.Split(chunk.Content(), "\n")
+				// Remove trailing empty string from split
+				if len(lines) > 0 && lines[len(lines)-1] == "" {
+					lines = lines[:len(lines)-1]
+				}
+				switch chunk.Type() {
+				case diff.Equal:
+					oldLines = append(oldLines, lines...)
+					newLines = append(newLines, lines...)
+				case diff.Delete:
+					oldLines = append(oldLines, lines...)
+				case diff.Add:
+					newLines = append(newLines, lines...)
+				}
+			}
+
+			headText := strings.Join(oldLines, "\n")
+			rightText := strings.Join(newLines, "\n")
+			result = append(result, FileDiffView{
+				Path:       filePath,
+				HeadLines:  oldLines,
+				RightLines: newLines,
+				DiffRows:   SideBySide(headText, rightText),
+			})
+		}
+	}
+	return result, nil
 }

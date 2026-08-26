@@ -192,6 +192,12 @@ type Model struct {
 	gitSel       int
 	gitOffset    int
 	gitCommitIn  []rune
+	gitDiffFocused bool // true when diff preview area has focus (scrollable)
+
+	// Git log
+	gitLogEntries []vcs.LogEntry
+	gitLogSel     int
+	gitLogOffset  int
 
 	// Side-by-side diff view (opened from the Git panel)
 	diffViewOpen   bool
@@ -199,6 +205,8 @@ type Model struct {
 	diffRows       []vcs.DiffRow
 	diffHeadLines  []string
 	diffRightLines []string
+	diffHeadSyntax  []syntax.HighlightedLine
+	diffRightSyntax []syntax.HighlightedLine
 	diffOffsetY    int
 	diffOffsetX    int
 
@@ -1503,6 +1511,19 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 		return nil
 	}
 
+	// When git panel is open with inline diff, clicks in the diff area
+	// toggle focus to the diff panel.
+	if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0 {
+		leftW := m.leftRailWidth()
+		if x >= leftW {
+			m.gitDiffFocused = true
+			return nil
+		}
+		// Click on the file list — unfocus diff, don't try to set buffer cursor
+		m.gitDiffFocused = false
+		return nil
+	}
+
 	// Map y to a buffer line via the active pane's scroll offset.
 	editorRow := y - 1
 	p := m.curPane()
@@ -1544,6 +1565,16 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 }
 
 func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
+	// When git diff is focused, scroll the diff instead of the editor.
+	if m.gitDiffFocused {
+		if msg.Button == tea.MouseWheelUp {
+			m.diffOffsetY--
+		} else if msg.Button == tea.MouseWheelDown {
+			m.diffOffsetY++
+		}
+		m.clampDiffScroll(m.viewHeight())
+		return nil
+	}
 	p := m.curPane()
 	if msg.Button == tea.MouseWheelUp {
 		if p.offsetY > 0 {
