@@ -9,8 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-func altT() tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}, Alt: true}
+func altT() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: 't', Mod: tea.ModAlt}
 }
 
 func TestTerminalShellSelection(t *testing.T) {
@@ -65,7 +65,7 @@ func TestTerminalToggleAndInput(t *testing.T) {
 	if string(m.termIn) != "echo dmed_term_ok" {
 		t.Fatalf("input line = %q", string(m.termIn))
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if string(m.termIn) != "" {
 		t.Fatal("enter must clear the input line")
 	}
@@ -80,7 +80,7 @@ func TestTerminalToggleAndInput(t *testing.T) {
 	}
 
 	// Esc closes the panel but keeps the session
-	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.termOpen {
 		t.Fatal("esc must close the terminal panel")
 	}

@@ -55,8 +55,9 @@ func TestEditorGitGutterAndHunkJump(t *testing.T) {
 
 	// Status bar should show branch
 	v := m.View()
-	if !strings.Contains(v.Content, "master") && !strings.Contains(v.Content, "main") {
-		t.Fatalf("view should show git branch in status bar:\n%s", v)
+	plain := strings.Join(plainRows(v.Content), "\n")
+	if !strings.Contains(plain, "master") && !strings.Contains(plain, "main") {
+		t.Fatalf("view should show git branch in status bar:\n%s", v.Content)
 	}
 
 	// Modify buffer (insert a new line)
@@ -67,7 +68,7 @@ func TestEditorGitGutterAndHunkJump(t *testing.T) {
 	// View should render gutter diff marker '+'
 	v = m.View()
 	if !strings.Contains(v.Content, "+") {
-		t.Fatalf("gutter should show '+' for added line:\n%s", v)
+		t.Fatalf("gutter should show '+' for added line:\n%s", v.Content)
 	}
 
 	// Alt+] jump to hunk from line 0
@@ -116,7 +117,7 @@ func TestEditorExternalFileReload(t *testing.T) {
 	}
 
 	// Resolve conflict by reload ('r')
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyRunes, Text: string('r')})
+	m = press(m, tea.KeyPressMsg{Text: string('r')})
 	if m.conflictOpen {
 		t.Fatal("conflict prompt should be closed after 'r'")
 	}
@@ -136,7 +137,7 @@ func TestEditorGitCommitPanel(t *testing.T) {
 	m.saveActive()
 
 	// Open Git panel (Ctrl+G): starts in status mode with the file list
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlG})
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 	if !m.gitOpen {
 		t.Fatal("expected gitOpen true after Ctrl+G")
 	}
@@ -145,18 +146,18 @@ func TestEditorGitCommitPanel(t *testing.T) {
 	}
 	v := m.View()
 	if !strings.Contains(v.Content, "code.go") {
-		t.Fatalf("status mode should list changed files, got:\n%s", v)
+		t.Fatalf("status mode should list changed files, got:\n%s", v.Content)
 	}
 
 	// Stage all ('a'), then switch to commit mode ('c')
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyRunes, Text: string('a')})
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyRunes, Text: string('c')})
+	m = press(m, tea.KeyPressMsg{Text: string('a')})
+	m = press(m, tea.KeyPressMsg{Text: string('c')})
 	if m.gitMode != gitModeCommit {
 		t.Fatalf("expected commit mode after 'c', got %d", m.gitMode)
 	}
 	v = m.View()
 	if !strings.Contains(v.Content, "git commit:") {
-		t.Fatalf("commit mode should show git commit line, got:\n%s", v)
+		t.Fatalf("commit mode should show git commit line, got:\n%s", v.Content)
 	}
 
 	// Type commit message and commit
@@ -188,7 +189,7 @@ func TestEditorGitCommitPanel(t *testing.T) {
 	}
 
 	// Reopening the panel shows a clean state
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlG})
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 	if len(m.gitFiles) != 0 {
 		t.Fatalf("after commit the file list must be empty, got %d files", len(m.gitFiles))
 	}
@@ -204,8 +205,8 @@ func TestEditorGitPanelLeftRail(t *testing.T) {
 	m := New(f)
 	m.width, m.height = 80, 24
 
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlG})
-	rows := plainRows(m.View())
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	rows := plainRows(m.View().Content)
 
 	found := false
 	for _, row := range rows {
@@ -232,30 +233,30 @@ func TestQuitKeysWorkInAllModes(t *testing.T) {
 	// Project tree focused: Ctrl+Q must quit
 	m := New(dir)
 	m.width, m.height = 80, 24
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlB}) // focus tree
+	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl}) // focus tree
 	if !m.treeFocus {
 		t.Fatal("setup: tree must be focused")
 	}
-	if _, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyCtrlQ}); cmd == nil {
+	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl}); cmd == nil {
 		t.Fatal("ctrl+q must quit while tree is focused")
 	}
 
 	// Git panel open (status mode): Ctrl+Q and Ctrl+C must quit
 	m = New(f)
 	m.width, m.height = 80, 24
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlG})
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 	if !m.gitOpen {
 		t.Fatal("setup: git panel must be open")
 	}
-	if _, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyCtrlQ}); cmd == nil {
+	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl}); cmd == nil {
 		t.Fatal("ctrl+q must quit while git panel is open")
 	}
-	if _, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyCtrlC}); cmd == nil {
+	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}); cmd == nil {
 		t.Fatal("ctrl+c must quit while git panel is open")
 	}
 
 	// Git commit mode: typing 'q'/'c' still enters the message; Ctrl+Q quits
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyRunes, Text: string('c')})
+	m = press(m, tea.KeyPressMsg{Text: string('c')})
 	if m.gitMode != gitModeCommit {
 		t.Fatalf("expected commit mode after 'c', got %d", m.gitMode)
 	}
@@ -263,7 +264,7 @@ func TestQuitKeysWorkInAllModes(t *testing.T) {
 	if got := string(m.gitCommitIn); got != "msg q c" {
 		t.Fatalf("commit input corrupted by quit-key letters: %q", got)
 	}
-	if _, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyCtrlQ}); cmd == nil {
+	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl}); cmd == nil {
 		t.Fatal("ctrl+q must quit from commit mode")
 	}
 
@@ -271,8 +272,8 @@ func TestQuitKeysWorkInAllModes(t *testing.T) {
 	m = New(f)
 	m.width, m.height = 80, 24
 	m.cur().buf.Insert('!')
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlG})
-	m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyCtrlQ})
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl})
 	m = m2.(Model)
 	if !m.quitConfirm {
 		t.Fatal("dirty buffer must raise quit confirmation")
@@ -285,8 +286,8 @@ func TestCloseTabKeysWorkInAllModes(t *testing.T) {
 	// Git panel open, no selection: Ctrl+X closes the only tab → quit
 	m := New(f)
 	m.width, m.height = 80, 24
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlG})
-	if _, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyCtrlX}); cmd == nil {
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}); cmd == nil {
 		t.Fatal("ctrl+x must close/quit while git panel is open")
 	}
 
@@ -296,11 +297,11 @@ func TestCloseTabKeysWorkInAllModes(t *testing.T) {
 	if len(mt.tabs) != 1 {
 		t.Fatalf("setup: want single untitled tab, got %d", len(mt.tabs))
 	}
-	mt = press(mt, tea.KeyPressMsg{Code: tea.KeyCtrlB})
+	mt = press(mt, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
 	if !mt.treeFocus {
 		t.Fatal("setup: tree must be focused")
 	}
-	if _, cmd := mt.Update(tea.KeyPressMsg{Code: tea.KeyCtrlW}); cmd == nil {
+	if _, cmd := mt.Update(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl}); cmd == nil {
 		t.Fatal("ctrl+w must close/quit while tree is focused")
 	}
 }
@@ -314,12 +315,12 @@ func TestCutWithSelectionInGitMode(t *testing.T) {
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyHome}) // select whole word
 	m.cur().buf.StartSelection()
 	m.cur().buf.LineEndWithSelect()
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlG})
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 	if !m.gitOpen {
 		t.Fatal("setup: git panel must be open")
 	}
 
-	m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyCtrlX})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	m = m2.(Model)
 	if m.clipboard != "hello" {
 		t.Fatalf("cut must fill clipboard, got %q", m.clipboard)
@@ -349,11 +350,11 @@ func TestGitDiffView(t *testing.T) {
 	m := New(f)
 	m.width, m.height = 80, 24
 
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlG})
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 	if len(m.gitFiles) != 1 {
 		t.Fatalf("setup: want 1 changed file, got %d", len(m.gitFiles))
 	}
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyRunes, Text: string('d')})
+	m = press(m, tea.KeyPressMsg{Text: string('d')})
 	if !m.diffViewOpen {
 		t.Fatal("'d' must open the side-by-side diff")
 	}
@@ -362,7 +363,7 @@ func TestGitDiffView(t *testing.T) {
 	}
 
 	half := (m.width - 1) / 2
-	rows := plainRows(m.View())
+	rows := plainRows(m.View().Content)
 	foundOld, foundNew, foundAdded := false, false, false
 	for _, row := range rows {
 		if i := strings.Index(row, "func main() {}"); i >= 0 {
@@ -418,11 +419,11 @@ func TestSwitchGitTreePanels(t *testing.T) {
 	}
 
 	// Focus the tree ("project mode"), then Ctrl+G must open the Git panel
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlB})
+	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
 	if !m.treeFocus {
 		t.Fatal("setup: tree must be focused")
 	}
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlG})
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 	if !m.gitOpen {
 		t.Fatal("ctrl+g from tree mode must open the git panel")
 	}
@@ -431,7 +432,7 @@ func TestSwitchGitTreePanels(t *testing.T) {
 	}
 
 	// In Git panel mode, Ctrl+B must switch back to the focused tree
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlB})
+	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
 	if m.gitOpen {
 		t.Fatal("ctrl+b in git mode must close the git panel")
 	}
@@ -441,7 +442,7 @@ func TestSwitchGitTreePanels(t *testing.T) {
 
 	// The tree rail actually renders project files again
 	found := false
-	for _, row := range plainRows(m.View()) {
+	for _, row := range plainRows(m.View().Content) {
 		if strings.Contains(row, "code.go") {
 			found = true
 			break
@@ -462,7 +463,7 @@ func TestEditorGitPanelStageToggle(t *testing.T) {
 	m := New(f)
 	m.width, m.height = 80, 24
 
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlG})
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 	if len(m.gitFiles) != 1 || m.gitSel != 0 {
 		t.Fatalf("expected one changed file selected, got %d files sel=%d", len(m.gitFiles), m.gitSel)
 	}
@@ -471,7 +472,7 @@ func TestEditorGitPanelStageToggle(t *testing.T) {
 	}
 
 	// Space stages
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyRunes, Text: string(' ')})
+	m = press(m, tea.KeyPressMsg{Text: string(' ')})
 	if !m.gitFiles[0].IsStaged() {
 		t.Fatal("space must stage the selected file")
 	}
@@ -488,7 +489,7 @@ func TestEditorGitPanelStageToggle(t *testing.T) {
 	}
 
 	// Space again unstages
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyRunes, Text: string(' ')})
+	m = press(m, tea.KeyPressMsg{Text: string(' ')})
 	if m.gitFiles[0].IsStaged() {
 		t.Fatal("second space must unstage the file")
 	}

@@ -38,7 +38,7 @@ func TestSplitVertSeparatorAligned(t *testing.T) {
 	m.tabs[0].buf = buffer.Load("short\na much longer line of text here to shift the separator\nx\n")
 	m.splitVert()
 
-	rows := plainRows(m.View())
+	rows := plainRows(m.View().Content)
 	h := m.viewHeight()
 	sepCol := -1
 	for row := 1; row <= h; row++ {
@@ -60,7 +60,7 @@ func TestSplitHorizRowsFixedWidth(t *testing.T) {
 	m.tabs[0].buf = buffer.Load("short\na much longer line of text here to shift things around a bit\nx\n")
 	m.splitHoriz()
 
-	rows := plainRows(m.View())
+	rows := plainRows(m.View().Content)
 	want := m.editorAreaWidth()
 	h := m.viewHeight()
 	for row := 1; row <= h; row++ {
@@ -84,7 +84,7 @@ func TestCloseTabCollapsesSplit(t *testing.T) {
 	}
 
 	// Close the tab shown in the ACTIVE pane (f1): split collapses, f2 remains.
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlX})
+	m = press(m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	if m.layout != splitNone {
 		t.Fatalf("ctrl+x in split must collapse the split, layout=%d", m.layout)
 	}
@@ -102,7 +102,7 @@ func TestCloseTabCollapsesSplit(t *testing.T) {
 	if m.activeTab().path != f2 {
 		t.Fatalf("setup: expected active pane on f2, got %s", m.activeTab().path)
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlX})
+	m = press(m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	if m.layout != splitNone || len(m.panes) != 1 {
 		t.Fatalf("want collapsed single pane, layout=%d panes=%d", m.layout, len(m.panes))
 	}

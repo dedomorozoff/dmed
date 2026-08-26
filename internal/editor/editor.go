@@ -797,7 +797,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if len(msg.Text) == 1 {
 		if r := rune(msg.Text[0]); r < 32 && r != '\t' {
-			msg = tea.KeyPressMsg{Code: r}
+			msg = tea.KeyPressMsg{Code: r + 96, Mod: tea.ModCtrl}
 		}
 	}
 	// Normalize Russian ЙЦУКЕН → English QWERTY for layout-independent keys.

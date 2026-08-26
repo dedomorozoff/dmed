@@ -27,19 +27,19 @@ func TestSelectionCopyPasteCut(t *testing.T) {
 	}
 
 	// Copy (Ctrl+C)
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = press(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if m.clipboard != "hello" {
 		t.Fatalf("expected clipboard 'hello', got %q", m.clipboard)
 	}
 
 	// Move cursor to end of line
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnd})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnd})
 	if m.cur().buf.HasSelection() {
 		t.Fatal("selection should clear on move")
 	}
 
 	// Paste (Ctrl+V)
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlV})
+	m = press(m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if !strings.HasPrefix(m.cur().buf.Text(), "hello worldhello") {
 		t.Fatalf("after paste: %q", m.cur().buf.Text())
 	}
@@ -49,7 +49,7 @@ func TestSelectionCopyPasteCut(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		m.cur().buf.MoveRightWithSelect()
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlX})
+	m = press(m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	if m.clipboard != "hello" {
 		t.Fatalf("expected clipboard after cut 'hello', got %q", m.clipboard)
 	}

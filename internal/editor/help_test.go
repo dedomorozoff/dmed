@@ -55,7 +55,7 @@ func TestStatusBarShowsHint(t *testing.T) {
 func TestNulByteIsIgnored(t *testing.T) {
 	m := New()
 	m.width, m.height = 80, 24
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyRunes, Text: string('\x00')})
+	m = press(m, tea.KeyPressMsg{Text: string('\x00')})
 	if m.helpOpen {
 		t.Fatal("bare NUL (some stacks send it for bare Ctrl) must not toggle help")
 	}

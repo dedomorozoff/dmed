@@ -15,7 +15,7 @@ func TestSearchFindNextAndPrev(t *testing.T) {
 	m.width, m.height = 80, 24
 
 	// Open search
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlF})
+	m = press(m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
 	if !m.searchOpen {
 		t.Fatal("search must be open after Ctrl+F")
 	}
@@ -71,7 +71,7 @@ func TestSearchReplaceOneAndAll(t *testing.T) {
 	m.width, m.height = 80, 24
 
 	// Open Replace (Ctrl+H)
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlH})
+	m = press(m, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
 	if !m.replaceOpen || !m.searchOpen {
 		t.Fatal("replace and search must be open after Ctrl+H")
 	}
@@ -97,14 +97,14 @@ func TestSearchReplaceOneAndAll(t *testing.T) {
 	}
 
 	// Replace all remaining (Ctrl+A)
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlA})
+	m = press(m, tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
 	expected := "banana orange banana\nbanana pie\n"
 	if m.cur().buf.Text() != expected {
 		t.Fatalf("after replace all: want %q, got %q", expected, m.cur().buf.Text())
 	}
 
 	// Undo (Ctrl+Z)
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlZ})
+	m = press(m, tea.KeyPressMsg{Code: 'z', Mod: tea.ModCtrl})
 	if m.cur().buf.Text() != "banana orange apple\napple pie\n" {
 		t.Fatalf("after undo replace all: %q", m.cur().buf.Text())
 	}
@@ -117,14 +117,15 @@ func TestSearchViewHighlight(t *testing.T) {
 	m := New(f)
 	m.width, m.height = 80, 24
 
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyCtrlF})
+	m = press(m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
 	m = typeStr(m, "main")
 
 	v := m.View()
-	if !strings.Contains(v.Content, "search: main") {
-		t.Fatalf("view must show search bar with query, got:\n%s", v)
+	plain := strings.Join(plainRows(v.Content), "\n")
+	if !strings.Contains(plain, "search: main") {
+		t.Fatalf("view must show search bar with query, got:\n%s", v.Content)
 	}
-	if !strings.Contains(v.Content, "[1/2]") {
-		t.Fatalf("view must show match count [1/2], got:\n%s", v)
+	if !strings.Contains(plain, "[1/2]") {
+		t.Fatalf("view must show match count [1/2], got:\n%s", v.Content)
 	}
 }

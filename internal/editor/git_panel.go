@@ -133,7 +133,7 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 			m.gitSel++
 			m.clampGitScroll()
 		}
-	case " ":
+	case "space":
 		// Toggle stage/unstage for selected file
 		if m.gitSel >= len(m.gitFiles) {
 			break

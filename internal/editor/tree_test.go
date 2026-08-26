@@ -46,9 +46,9 @@ func TestTreeNavigateOpenAndFold(t *testing.T) {
 
 	m := New(root)
 	m.width, m.height = 100, 24
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlB}) // focus tree
-	m = press(m, tea.KeyMsg{Type: tea.KeyDown})  // select b.txt
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnter}) // open file, defocus tree
+	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl}) // focus tree
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})            // select b.txt
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})           // open file, defocus tree
 	if m.activeTab().path != filepath.Join(root, "b.txt") {
 		t.Fatalf("enter on file must open it, got %q", m.activeTab().path)
 	}
@@ -63,9 +63,9 @@ func TestTreeNavigateOpenAndFold(t *testing.T) {
 	}
 
 	// Re-focus tree to navigate to dir
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlB}) // re-focus tree
-	m = press(m, tea.KeyMsg{Type: tea.KeyUp})    // select sub dir
-	m = press(m, tea.KeyMsg{Type: tea.KeyEnter}) // expand sub (stays in tree)
+	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl}) // re-focus tree
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyUp})             // select sub dir
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})          // expand sub (stays in tree)
 	found := false
 	for _, r := range m.treeRows {
 		if r.rel == "sub/a.txt" && r.depth == 2 {
@@ -78,7 +78,7 @@ func TestTreeNavigateOpenAndFold(t *testing.T) {
 	if !m.treeFocus {
 		t.Fatal("enter on dir must keep focus in tree")
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyLeft})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyLeft})
 	for _, r := range m.treeRows {
 		if r.isDir && r.rel == "sub" && m.expanded[r.rel] {
 			t.Fatal("left on expanded dir must collapse it")
@@ -107,7 +107,7 @@ func TestFinderUsesProjectRoot(t *testing.T) {
 
 	m := New(root)
 	m.width, m.height = 100, 24
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	m = press(m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	joined := strings.Join(m.finderHits, ",")
 	if !strings.Contains(joined, "b.txt") || !strings.Contains(joined, "sub/a.txt") {
 		t.Fatalf("finder must walk project root, hits=%v", m.finderHits)
@@ -123,7 +123,7 @@ func TestSidebarFocusLifecycle(t *testing.T) {
 	if m.treeFocus {
 		t.Fatal("tree starts unfocused")
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlB})
+	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
 	if !m.treeFocus {
 		t.Fatal("ctrl+b must focus visible tree")
 	}
@@ -131,7 +131,7 @@ func TestSidebarFocusLifecycle(t *testing.T) {
 	if m.tabs[0].buf.Text() != "\n" {
 		t.Fatal("typing with focused tree must not edit buffer")
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.treeFocus || !m.treeVisible {
 		t.Fatal("esc must return focus to editor keeping panel")
 	}
@@ -139,13 +139,13 @@ func TestSidebarFocusLifecycle(t *testing.T) {
 	if m.tabs[0].buf.Text() != "hi\n" {
 		t.Fatal("typing after esc must edit buffer")
 	}
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlB})
-	m = press(m, tea.KeyMsg{Type: tea.KeyCtrlB})
+	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
 	if m.treeVisible {
 		t.Fatal("ctrl+b twice more must hide panel")
 	}
 	v := m.View()
-	if strings.Contains(v, "+ sub") {
+	if strings.Contains(v.Content, "+ sub") {
 		t.Fatal("hidden sidebar must not render")
 	}
 }
@@ -157,7 +157,7 @@ func TestViewRendersTreePanel(t *testing.T) {
 	m := New(root)
 	m.width, m.height = 100, 24
 	v := m.View()
-	if !strings.Contains(v, "+ sub") || !strings.Contains(v, "b.txt") {
-		t.Fatalf("sidebar must render entries, got:\n%s", v)
+	if !strings.Contains(v.Content, "+ sub") || !strings.Contains(v.Content, "b.txt") {
+		t.Fatalf("sidebar must render entries, got:\n%s", v.Content)
 	}
 }
