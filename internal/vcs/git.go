@@ -3,6 +3,7 @@ package vcs
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -61,6 +62,29 @@ func Open(path string) (*Repo, error) {
 		return nil, err
 	}
 
+	return &Repo{
+		Root: wt.Filesystem.Root(),
+		r:    r,
+	}, nil
+}
+
+// Init creates a new Git repository at path and returns it.
+func Init(path string) (*Repo, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	if fi, serr := os.Stat(abs); serr == nil && !fi.IsDir() {
+		abs = filepath.Dir(abs)
+	}
+	r, err := git.PlainInit(abs, false)
+	if err != nil {
+		return nil, err
+	}
+	wt, err := r.Worktree()
+	if err != nil {
+		return nil, err
+	}
 	return &Repo{
 		Root: wt.Filesystem.Root(),
 		r:    r,

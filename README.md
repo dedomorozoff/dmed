@@ -58,18 +58,32 @@ AI agents can read, propose, and apply changes directly to your codebase — but
 
 ## Install
 
+Install the latest release with a single command:
+
 ```sh
-# Requires Go >= 1.24
-git clone https://github.com/user/dmed.git
+curl -fsSL https://raw.githubusercontent.com/dedomorozoff/dmed/main/install.sh | sh
+```
+
+> Requires a Go toolchain **>= 1.24** for building from source; the one-liner
+> installs a prebuilt binary (no Go needed).
+
+**Alternative — build from source:**
+
+```sh
+git clone https://github.com/dedomorozoff/dmed.git
 cd dmed
 make build        # produces ./dmed.exe (or ./dmed on Linux/macOS)
 ```
 
-Or install directly:
+**Or install with Go directly:**
 
 ```sh
-go install github.com/user/dmed@latest
+go install github.com/dedomorozoff/dmed@latest
 ```
+
+> The one-liner installs to `~/.local/bin` on Linux/macOS/BSD and to
+> `%LOCALAPPDATA%\dmed` on native Windows. Add that directory to your `PATH`
+> if `dmed` isn't found after installing.
 
 ## Usage
 

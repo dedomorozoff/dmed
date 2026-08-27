@@ -40,7 +40,7 @@ type helpEntry struct {
 var helpEntries = []helpEntry{
 	{"Ctrl+S", "save active tab (untitled: Save As)"},
 	{"", ""},
-	{"Ctrl+P / F2", "Command Palette (run any command)"},
+	{"Ctrl+P / F2", "Command Palette (File: New, Save, ...)"},
 	{"Shift+Arrows", "select text range"},
 	{"Ctrl+C / Ctrl+X / Ctrl+V", "copy / cut / paste"},
 	{"", ""},
@@ -471,7 +471,11 @@ func (m Model) helpPanel(h int) []string {
 }
 
 func (m Model) promptLine() string {
-	line := statusHiStyle.Render(" open file: ") + statusStyle.Render(string(m.promptIn)) + cursorStyle.Render(" ")
+	label := " open file: "
+	if m.promptNewFile {
+		label = " new file: "
+	}
+	line := statusHiStyle.Render(label) + statusStyle.Render(string(m.promptIn)) + cursorStyle.Render(" ")
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -529,7 +533,12 @@ func (m Model) gitStatusLine() string {
 		line = statusHiStyle.Render(" git ") + hintStyle.Render("("+r.Branch()+" "+summary+")") +
 			statusStyle.Render(fmt.Sprintf(" %d changed, %d staged ", len(m.gitFiles), staged))
 	}
-	hint := "(Space: stage, A: all, C: commit, D: diff, L: log, B: branch, R: refresh, Esc: close)"
+	hint := ""
+	if r == nil {
+		hint = "(I: init repo, Esc: close)"
+	} else {
+		hint = "(Space: stage, A: all, C: commit, D: diff, L: log, B: branch, R: refresh, Esc: close)"
+	}
 	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))

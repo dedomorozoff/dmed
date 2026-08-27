@@ -149,6 +149,7 @@ type Model struct {
 	promptIn   []rune
 	promptSave bool
 	promptSaveIn []rune
+	promptNewFile bool
 
 	finderOpen  bool
 	finderQ     []rune
@@ -437,6 +438,12 @@ func (m *Model) startPrompt() {
 	m.promptIn = nil
 }
 
+func (m *Model) startNewFilePrompt() {
+	m.promptOpen = true
+	m.promptNewFile = true
+	m.promptIn = nil
+}
+
 func (m *Model) startSavePrompt() {
 	m.promptSave = true
 	m.promptSaveIn = nil
@@ -548,9 +555,11 @@ func (m *Model) handlePrompt(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		m.promptOpen = false
+		m.promptNewFile = false
 	case "enter":
 		path := strings.TrimSpace(string(m.promptIn))
 		m.promptOpen = false
+		m.promptNewFile = false
 		if path != "" {
 			m.openPath(path)
 		}
@@ -839,9 +848,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	}
 	// Normalize Russian ЙЦУКЕН → English QWERTY for layout-independent keys.
-	if len(msg.Text) > 0 {
-		nr := make([]rune, len(msg.Text))
-		for i, r := range msg.Text {
+	// Use []rune so multi-byte UTF-8 (Cyrillic) inputs don't leave trailing NULs.
+	if src := []rune(msg.Text); len(src) > 0 {
+		nr := make([]rune, len(src))
+		for i, r := range src {
 			nr[i] = normalizeKey(r)
 		}
 		msg = tea.KeyPressMsg{Code: nr[0], Text: string(nr), Mod: msg.Mod}

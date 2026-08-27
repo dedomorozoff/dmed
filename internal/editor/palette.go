@@ -19,6 +19,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "save_as", title: "File: Save As...", desc: "Save active buffer to a new path", action: func(m *Model) tea.Cmd { m.startSavePrompt(); return nil }},
 		{id: "close_tab", title: "File: Close Tab", desc: "Ctrl+W — Close active tab", action: func(m *Model) tea.Cmd { return m.closeTab() }},
 		{id: "open", title: "File: Open by Path...", desc: "Ctrl+T — Open file prompt", action: func(m *Model) tea.Cmd { m.startPrompt(); return nil }},
+		{id: "new_file", title: "File: New File...", desc: "Create a new file by path", action: func(m *Model) tea.Cmd { m.startNewFilePrompt(); return nil }},
 		{id: "finder", title: "File: Fuzzy Finder...", desc: "Ctrl+O — Quick file search", action: func(m *Model) tea.Cmd { m.startFinder(); return nil }},
 		{id: "search", title: "Edit: Find in File...", desc: "Ctrl+F — Search text", action: func(m *Model) tea.Cmd { m.startSearch(); return nil }},
 		{id: "replace", title: "Edit: Replace in File...", desc: "Ctrl+H — Find and replace", action: func(m *Model) tea.Cmd { m.startReplace(); return nil }},

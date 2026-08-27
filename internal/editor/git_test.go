@@ -494,3 +494,53 @@ func TestEditorGitPanelStageToggle(t *testing.T) {
 		t.Fatal("second space must unstage the file")
 	}
 }
+
+func TestGitKeyNameCyrillicLayout(t *testing.T) {
+	// 'и' is the Cyrillic letter that physically occupies the 'b' key (ЙЦУКЕН).
+	if got := gitKeyName(tea.KeyPressMsg{Text: "и"}); got != "b" {
+		t.Fatalf("Cyrillic 'и' must map to 'b', got %q", got)
+	}
+	if got := gitKeyName(tea.KeyPressMsg{Text: "И"}); got != "b" {
+		t.Fatalf("Cyrillic 'И' must map to 'b', got %q", got)
+	}
+	if got := gitKeyName(tea.KeyPressMsg{Code: 'и'}); got != "b" {
+		t.Fatalf("Cyrillic Code 'и' must map to 'b', got %q", got)
+	}
+	// Non-Cyrillic and special keys must come through unchanged.
+	if got := gitKeyName(tea.KeyPressMsg{Code: 'x'}); got != "x" {
+		t.Fatalf("Latin 'x' must stay 'x', got %q", got)
+	}
+	if got := gitKeyName(tea.KeyPressMsg{Code: tea.KeyEnter}); got != "enter" {
+		t.Fatalf("Enter must stay 'enter', got %q", got)
+	}
+	if got := gitKeyName(tea.KeyPressMsg{Code: tea.KeyEsc}); got != "esc" {
+		t.Fatalf("Esc must stay 'esc', got %q", got)
+	}
+	// BaseCode wins when present (Windows Console API).
+	if got := gitKeyName(tea.KeyPressMsg{Text: "и", BaseCode: 'b'}); got != "b" {
+		t.Fatalf("BaseCode 'b' must win, got %q", got)
+	}
+}
+
+func TestGitBranchViaCyrillicB(t *testing.T) {
+	_, f := initTestGitRepo(t)
+
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	// Open git panel, then press 'b' as the Cyrillic letter 'и'.
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	if !m.gitOpen {
+		t.Fatal("setup: git panel must be open")
+	}
+	m = press(m, tea.KeyPressMsg{Text: "и"})
+	if m.gitMode != gitModeBranch {
+		t.Fatalf("Cyrillic 'и' (physical b) must open branch mode, got mode %d", m.gitMode)
+	}
+
+	// Bottom bar must describe branch controls.
+	v := m.View()
+	if !strings.Contains(v.Content, "BRANCH") || !strings.Contains(v.Content, "Enter: checkout") {
+		t.Fatalf("branch mode bottom bar must be shown:\n%s", v.Content)
+	}
+}

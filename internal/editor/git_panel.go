@@ -12,6 +12,105 @@ import (
 	"dmed/internal/vcs"
 )
 
+// cyrToLat maps a Cyrillic (ЙЦУКЕН) letter to its QWERTY physical key. The
+// Russian layout is positionally identical to US QWERTY, so this lets letter
+// commands (c/a/r/l/d/b/i…) work under a Russian keyboard layout on any
+// terminal, even ones that don't populate Key.BaseCode (Kitty / Windows
+// Console API are the only backends that do). Returns 0 for non-Cyrillic.
+func cyrToLat(r rune) rune {
+	switch r {
+	case 'й', 'Й':
+		return 'q'
+	case 'ц', 'Ц':
+		return 'w'
+	case 'у', 'У':
+		return 'e'
+	case 'к', 'К':
+		return 'r'
+	case 'е', 'Е':
+		return 't'
+	case 'н', 'Н':
+		return 'y'
+	case 'г', 'Г':
+		return 'u'
+	case 'ш', 'Ш':
+		return 'i'
+	case 'щ', 'Щ':
+		return 'o'
+	case 'з', 'З':
+		return 'p'
+	case 'х', 'Х':
+		return '['
+	case 'ъ', 'Ъ':
+		return ']'
+	case 'ф', 'Ф':
+		return 'a'
+	case 'ы', 'Ы':
+		return 's'
+	case 'в', 'В':
+		return 'd'
+	case 'а', 'А':
+		return 'f'
+	case 'п', 'П':
+		return 'g'
+	case 'р', 'Р':
+		return 'h'
+	case 'о', 'О':
+		return 'j'
+	case 'л', 'Л':
+		return 'k'
+	case 'д', 'Д':
+		return 'l'
+	case 'ж', 'Ж':
+		return ';'
+	case 'э', 'Э':
+		return '\''
+	case 'я', 'Я':
+		return 'z'
+	case 'ч', 'Ч':
+		return 'x'
+	case 'с', 'С':
+		return 'c'
+	case 'м', 'М':
+		return 'v'
+	case 'и', 'И':
+		return 'b'
+	case 'т', 'Т':
+		return 'n'
+	case 'ь', 'Ь':
+		return 'm'
+	case 'б', 'Б':
+		return ','
+	case 'ю', 'Ю':
+		return '.'
+	}
+	return 0
+}
+
+// gitKeyName returns a layout-independent name for a key press so commands
+// like c/a/r/l/d/b/i work regardless of the active (e.g. Cyrillic) keyboard
+// layout. It tries, in order: the physical PC-101 key (BaseCode/ShiftedCode,
+// Windows Console API / Kitty), a Cyrillic→QWERTY lookup of the received
+// letter, then falls back to String(). Special keys (esc, arrows, tab,
+// enter) are identical in every layout and come through unchanged.
+func gitKeyName(msg tea.KeyPressMsg) string {
+	if msg.BaseCode >= 'a' && msg.BaseCode <= 'z' {
+		return string(msg.BaseCode)
+	}
+	if msg.ShiftedCode >= 'a' && msg.ShiftedCode <= 'z' {
+		return string(msg.ShiftedCode)
+	}
+	if c := cyrToLat(msg.Code); c >= 'a' && c <= 'z' {
+		return string(c)
+	}
+	for _, r := range msg.Text {
+		if c := cyrToLat(r); c >= 'a' && c <= 'z' {
+			return string(c)
+		}
+	}
+	return msg.String()
+}
+
 // gitPanelMode controls what the Git panel is showing.
 type gitPanelMode int
 
@@ -53,15 +152,16 @@ func (m *Model) refreshGitFiles() {
 func (m *Model) repoForCur() *vcs.Repo {
 	t := m.cur()
 	r := m.repo
-	if r == nil || (t.path != "" && !strings.HasPrefix(t.path, r.Root)) {
-		if t.path != "" {
-			if found, err := vcs.Open(filepath.Dir(t.path)); err == nil {
-				return found
-			}
-		}
-		return m.repo
+	if t.path == "" {
+		return r
 	}
-	return r
+	if r != nil && strings.HasPrefix(t.path, r.Root) {
+		return r
+	}
+	if found, err := vcs.Open(filepath.Dir(t.path)); err == nil {
+		return found
+	}
+	return nil
 }
 
 func (m Model) gitListHeight() int {
@@ -361,7 +461,7 @@ func (m *Model) branchPanel(h int) []string {
 }
 
 func (m *Model) handleGitBranch(msg tea.KeyPressMsg) tea.Cmd {
-	key := msg.String()
+	key := gitKeyName(msg)
 	r := m.repoForCur()
 
 	switch key {
@@ -471,7 +571,7 @@ func (m *Model) handleGit(msg tea.KeyPressMsg) tea.Cmd {
 // --- Status mode ---
 
 func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
-	key := msg.String()
+	key := gitKeyName(msg)
 
 	// Global keys
 	switch key {
@@ -600,8 +700,38 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 		m.refreshGitFiles()
 		m.refreshGitDiffPreview()
 		m.msg = fmt.Sprintf("staged all (%d files)", len(m.gitFiles))
+	case "i":
+		if m.repoForCur() != nil {
+			m.msg = "already a git repo"
+			break
+		}
+		m.gitInit()
 	}
 	return nil
+}
+
+// gitInit initializes a git repository at the current file's directory.
+func (m *Model) gitInit() {
+	dir := m.root
+	if dir == "" {
+		t := m.cur()
+		if t.path != "" {
+			dir = filepath.Dir(t.path)
+		}
+	}
+	if dir == "" {
+		m.msg = "no directory to init"
+		return
+	}
+	repo, err := vcs.Init(dir)
+	if err != nil {
+		m.msg = "git init failed: " + err.Error()
+		return
+	}
+	m.repo = repo
+	m.msg = "initialized git repo at " + repo.Root
+	m.refreshGitFiles()
+	m.refreshGitDiffPreview()
 }
 
 // --- Commit mode ---
@@ -649,7 +779,7 @@ func (m *Model) handleGitCommit(msg tea.KeyPressMsg) tea.Cmd {
 // --- Log mode ---
 
 func (m *Model) handleGitLog(msg tea.KeyPressMsg) tea.Cmd {
-	key := msg.String()
+	key := gitKeyName(msg)
 
 	// Global keys
 	switch key {
