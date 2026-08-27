@@ -169,6 +169,8 @@ func (m Model) View() tea.View {
 	} else if m.gitOpen {
 		if m.gitMode == gitModeCommit {
 			bottom = m.gitLine()
+		} else if m.gitMode == gitModeLog {
+			bottom = m.gitLogStatusLine()
 		} else {
 			bottom = m.gitStatusLine()
 		}
@@ -525,7 +527,7 @@ func (m Model) gitStatusLine() string {
 		line = statusHiStyle.Render(" git ") + hintStyle.Render("("+r.Branch()+" "+summary+")") +
 			statusStyle.Render(fmt.Sprintf(" %d changed, %d staged ", len(m.gitFiles), staged))
 	}
-	hint := "(Space: stage, A: all, C: commit, R: refresh, Esc: close)"
+	hint := "(Space: stage, A: all, C: commit, L: log, R: refresh, Esc: close)"
 	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -533,6 +535,20 @@ func (m Model) gitStatusLine() string {
 	return line + hintStyle.Render(hint)
 }
 
+func (m Model) gitLogStatusLine() string {
+	var line string
+	if len(m.gitLogEntries) == 0 {
+		line = statusHiStyle.Render(" LOG ") + statusStyle.Render(" no commits")
+	} else {
+		line = statusHiStyle.Render(" LOG ") + hintStyle.Render(fmt.Sprintf("(%d commits)", len(m.gitLogEntries)))
+	}
+	hint := "(J/K: navigate, Tab: diff focus, Esc: back to files, R: refresh)"
+	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line + hintStyle.Render(hint)
+}
 // fitPath keeps the tail of long paths (the file name matters most).
 func fitPath(p string, w int) string {
 	r := []rune(p)
