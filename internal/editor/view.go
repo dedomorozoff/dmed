@@ -171,6 +171,8 @@ func (m Model) View() tea.View {
 			bottom = m.gitLine()
 		} else if m.gitMode == gitModeLog {
 			bottom = m.gitLogStatusLine()
+		} else if m.gitMode == gitModeBranch {
+			bottom = m.gitBranchLine()
 		} else {
 			bottom = m.gitStatusLine()
 		}
@@ -527,7 +529,7 @@ func (m Model) gitStatusLine() string {
 		line = statusHiStyle.Render(" git ") + hintStyle.Render("("+r.Branch()+" "+summary+")") +
 			statusStyle.Render(fmt.Sprintf(" %d changed, %d staged ", len(m.gitFiles), staged))
 	}
-	hint := "(Space: stage, A: all, C: commit, L: log, R: refresh, Esc: close)"
+	hint := "(Space: stage, A: all, C: commit, D: diff, L: log, B: branch, R: refresh, Esc: close)"
 	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -549,6 +551,28 @@ func (m Model) gitLogStatusLine() string {
 	}
 	return line + hintStyle.Render(hint)
 }
+
+func (m Model) gitBranchLine() string {
+	if m.gitBranchNew {
+		line := statusHiStyle.Render(" new branch: ") + statusStyle.Render(string(m.gitBranchIn)) + cursorStyle.Render(" ")
+		line += hintStyle.Render("  (Enter: create, Esc: cancel)")
+		fill := m.width - lipgloss.Width(line)
+		if fill > 0 {
+			line += statusStyle.Render(strings.Repeat(" ", fill))
+		}
+		return line
+	}
+	var line string
+	if r := m.repoForCur(); r != nil {
+		line = statusHiStyle.Render(" BRANCH ") + statusStyle.Render(r.Branch())
+	}
+	hint := "(J/K: switch, Enter: checkout, N: new branch, Esc: back, R: refresh)"
+	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line + hintStyle.Render(hint)
+}
 // fitPath keeps the tail of long paths (the file name matters most).
 func fitPath(p string, w int) string {
 	r := []rune(p)
@@ -564,6 +588,9 @@ func fitPath(p string, w int) string {
 func (m Model) gitPanel(h int) []string {
 	if m.gitMode == gitModeLog {
 		return m.gitLogPanel(h)
+	}
+	if m.gitMode == gitModeBranch {
+		return m.branchPanel(h)
 	}
 	rows := make([]string, 0, h)
 	start := m.gitOffset

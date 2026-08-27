@@ -83,6 +83,55 @@ func (repo *Repo) Branch() string {
 	return h
 }
 
+// Branches returns the list of local branch names (except current).
+func (repo *Repo) Branches() ([]string, error) {
+	iter, err := repo.r.Branches()
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	cur := repo.Branch()
+	_ = iter.ForEach(func(ref *plumbing.Reference) error {
+		name := ref.Name().Short()
+		if name != cur && name != "HEAD" {
+			names = append(names, name)
+		}
+		return nil
+	})
+	return names, nil
+}
+
+// CreateBranch creates a new branch at the current HEAD and checks it out.
+func (repo *Repo) CreateBranch(name string) error {
+	head, err := repo.r.Head()
+	if err != nil {
+		return err
+	}
+	if _, err := repo.r.Reference(plumbing.NewBranchReferenceName(name), false); err == nil {
+		return fmt.Errorf("branch already exists: %s", name)
+	}
+	wt, err := repo.r.Worktree()
+	if err != nil {
+		return err
+	}
+	return wt.Checkout(&git.CheckoutOptions{
+		Branch: plumbing.NewBranchReferenceName(name),
+		Create: true,
+		Hash:   head.Hash(),
+	})
+}
+
+// SwitchBranch checks out an existing branch.
+func (repo *Repo) SwitchBranch(name string) error {
+	wt, err := repo.r.Worktree()
+	if err != nil {
+		return err
+	}
+	return wt.Checkout(&git.CheckoutOptions{
+		Branch: plumbing.NewBranchReferenceName(name),
+	})
+}
+
 // FileStatusCode indicates the state of a file in the working tree / index.
 type FileStatusCode rune
 

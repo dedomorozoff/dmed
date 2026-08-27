@@ -199,6 +199,13 @@ type Model struct {
 	gitLogSel     int
 	gitLogOffset  int
 
+	// Git branch management
+	gitBranchIn    []rune
+	gitBranchList  []string
+	gitBranchSel   int
+	gitBranchOffset int
+	gitBranchNew   bool // true when creating a new branch, false when switching
+
 	// Side-by-side diff view (opened from the Git panel)
 	diffViewOpen   bool
 	diffPath       string

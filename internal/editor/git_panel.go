@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"dmed/internal/syntax"
 	"dmed/internal/vcs"
 )
@@ -18,6 +19,7 @@ const (
 	gitModeStatus gitPanelMode = iota // file list
 	gitModeCommit                     // commit message input
 	gitModeLog                        // commit history list
+	gitModeBranch                     // branch input / switch
 )
 
 func (m *Model) openGitPanel() {
@@ -258,6 +260,191 @@ func (m *Model) showLogDiff() {
 	m.diffOffsetX = 0
 }
 
+// --- Branch management ---
+
+func (m *Model) openBranchView() {
+	m.gitMode = gitModeBranch
+	m.gitBranchNew = false
+	m.gitBranchIn = nil
+	m.gitBranchSel = 0
+	m.gitBranchOffset = 0
+	m.gitDiffFocused = false
+	m.refreshGitBranches()
+}
+
+func (m *Model) refreshGitBranches() {
+	r := m.repoForCur()
+	if r == nil {
+		m.gitBranchList = nil
+		return
+	}
+	branches, err := r.Branches()
+	if err != nil {
+		m.gitBranchList = nil
+		m.msg = "git branches error: " + err.Error()
+		return
+	}
+	m.gitBranchList = branches
+	m.clampGitBranchScroll()
+}
+
+func (m Model) gitBranchListHeight() int {
+	n := len(m.gitBranchList)
+	if n == 0 {
+		n = 1 // at least one blank row
+	}
+	if room := m.viewHeight(); n > room {
+		n = room
+	}
+	return n
+}
+
+func (m *Model) clampGitBranchScroll() {
+	w := m.gitBranchListHeight()
+	if w <= 0 {
+		m.gitBranchOffset = 0
+		return
+	}
+	if m.gitBranchSel < m.gitBranchOffset {
+		m.gitBranchOffset = m.gitBranchSel
+	}
+	if m.gitBranchSel >= m.gitBranchOffset+w {
+		m.gitBranchOffset = m.gitBranchSel - w + 1
+	}
+	if off := len(m.gitBranchList) - w; m.gitBranchOffset > off {
+		m.gitBranchOffset = off
+	}
+	if m.gitBranchOffset < 0 {
+		m.gitBranchOffset = 0
+	}
+}
+
+func (m *Model) branchPanel(h int) []string {
+	rows := make([]string, 0, h)
+	cur := ""
+	if r := m.repoForCur(); r != nil {
+		cur = r.Branch()
+	}
+	// Current branch highlighted as a header
+	curLine := " " + gitAddStyle.Render("● "+cur)
+	pad := gitPanelWidth - 1 - lipgloss.Width(curLine)
+	if pad < 0 {
+		pad = 0
+	}
+	rows = append(rows, curLine+strings.Repeat(" ", pad))
+	// Other branches
+	start := m.gitBranchOffset
+	end := start + m.gitBranchListHeight()
+	for i := start; i < end && len(rows) < h; i++ {
+		var name string
+		if i < len(m.gitBranchList) {
+			name = m.gitBranchList[i]
+		}
+		plain := " " + name
+		pad := gitPanelWidth - 1 - lipgloss.Width(plain)
+		if pad < 0 {
+			pad = 0
+		}
+		line := plain + strings.Repeat(" ", pad)
+		var cell string
+		if i == m.gitBranchSel {
+			cell = statusHiStyle.Render(line)
+		} else {
+			cell = line
+		}
+		rows = append(rows, cell)
+	}
+	for len(rows) < h {
+		rows = append(rows, strings.Repeat(" ", gitPanelWidth))
+	}
+	return rows
+}
+
+func (m *Model) handleGitBranch(msg tea.KeyPressMsg) tea.Cmd {
+	key := msg.String()
+	r := m.repoForCur()
+
+	switch key {
+	case "esc":
+		m.gitMode = gitModeStatus
+		m.gitDiffFocused = false
+		m.msg = ""
+		return nil
+	case "n":
+		// Create a new branch (enter name)
+		m.gitBranchNew = true
+		m.gitBranchIn = nil
+		m.msg = "new branch name:"
+		return nil
+	case "enter":
+		// Switch to selected branch
+		if r == nil {
+			break
+		}
+		if len(m.gitBranchList) == 0 {
+			break
+		}
+		name := m.gitBranchList[m.gitBranchSel]
+		if err := r.SwitchBranch(name); err != nil {
+			m.msg = "switch error: " + err.Error()
+		} else {
+			m.msg = "switched to " + name
+			m.gitMode = gitModeStatus
+			m.refreshGitFiles()
+			m.refreshGitDiffPreview()
+		}
+	case "up", "k":
+		if m.gitBranchSel > 0 {
+			m.gitBranchSel--
+			m.clampGitBranchScroll()
+		}
+	case "down", "j":
+		if m.gitBranchSel < len(m.gitBranchList)-1 {
+			m.gitBranchSel++
+			m.clampGitBranchScroll()
+		}
+	case "r":
+		m.refreshGitBranches()
+		m.msg = "refreshed"
+	}
+
+	// If creating a new branch, capture name input
+	if m.gitBranchNew {
+		switch key {
+		case "enter":
+			if len(m.gitBranchIn) > 0 {
+				if r == nil {
+					m.msg = "no git repo"
+					break
+				}
+				if err := r.CreateBranch(string(m.gitBranchIn)); err != nil {
+					m.msg = "create error: " + err.Error()
+				} else {
+					m.msg = "created branch " + string(m.gitBranchIn)
+					m.gitBranchNew = false
+					m.gitBranchIn = nil
+					m.gitMode = gitModeStatus
+					m.refreshGitFiles()
+					m.refreshGitDiffPreview()
+				}
+			}
+		case "esc":
+			m.gitBranchNew = false
+			m.gitBranchIn = nil
+			m.msg = ""
+		case "backspace":
+			if n := len(m.gitBranchIn); n > 0 {
+				m.gitBranchIn = m.gitBranchIn[:n-1]
+			}
+		default:
+			if len(msg.Text) > 0 {
+				m.gitBranchIn = append(m.gitBranchIn, []rune(msg.Text)...)
+			}
+		}
+	}
+	return nil
+}
+
 // --- Dispatch ---
 
 func (m *Model) handleGit(msg tea.KeyPressMsg) tea.Cmd {
@@ -275,6 +462,8 @@ func (m *Model) handleGit(msg tea.KeyPressMsg) tea.Cmd {
 		return m.handleGitCommit(msg)
 	case gitModeLog:
 		return m.handleGitLog(msg)
+	case gitModeBranch:
+		return m.handleGitBranch(msg)
 	}
 	return nil
 }
@@ -387,6 +576,8 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 		m.openDiffView()
 	case "l":
 		m.openLogView()
+	case "b":
+		m.openBranchView()
 	case "c":
 		m.gitMode = gitModeCommit
 		m.gitCommitIn = nil
