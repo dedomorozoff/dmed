@@ -13,7 +13,8 @@ PREFIX   ?= /usr/local
 .DEFAULT_GOAL := help
 
 .PHONY: help build test vet run clean dist install install-man
-.PHONY: deb rpm pkg termux freebsd-port
+.PHONY: deb rpm pkg termux win-zip freebsd-port
+.PHONY: $(addprefix build-,$(PLATFORMS))
 
 help: ## Show this help
 	@echo "dmed $(VERSION)"
@@ -88,7 +89,11 @@ build-darwin-arm64: ## Build for macOS arm64 (Apple Silicon)
 	@mkdir -p $(DISTDIR)
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO) build -ldflags "$(LDFLAGS)" -o $(DISTDIR)/dmed-darwin-arm64 .
 
-PLATFORMS := linux-amd64 linux-arm64 freebsd-amd64 openbsd-amd64 netbsd-amd64 darwin-amd64 darwin-arm64
+build-windows-amd64: ## Build for Windows amd64 (.exe)
+	@mkdir -p $(DISTDIR)
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(DISTDIR)/dmed-windows-amd64.exe .
+
+PLATFORMS := linux-amd64 linux-arm64 freebsd-amd64 openbsd-amd64 netbsd-amd64 darwin-amd64 darwin-arm64 windows-amd64
 
 dist: $(addprefix build-,$(PLATFORMS)) ## Build all platforms
 	@echo "Built binaries:"
@@ -184,6 +189,16 @@ termux: build-linux-arm64 ## Build Termux .deb (aarch64)
 	echo "Version: $(VERSION)" >> dist/termux/dmed_$(VERSION)_aarch64/DEBIAN/control
 	dpkg-deb --build dist/termux/dmed_$(VERSION)_aarch64 dist/dmed_$(VERSION)_aarch64-termux.deb
 	@echo "Built: dist/dmed_$(VERSION)_aarch64-termux.deb"
+
+# Windows (zip)
+win-zip: build-windows-amd64 ## Build Windows .zip (amd64)
+	@mkdir -p $(DISTDIR)/win-zip/dmed
+	cp $(DISTDIR)/dmed-windows-amd64.exe $(DISTDIR)/win-zip/dmed/dmed.exe
+	cp LICENSE $(DISTDIR)/win-zip/dmed/LICENSE
+	cp docs/dmed.1 $(DISTDIR)/win-zip/dmed/dmed.1 2>/dev/null || true
+	cd $(DISTDIR)/win-zip && zip -9r ../dmed_$(VERSION)_windows-amd64.zip dmed
+	rm -rf $(DISTDIR)/win-zip
+	@echo "Built: $(DISTDIR)/dmed_$(VERSION)_windows-amd64.zip"
 
 # FreeBSD port
 freebsd-port: ## Generate FreeBSD port Makefile
