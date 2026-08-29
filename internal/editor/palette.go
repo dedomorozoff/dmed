@@ -37,6 +37,9 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "terminal", title: "View: Toggle Terminal", desc: "Alt+T — Shell panel at the bottom", action: func(m *Model) tea.Cmd { return m.toggleTerminal() }},
 		{id: "ai_chat", title: "AI: Toggle Chat Panel", desc: "Alt+A — Local Ollama chat on the right", action: func(m *Model) tea.Cmd { m.toggleChat(); return nil }},
 		{id: "ai_inline", title: "AI: Inline Request", desc: "Alt+I — Rewrite selected text with AI", action: func(m *Model) tea.Cmd { m.startInlineRequest(); return nil }},
+		{id: "ai_settings", title: "AI: Preferences...", desc: "Configure provider, model, URL, API key", action: func(m *Model) tea.Cmd { m.startAISettings(); return nil }},
+		{id: "agent_tasks", title: "Agent: Task Panel", desc: "Alt+L — Background agent task list", action: func(m *Model) tea.Cmd { return m.openAgentPanel() }},
+		{id: "agent_new", title: "Agent: New Task", desc: "Run a background refactoring task", action: func(m *Model) tea.Cmd { return m.startAgentTaskPrompt() }},
 		{id: "settings", title: "Settings: Open Config", desc: "Open .dmed.conf for editing", action: func(m *Model) tea.Cmd { m.openConfigFile(); return nil }},
 		{id: "help", title: "Help: Show Keybindings", desc: "F1 / Ctrl+E — Help panel", action: func(m *Model) tea.Cmd { m.helpOpen = true; return nil }},
 		{id: "quit", title: "App: Quit Editor", desc: "Ctrl+Q — Exit", action: func(m *Model) tea.Cmd { return tea.Quit }},
@@ -63,35 +66,64 @@ func (m *Model) handlePalette(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		m.paletteOpen = false
+		m.paletteSel = 0
+		m.paletteOffset = 0
 		m.msg = ""
 	case "enter":
 		if len(hits) > 0 {
 			if m.paletteSel >= len(hits) {
 				m.paletteSel = 0
+				m.paletteOffset = 0
 			}
 			sel := hits[m.paletteSel]
 			m.paletteOpen = false
+			m.paletteSel = 0
+			m.paletteOffset = 0
 			return sel.action(m)
 		}
 		m.paletteOpen = false
 	case "up":
 		if len(hits) > 0 {
 			m.paletteSel = (m.paletteSel - 1 + len(hits)) % len(hits)
+			m.clampPalette(hits)
 		}
 	case "down":
 		if len(hits) > 0 {
 			m.paletteSel = (m.paletteSel + 1) % len(hits)
+			m.clampPalette(hits)
 		}
 	case "backspace":
 		if len(m.paletteQ) > 0 {
 			m.paletteQ = m.paletteQ[:len(m.paletteQ)-1]
 			m.paletteSel = 0
+			m.paletteOffset = 0
 		}
 	default:
 		if len(msg.Text) > 0 {
 			m.paletteQ = append(m.paletteQ, []rune(msg.Text)...)
 			m.paletteSel = 0
+			m.paletteOffset = 0
 		}
 	}
 	return nil
+}
+
+// clampPalette keeps the palette viewport scrolled so paletteSel stays visible.
+func (m *Model) clampPalette(hits []commandItem) {
+	const paletteVisible = 8
+	if len(hits) <= paletteVisible {
+		m.paletteOffset = 0
+		return
+	}
+	// Jump straight to the End when wrapping past the last item.
+	if m.paletteSel > len(hits)-paletteVisible {
+		m.paletteOffset = len(hits) - paletteVisible
+		return
+	}
+	if m.paletteSel < m.paletteOffset {
+		m.paletteOffset = m.paletteSel
+	}
+	if m.paletteSel >= m.paletteOffset+paletteVisible {
+		m.paletteOffset = m.paletteSel - paletteVisible + 1
+	}
 }

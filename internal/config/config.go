@@ -13,7 +13,18 @@ import (
 type Config struct {
 	Editor EditorConfig
 	AI     AIConfig
+	Agent  AgentConfig
 	UI     UIConfig
+}
+
+// AgentConfig holds settings for background agent tasks (M4).
+type AgentConfig struct {
+	// SystemPrompt overrides the default instruction the agent follows when
+	// producing file edits. Empty uses the built-in prompt.
+	SystemPrompt string
+	// ContextMax is the total size budget (bytes) of file context gathered
+	// from the project and sent to the agent.
+	ContextMax int
 }
 
 // EditorConfig holds editor-related settings.
@@ -56,6 +67,10 @@ func Defaults() Config {
 			ContextMax: 6000,
 			SystemPrompt: "You are a helpful coding assistant. " +
 				"Answer concisely. When showing code, use markdown fences.",
+		},
+		Agent: AgentConfig{
+			SystemPrompt: "",
+			ContextMax:   256 * 1024,
 		},
 		UI: UIConfig{
 			TreeWidth:    25,
@@ -166,6 +181,18 @@ func loadFile(path string, cfg *Config) {
 		}
 	}
 
+	// [agent]
+	if s, ok := sections["agent"]; ok {
+		if v, ok := s["system_prompt"]; ok {
+			cfg.Agent.SystemPrompt = v
+		}
+		if v, ok := s["context_max"]; ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				cfg.Agent.ContextMax = n
+			}
+		}
+	}
+
 	// [ui]
 	if s, ok := sections["ui"]; ok {
 		if v, ok := s["tree_width"]; ok {
@@ -221,4 +248,93 @@ func parseINI(r io.Reader) map[string]map[string]string {
 func parseBool(s string) bool {
 	s = strings.ToLower(s)
 	return s == "true" || s == "yes" || s == "1"
+}
+
+// WriteAI merges the AI settings into the INI file at path, updating the
+// [ai] section in place and preserving all other sections, keys, and comments.
+// If the file or the [ai] section is missing it is appended. Returns the
+// number of keys written.
+func WriteAI(path string, ai AIConfig) (int, error) {
+	known := []struct{ key, val string }{
+		{"provider", ai.Provider},
+		{"model", ai.Model},
+		{"ollama_url", ai.OllamaURL},
+		{"api_key", ai.APIKey},
+		{"context_max", strconv.Itoa(ai.ContextMax)},
+	}
+
+	data, err := os.ReadFile(path)
+	var lines []string
+	if err != nil && !os.IsNotExist(err) {
+		return 0, err
+	}
+	if err == nil {
+		lines = strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	}
+
+	var out []string
+	inAI := false
+	aiPresent := false
+	replaced := make(map[string]bool, len(known))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			name := strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+			inAI = strings.EqualFold(name, "ai")
+			if inAI {
+				aiPresent = true
+			}
+		}
+		if inAI {
+			if idx := strings.IndexByte(line, '='); idx > 0 {
+				key := strings.ToLower(strings.TrimSpace(line[:idx]))
+				matched := false
+				for _, k := range known {
+					if k.key == key {
+						out = append(out, key+" = "+k.val)
+						replaced[key] = true
+						matched = true
+						break
+					}
+				}
+				if matched {
+					continue
+				}
+			}
+		}
+		out = append(out, line)
+	}
+
+	var missing []string
+	for _, k := range known {
+		if !replaced[k.key] {
+			missing = append(missing, k.key+" = "+k.val)
+		}
+	}
+	if !aiPresent {
+		if len(out) > 0 && out[len(out)-1] != "" {
+			out = append(out, "")
+		}
+		out = append(out, "[ai]")
+		out = append(out, missing...)
+	} else if len(missing) > 0 {
+		for i := len(out) - 1; i >= 0; i-- {
+			t := strings.TrimSpace(out[i])
+			if strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]") &&
+				strings.EqualFold(strings.TrimSpace(t[1:len(t)-1]), "ai") {
+				tail := append([]string{}, out[i+1:]...)
+				out = append(append(out[:i+1], missing...), tail...)
+				break
+			}
+		}
+	}
+
+	content := strings.Join(out, "\n") + "\n"
+	if len(content) == 1 {
+		content = ""
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return 0, err
+	}
+	return len(replaced) + len(missing), nil
 }

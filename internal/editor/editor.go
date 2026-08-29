@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
 
+	"dmed/internal/agent"
 	"dmed/internal/ai"
 	"dmed/internal/buffer"
 	"dmed/internal/config"
@@ -135,20 +136,20 @@ func (t *tab) getDiff(repo *vcs.Repo) vcs.FileDiff {
 }
 
 type Model struct {
-	root   string
-	cfg    config.Config
-	tabs   []tab
-	panes  []pane
-	layout splitLayout
+	root       string
+	cfg        config.Config
+	tabs       []tab
+	panes      []pane
+	layout     splitLayout
 	activePane int
-	width  int
-	height int
-	msg    string
+	width      int
+	height     int
+	msg        string
 
-	promptOpen bool
-	promptIn   []rune
-	promptSave bool
-	promptSaveIn []rune
+	promptOpen    bool
+	promptIn      []rune
+	promptSave    bool
+	promptSaveIn  []rune
 	promptNewFile bool
 
 	finderOpen  bool
@@ -158,6 +159,11 @@ type Model struct {
 	finderSel   int
 
 	helpOpen bool
+
+	aiCfgOpen  bool
+	aiCfgField int
+	aiCfgEdit  bool
+	aiCfgIn    []rune
 
 	treeVisible bool
 	treeFocus   bool
@@ -176,24 +182,24 @@ type Model struct {
 	replaceFocusFind   bool
 
 	// Events, watcher, Git
-	bus          *events.Bus
-	watcher      *watcher.Watcher
-	fileEvents   chan string
-	repo         *vcs.Repo
-	conflictOpen bool
-	conflictPath string
+	bus                *events.Bus
+	watcher            *watcher.Watcher
+	fileEvents         chan string
+	repo               *vcs.Repo
+	conflictOpen       bool
+	conflictPath       string
 	conflictRows       []vcs.DiffRow
 	conflictLeftLines  []string
 	conflictRightLines []string
 	conflictOffY       int
 	conflictOffX       int
-	gitOpen      bool
-	gitMode      gitPanelMode
-	gitFiles     []vcs.FileStatus
-	gitSel       int
-	gitOffset    int
-	gitCommitIn  []rune
-	gitDiffFocused bool // true when diff preview area has focus (scrollable)
+	gitOpen            bool
+	gitMode            gitPanelMode
+	gitFiles           []vcs.FileStatus
+	gitSel             int
+	gitOffset          int
+	gitCommitIn        []rune
+	gitDiffFocused     bool // true when diff preview area has focus (scrollable)
 
 	// Git log
 	gitLogEntries []vcs.LogEntry
@@ -201,22 +207,22 @@ type Model struct {
 	gitLogOffset  int
 
 	// Git branch management
-	gitBranchIn    []rune
-	gitBranchList  []string
-	gitBranchSel   int
+	gitBranchIn     []rune
+	gitBranchList   []string
+	gitBranchSel    int
 	gitBranchOffset int
-	gitBranchNew   bool // true when creating a new branch, false when switching
+	gitBranchNew    bool // true when creating a new branch, false when switching
 
 	// Side-by-side diff view (opened from the Git panel)
-	diffViewOpen   bool
-	diffPath       string
-	diffRows       []vcs.DiffRow
-	diffHeadLines  []string
-	diffRightLines []string
+	diffViewOpen    bool
+	diffPath        string
+	diffRows        []vcs.DiffRow
+	diffHeadLines   []string
+	diffRightLines  []string
 	diffHeadSyntax  []syntax.HighlightedLine
 	diffRightSyntax []syntax.HighlightedLine
-	diffOffsetY    int
-	diffOffsetX    int
+	diffOffsetY     int
+	diffOffsetX     int
 
 	// Bottom terminal panel
 	termOpen    bool
@@ -230,10 +236,11 @@ type Model struct {
 	termCh      <-chan []string
 
 	// Command palette & Clipboard
-	paletteOpen bool
-	paletteQ    []rune
-	paletteSel  int
-	clipboard   string
+	paletteOpen   bool
+	paletteQ      []rune
+	paletteSel    int
+	paletteOffset int
+	clipboard     string
 
 	// Right-side AI chat panel (local Ollama)
 	chatOpen   bool
@@ -268,8 +275,32 @@ type Model struct {
 	aiReviewOffX     int
 
 	quitConfirm bool
-	quitTab     bool  // true if confirming close of a single tab (not quit)
+	quitTab     bool // true if confirming close of a single tab (not quit)
 	pendingQuit bool
+
+	// Agent background tasks (M4)
+	agentQueue    *agent.Queue
+	agentRunner   *agent.Runner
+	agentApplier  *agent.Applier
+	agentCommit   *agent.Committer
+	agentCtx      context.Context
+	agentCancel   context.CancelFunc
+	agentCh       chan struct{} // repaint signal from the agent worker
+	agentOpen     bool
+	agentPrompt   bool // entering a new task prompt
+	agentPromptIn []rune
+	agentSel      int
+	agentOffset   int
+
+	// Agent diff review (T6): a task's proposed changes shown side-by-side.
+	agentReviewMode   bool
+	agentReviewTaskID string
+	agentReviewChange int // index into the task's Changes
+	agentReviewRows   []vcs.DiffRow
+	agentReviewLeft   []string
+	agentReviewRight  []string
+	agentReviewOffY   int
+	agentReviewOffX   int
 
 	// Mouse state
 	mouseDown bool
@@ -479,6 +510,9 @@ func (m *Model) openConfigFile() {
 			"# ollama_url = http://localhost:11434\n" +
 			"# api_key =  # for OpenAI-compatible providers\n" +
 			"# context_max = 6000\n\n" +
+			"[agent]\n" +
+			"# system_prompt =  # optional override for background agent tasks\n" +
+			"# context_max = 262144  # bytes of file context sent to the agent\n\n" +
 			"[ui]\n" +
 			"# tree_width = 25\n" +
 			"# chat_width_pct = 40\n"
@@ -806,6 +840,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case InlineOutputMsg:
 		cmd := m.handleInlineOutput(msg)
 		return m, cmd
+	case AgentRefreshMsg:
+		return m, waitForAgentRefresh(m.agentCh)
 	case tea.MouseClickMsg:
 		cmd := m.handleMouseClick(msg)
 		return m, cmd
@@ -947,6 +983,15 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.termOpen {
 		return m.handleTerm(msg)
 	}
+	if m.agentReviewMode {
+		return m.handleAgentReview(msg)
+	}
+	if m.agentPrompt {
+		return m.handleAgentPrompt(msg)
+	}
+	if m.agentOpen {
+		return m.handleAgent(msg)
+	}
 	if m.chatOpen {
 		return m.handleChat(msg)
 	}
@@ -955,6 +1000,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.paletteOpen {
 		return m.handlePalette(msg)
+	}
+	if m.aiCfgOpen {
+		return m.handleAISettings(msg)
 	}
 	if m.helpOpen {
 		return m.handleHelp(msg)
@@ -1020,6 +1068,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "alt+a":
 		m.toggleChat()
+	case "alt+l":
+		return m.openAgentPanel()
 	case "alt+i":
 		m.startInlineRequest()
 	case "ctrl+o":
@@ -1146,6 +1196,10 @@ func (m *Model) requestQuit() tea.Cmd {
 func (m *Model) shutdown() {
 	m.cancelChat()
 	m.killTerminal()
+	if m.agentCancel != nil {
+		m.agentCancel()
+		m.agentCancel = nil
+	}
 	if m.watcher != nil {
 		_ = m.watcher.Close()
 	}
@@ -1495,6 +1549,7 @@ func (m *Model) startPalette() {
 	m.paletteOpen = true
 	m.paletteQ = nil
 	m.paletteSel = 0
+	m.paletteOffset = 0
 }
 
 func (m *Model) saveSession() {
