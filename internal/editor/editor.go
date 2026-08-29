@@ -151,6 +151,7 @@ type Model struct {
 	promptSave    bool
 	promptSaveIn  []rune
 	promptNewFile bool
+	promptNewFolder bool
 
 	finderOpen  bool
 	finderQ     []rune
@@ -475,6 +476,12 @@ func (m *Model) startNewFilePrompt() {
 	m.promptIn = nil
 }
 
+func (m *Model) startNewFolderPrompt() {
+	m.promptOpen = true
+	m.promptNewFolder = true
+	m.promptIn = nil
+}
+
 func (m *Model) startSavePrompt() {
 	m.promptSave = true
 	m.promptSaveIn = nil
@@ -590,12 +597,20 @@ func (m *Model) handlePrompt(msg tea.KeyPressMsg) tea.Cmd {
 	case "esc":
 		m.promptOpen = false
 		m.promptNewFile = false
+		m.promptNewFolder = false
 	case "enter":
 		path := strings.TrimSpace(string(m.promptIn))
+		newFolder := m.promptNewFolder
 		m.promptOpen = false
 		m.promptNewFile = false
+		m.promptNewFolder = false
 		if path != "" {
-			m.openPath(path)
+			if newFolder {
+				_ = os.MkdirAll(path, 0o755)
+				m.msg = "created folder: " + path
+			} else {
+				m.openPath(path)
+			}
 		}
 	case "backspace":
 		if n := len(m.promptIn); n > 0 {
@@ -893,7 +908,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		msg = tea.KeyPressMsg{Code: nr[0], Text: string(nr), Mod: msg.Mod}
 	}
 	s := msg.String()
-	// Quit/close keys must work in every mode (tree, git panel, prompts, search...).
+	// Global keys work in every mode (tree, git panel, prompts, search, agents...).
 	switch s {
 	case "ctrl+q":
 		return m.requestQuit()
@@ -916,6 +931,54 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		return m.closeActiveTab()
+	case "ctrl+p", "ctrl+shift+p", "f2":
+		m.startPalette()
+		return nil
+	case "ctrl+t":
+		m.startPrompt()
+		return nil
+	case "alt+t":
+		if cmd := m.toggleTerminal(); cmd != nil {
+			return cmd
+		}
+		return nil
+	case "alt+a":
+		m.toggleChat()
+		return nil
+	case "alt+l":
+		return m.openAgentPanel()
+	case "alt+i":
+		m.startInlineRequest()
+		return nil
+	case "ctrl+o":
+		m.startFinder()
+		return nil
+	case "f3":
+		m.updateSearchMatches(true)
+		return nil
+	case "shift+f3":
+		m.findPrev()
+		return nil
+	case "ctrl+f":
+		m.startSearch()
+		return nil
+	case "ctrl+h":
+		m.startReplace()
+		return nil
+	case "ctrl+g":
+		if m.gitOpen {
+			m.gitOpen = false
+			m.msg = ""
+		} else {
+			m.openGitPanel()
+		}
+		return nil
+	case "f1", "ctrl+e":
+		m.helpOpen = !m.helpOpen
+		return nil
+	case "ctrl+b", "f9":
+		m.toggleTree()
+		return nil
 	}
 	if m.conflictOpen {
 		switch s {
@@ -1060,45 +1123,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.cur().buf.Redo() {
 			m.msg = ""
 		}
-	case "ctrl+t":
-		m.startPrompt()
-	case "alt+t":
-		if cmd := m.toggleTerminal(); cmd != nil {
-			return cmd
-		}
-	case "alt+a":
-		m.toggleChat()
-	case "alt+l":
-		return m.openAgentPanel()
-	case "alt+i":
-		m.startInlineRequest()
-	case "ctrl+o":
-		m.startFinder()
-	case "ctrl+p", "ctrl+shift+p", "f2":
-		m.startPalette()
-	case "f3":
-		m.updateSearchMatches(true)
-	case "shift+f3":
-		m.findPrev()
-	case "ctrl+f":
-		m.startSearch()
-	case "ctrl+h":
-		m.startReplace()
-	case "ctrl+g":
-		if m.gitOpen {
-			m.gitOpen = false
-			m.msg = ""
-		} else {
-			m.openGitPanel()
-		}
 	case "alt+[":
 		m.jumpHunk(-1)
 	case "alt+]":
 		m.jumpHunk(1)
-	case "f1", "ctrl+e":
-		m.helpOpen = !m.helpOpen
-	case "ctrl+b", "f9":
-		m.toggleTree()
 	case "ctrl+\\", "f6":
 		m.splitVert()
 	case "ctrl+alt+h", "f7":

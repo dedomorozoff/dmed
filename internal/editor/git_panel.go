@@ -126,6 +126,7 @@ func (m *Model) openGitPanel() {
 	m.gitMode = gitModeStatus
 	m.gitCommitIn = nil
 	m.gitDiffFocused = false
+	m.treeFocus = false
 	m.refreshGitFiles()
 	m.refreshGitDiffPreview()
 }

@@ -491,6 +491,8 @@ func (m Model) promptLine() string {
 	label := " open file: "
 	if m.promptNewFile {
 		label = " new file: "
+	} else if m.promptNewFolder {
+		label = " new folder: "
 	}
 	line := statusHiStyle.Render(label) + statusStyle.Render(string(m.promptIn)) + cursorStyle.Render(" ")
 	fill := m.width - lipgloss.Width(line)

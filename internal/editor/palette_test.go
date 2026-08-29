@@ -1,6 +1,8 @@
 package editor
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -84,6 +86,48 @@ func TestPaletteNewFileCommand(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("new file must open a tab for brand_new.txt")
+	}
+}
+
+func TestPaletteNewFolderCommand(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "existing.txt", "hello\n")
+
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	m = press(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	if !m.paletteOpen {
+		t.Fatal("palette must be open after Ctrl+P")
+	}
+
+	m = typeStr(m, "new folder")
+	hits := m.filterPalette()
+	if len(hits) == 0 || hits[0].id != "new_folder" {
+		t.Fatalf("expected 'new_folder' command as top match, got: %+v", hits)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.paletteOpen {
+		t.Fatal("palette must close after executing new folder command")
+	}
+	if !m.promptOpen || !m.promptNewFolder {
+		t.Fatalf("new folder command must open the prompt in new-folder mode")
+	}
+
+	folder := filepath.Join(dir, "brand_new_dir")
+	m = typeStr(m, folder)
+	v := m.View()
+	if !strings.Contains(v.Content, "new folder:") {
+		t.Fatalf("view must render new-folder prompt label:\n%s", v.Content)
+	}
+
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.promptOpen {
+		t.Fatal("prompt must close after entering path")
+	}
+	fi, err := os.Stat(folder)
+	if err != nil || !fi.Mode().IsDir() {
+		t.Fatalf("new folder must create directory %s, err=%v", folder, err)
 	}
 }
 
