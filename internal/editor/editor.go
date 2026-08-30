@@ -146,11 +146,11 @@ type Model struct {
 	height     int
 	msg        string
 
-	promptOpen    bool
-	promptIn      []rune
-	promptSave    bool
-	promptSaveIn  []rune
-	promptNewFile bool
+	promptOpen      bool
+	promptIn        []rune
+	promptSave      bool
+	promptSaveIn    []rune
+	promptNewFile   bool
 	promptNewFolder bool
 
 	finderOpen  bool
@@ -873,7 +873,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		text := msg.String()
 		if text != "" {
-			m.cur().buf.InsertText(text)
+			if m.cur().buf.HasMultipleCursors() {
+				m.cur().buf.MultiInsertText(text)
+			} else {
+				m.cur().buf.InsertText(text)
+			}
 			m.msg = "pasted"
 		}
 	case tea.KeyPressMsg:
@@ -1102,6 +1106,18 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	switch s {
+	case "alt+d":
+		b := m.cur().buf
+		if !b.AddNextOccurrence() {
+			m.msg = "no more occurrences"
+		} else if !b.HasMultipleCursors() && b.HasSelection() {
+			m.msg = "selected: type to replace all occurrences"
+		} else {
+			m.msg = ""
+		}
+	case "esc":
+		m.cur().buf.ClearCursors()
+		m.msg = ""
 	case "ctrl+s":
 		t := m.cur()
 		if t.path == "" {
@@ -1140,7 +1156,11 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.clipboard = sysClip
 		}
 		if m.clipboard != "" {
-			m.cur().buf.InsertText(m.clipboard)
+			if m.cur().buf.HasMultipleCursors() {
+				m.cur().buf.MultiInsertText(m.clipboard)
+			} else {
+				m.cur().buf.InsertText(m.clipboard)
+			}
 			m.msg = ""
 		}
 		return nil
@@ -1165,13 +1185,29 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "shift+end":
 		m.cur().buf.LineEndWithSelect()
 	case "up":
-		m.cur().buf.MoveUp()
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MoveAllUp()
+		} else {
+			m.cur().buf.MoveUp()
+		}
 	case "down":
-		m.cur().buf.MoveDown()
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MoveAllDown()
+		} else {
+			m.cur().buf.MoveDown()
+		}
 	case "left":
-		m.cur().buf.MoveLeft()
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MoveAllLeft()
+		} else {
+			m.cur().buf.MoveLeft()
+		}
 	case "right":
-		m.cur().buf.MoveRight()
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MoveAllRight()
+		} else {
+			m.cur().buf.MoveRight()
+		}
 	case "home":
 		m.cur().buf.LineStart()
 	case "end":
@@ -1187,21 +1223,41 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			t.buf.MoveDown()
 		}
 	case "enter":
-		m.cur().buf.InsertNewline()
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MultiNewline()
+		} else {
+			m.cur().buf.InsertNewline()
+		}
 		m.msg = ""
 	case "backspace":
-		m.cur().buf.Backspace()
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MultiBackspace()
+		} else {
+			m.cur().buf.Backspace()
+		}
 		m.msg = ""
 	case "delete":
-		m.cur().buf.Delete()
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MultiDelete()
+		} else {
+			m.cur().buf.Delete()
+		}
 		m.msg = ""
 	case "tab":
-		m.cur().buf.Insert('\t')
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MultiInsertRune('\t')
+		} else {
+			m.cur().buf.Insert('\t')
+		}
 		m.msg = ""
 	default:
 		if len(msg.Text) > 0 {
-			for _, r := range msg.Text {
-				m.cur().buf.Insert(r)
+			if m.cur().buf.HasMultipleCursors() {
+				m.cur().buf.MultiInsertText(msg.Text)
+			} else {
+				for _, r := range msg.Text {
+					m.cur().buf.Insert(r)
+				}
 			}
 			m.msg = ""
 		} else {
@@ -1653,6 +1709,14 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 	lineLen := t.buf.LineLen(ln)
 	if rawCol > lineLen {
 		rawCol = lineLen
+	}
+
+	// Alt+Click adds a secondary cursor instead of moving the main one.
+	if msg.Mod&tea.ModAlt != 0 {
+		if t.buf.AddCursor(ln, rawCol, rawCol, rawCol) {
+			m.msg = "added cursor"
+		}
+		return nil
 	}
 
 	t.buf.SetCursor(ln, rawCol)

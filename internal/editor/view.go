@@ -69,6 +69,9 @@ var helpEntries = []helpEntry{
 	{"Enter/Backspace/Delete/Tab", "edit text"},
 	{"Ctrl+Z / Ctrl+R", "undo / redo"},
 	{"Ctrl+Y / Ctrl+D", "delete line / duplicate line"},
+	{"Alt+D", "multi-cursor: add cursor at next occurrence of word"},
+	{"Alt+Click", "add cursor at click position"},
+	{"Esc", "exit multi-cursor mode"},
 	{"Alt+↑ / Alt+↓", "move line up / down"},
 	{"", ""},
 	{"F1 or Ctrl+E", "toggle this help"},
@@ -1148,11 +1151,31 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 		}
 	}
 
-	// Cursor position in exp coordinates
-	cx := -1
-	if activePane && ln == t.buf.CurLine() {
-		if t.buf.Col() <= len(raw) {
-			cx = rawToExp[t.buf.Col()]
+	// All cursor positions and per-cursor selections on this line (active pane
+	// only). Secondary cursors render as reverse cells; their selections use
+	// the normal selection style.
+	var carets []int
+	var selRanges [][2]int
+	if activePane {
+		for _, c := range t.buf.Cursors() {
+			if c.Line != ln {
+				continue
+			}
+			if c.Col <= len(raw) {
+				carets = append(carets, rawToExp[c.Col])
+			} else if len(raw) >= 0 {
+				carets = append(carets, rawToExp[len(raw)])
+			}
+			if c.From != c.To {
+				cf, ct := c.From, c.To
+				if cf > len(raw) {
+					cf = len(raw)
+				}
+				if ct > len(raw) {
+					ct = len(raw)
+				}
+				selRanges = append(selRanges, [2]int{rawToExp[cf], rawToExp[ct]})
+			}
 		}
 	}
 
@@ -1208,18 +1231,30 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 
 		if selStart >= 0 && i >= selStart && i < selEnd {
 			st = selectionStyle
+		} else {
+			for _, rng := range selRanges {
+				if i >= rng[0] && i < rng[1] {
+					st = selectionStyle
+					break
+				}
+			}
 		}
 
-		if i == cx {
-			st = cursorStyle
+		for _, cc := range carets {
+			if i == cc {
+				st = cursorStyle
+				break
+			}
 		}
 
 		out.WriteString(st.Render(string(r)))
 	}
 
-	// Cursor at end of line
-	if cx == len(exp) && cx >= start && cx < start+w {
-		out.WriteString(cursorStyle.Render(" "))
+	// Cursor(s) at end of line
+	for _, cc := range carets {
+		if cc == len(exp) && cc >= start && cc < start+w {
+			out.WriteString(cursorStyle.Render(" "))
+		}
 	}
 
 	return out.String()

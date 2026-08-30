@@ -24,6 +24,11 @@ type Buffer struct {
 	lastWasInsert bool
 	lastLine      int
 	lastCol       int
+
+	// Multi-cursor support: secondary cursors plus the word target used by
+	// AddNextOccurrence (Alt+D). See multicursor.go.
+	cursors []Cursor
+	word    string
 }
 
 func New() *Buffer {
