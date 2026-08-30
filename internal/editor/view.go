@@ -541,7 +541,13 @@ func (m Model) gitLine() string {
 
 func (m Model) gitStatusLine() string {
 	r := m.repoForCur()
-	var line string
+	var hint string
+	if r == nil {
+		hint = "(I: init repo, Esc: close)"
+	} else {
+		hint = "(SPC:stage A:all C:commit D:diff L:log B:branch R:refresh)"
+	}
+	line := ""
 	if r == nil {
 		line = statusHiStyle.Render(" git: ") + statusStyle.Render(" no repository")
 	} else {
@@ -552,20 +558,33 @@ func (m Model) gitStatusLine() string {
 				staged++
 			}
 		}
-		line = statusHiStyle.Render(" git ") + hintStyle.Render("("+r.Branch()+" "+summary+")") +
-			statusStyle.Render(fmt.Sprintf(" %d changed, %d staged ", len(m.gitFiles), staged))
+		line = statusHiStyle.Render(" git ") +
+			hintStyle.Render("("+r.Branch()+" "+summary+")") +
+			statusStyle.Render(fmt.Sprintf(" %d changed, %d staged", len(m.gitFiles), staged))
 	}
-	hint := ""
-	if r == nil {
-		hint = "(I: init repo, Esc: close)"
-	} else {
-		hint = "(Space: stage, A: all, C: commit, D: diff, L: log, B: branch, R: refresh, Esc: close)"
+	// The hint must stay visible even on narrow terminals: if the summary
+	// doesn't leave room for it on a single status line, trim the summary.
+	fill := m.width - lipgloss.Width(hint) - lipgloss.Width(line)
+	if fill < 0 {
+		line = statusStyle.Render(fitStatusTail(line, m.width-lipgloss.Width(hint)))
+		fill = m.width - lipgloss.Width(hint) - lipgloss.Width(line)
 	}
-	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	return line + hintStyle.Render(hint)
+}
+
+// fitStatusTail strips styling and keeps the tail of s within w visible columns.
+func fitStatusTail(s string, w int) string {
+	r := []rune(stripANSI(s))
+	if len(r) <= w {
+		return s
+	}
+	if w < 1 {
+		return ""
+	}
+	return "…" + string(r[len(r)-(w-1):])
 }
 
 func (m Model) gitLogStatusLine() string {

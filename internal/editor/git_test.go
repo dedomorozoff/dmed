@@ -227,6 +227,33 @@ func TestEditorGitPanelLeftRail(t *testing.T) {
 	}
 }
 
+func TestEditorGitPanelStatusHints(t *testing.T) {
+	_, f := initTestGitRepo(t)
+
+	// With a repo: the git status line shows the action hints.
+	m := New(f)
+	m.width, m.height = 80, 24
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	content := m.View().Content
+	if !strings.Contains(content, "stage") || !strings.Contains(content, "commit") {
+		t.Fatalf("git status line should show action hints, got:\n%s", content)
+	}
+
+	// Without a repo: the status line must hint at git init.
+	norepo := t.TempDir()
+	nf := filepath.Join(norepo, "plain.txt")
+	if err := os.WriteFile(nf, []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m = New(nf)
+	m.width, m.height = 80, 24
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	content = m.View().Content
+	if !strings.Contains(content, "init repo") {
+		t.Fatalf("git status line should hint at init for no-repo dir, got:\n%s", content)
+	}
+}
+
 func TestQuitKeysWorkInAllModes(t *testing.T) {
 	dir, f := initTestGitRepo(t)
 
