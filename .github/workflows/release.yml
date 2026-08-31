@@ -127,7 +127,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            dist/* \
+          # Upload every file under dist/ (some packages land in nested dirs,
+          # e.g. dist/rpm/RPMS/...), skipping directories.
+          mapfile -t assets < <(find dist -type f)
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes
