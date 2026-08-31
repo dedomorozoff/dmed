@@ -54,19 +54,19 @@ jobs:
         include:
           - target: deb
             image: ubuntu:24.04
-            install: apt-get update && apt-get install -y --no-install-recommends golang-go dpkg-dev
+            install: apt-get update && apt-get install -y --no-install-recommends make dpkg-dev ca-certificates
           - target: termux
             image: ubuntu:24.04
-            install: apt-get update && apt-get install -y --no-install-recommends golang-go dpkg-dev
+            install: apt-get update && apt-get install -y --no-install-recommends make dpkg-dev ca-certificates
           - target: win-zip
             image: ubuntu:24.04
-            install: apt-get update && apt-get install -y --no-install-recommends golang-go zip
+            install: apt-get update && apt-get install -y --no-install-recommends make zip ca-certificates
           - target: rpm
             image: fedora:40
-            install: dnf install -y golang rpm-build
+            install: dnf install -y make rpm-build ca-certificates
           - target: pkg
             image: archlinux:latest
-            install: pacman -Syu --noconfirm --needed go base-devel
+            install: pacman -Syu --noconfirm --needed make base-devel ca-certificates
     container:
       image: ${{ matrix.image }}
     steps:
@@ -74,6 +74,15 @@ jobs:
 
       - name: Install build deps
         run: ${{ matrix.install }}
+
+      # Distro Go is older than go.mod requires; install the pinned 1.25
+      # toolchain via setup-go so builds don't fall back to a broken
+      # toolchain download inside the container.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: Build package
         if: matrix.target != 'pkg'
