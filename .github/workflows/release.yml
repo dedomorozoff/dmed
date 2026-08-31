@@ -103,6 +103,7 @@ jobs:
           path: |
             dist/*.deb
             dist/*.rpm
+            dist/rpm/RPMS/**/*.rpm
             dist/*.pkg.tar.zst
             dist/*.zip
           if-no-files-found: error
