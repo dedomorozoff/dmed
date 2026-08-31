@@ -35,7 +35,7 @@ jobs:
           cache: true
 
       - name: Build ${{ matrix.platform }}
-        run: make build-${{ matrix.platform }}
+        run: make build-${{ matrix.platform }} VERSION="${GITHUB_REF_NAME#v}"
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
@@ -44,16 +44,70 @@ jobs:
           path: dist/dmed-${{ matrix.platform }}*
           if-no-files-found: error
 
+  packages:
+    name: package (${{ matrix.target }})
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: deb
+            image: ubuntu:24.04
+            install: apt-get update && apt-get install -y --no-install-recommends golang-go dpkg-dev
+          - target: termux
+            image: ubuntu:24.04
+            install: apt-get update && apt-get install -y --no-install-recommends golang-go dpkg-dev
+          - target: win-zip
+            image: ubuntu:24.04
+            install: apt-get update && apt-get install -y --no-install-recommends golang-go zip
+          - target: rpm
+            image: fedora:40
+            install: dnf install -y golang rpm-build
+          - target: pkg
+            image: archlinux:latest
+            install: pacman -Syu --noconfirm --needed go base-devel
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: ${{ matrix.install }}
+
+      - name: Build package
+        if: matrix.target != 'pkg'
+        run: make ${{ matrix.target }} VERSION="${GITHUB_REF_NAME#v}"
+
+      # makepkg refuses to run as root; build the Arch package as a regular user.
+      - name: Build pacman package (non-root)
+        if: matrix.target == 'pkg'
+        run: |
+          useradd -m builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          su builder -c "make pkg VERSION=\"${GITHUB_REF_NAME#v}\""
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.target }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.pkg.tar.zst
+            dist/*.zip
+          if-no-files-found: error
+
   release:
     name: Publish GitHub Release
-    needs: build
+    needs: [build, packages]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all binaries
+      - name: Download binaries and packages
         uses: actions/download-artifact@v4
         with:
           path: dist

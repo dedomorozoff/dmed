@@ -129,7 +129,7 @@ rpm: build-linux-amd64 ## Build .rpm package (x86_64)
 	echo 'Release:        1%{?dist}' >> dist/rpm/SPECS/dmed.spec
 	echo 'Summary:        Terminal code editor with AI agents' >> dist/rpm/SPECS/dmed.spec
 	echo 'License:        BSD-3-Clause' >> dist/rpm/SPECS/dmed.spec
-	echo 'URL:            https://github.com/user/dmed' >> dist/rpm/SPECS/dmed.spec
+	echo 'URL:            https://github.com/dedomorozoff/dmed' >> dist/rpm/SPECS/dmed.spec
 	echo 'Source0:        dmed' >> dist/rpm/SPECS/dmed.spec
 	echo 'Source1:        dmed.1' >> dist/rpm/SPECS/dmed.spec
 	echo '' >> dist/rpm/SPECS/dmed.spec
@@ -161,7 +161,7 @@ pkg: build-linux-amd64 ## Build .pkg.tar.zst (Arch, x86_64)
 	echo 'pkgrel=1' >> dist/pkg/dmed/PKGBUILD
 	echo 'pkgdesc="Terminal code editor with AI agents"' >> dist/pkg/dmed/PKGBUILD
 	echo 'arch=("x86_64")' >> dist/pkg/dmed/PKGBUILD
-	echo 'url="https://github.com/user/dmed"' >> dist/pkg/dmed/PKGBUILD
+	echo 'url="https://github.com/dedomorozoff/dmed"' >> dist/pkg/dmed/PKGBUILD
 	echo 'license=("BSD-3-Clause")' >> dist/pkg/dmed/PKGBUILD
 	echo 'source=()' >> dist/pkg/dmed/PKGBUILD
 	echo 'sha256sums=()' >> dist/pkg/dmed/PKGBUILD
@@ -183,7 +183,7 @@ termux: build-linux-arm64 ## Build Termux .deb (aarch64)
 	echo "Package: dmed" > dist/termux/dmed_$(VERSION)_aarch64/DEBIAN/control
 	echo "Architecture: aarch64" >> dist/termux/dmed_$(VERSION)_aarch64/DEBIAN/control
 	echo "Depends: libandroid-support" >> dist/termux/dmed_$(VERSION)_aarch64/DEBIAN/control
-	echo "Homepage: https://github.com/user/dmed" >> dist/termux/dmed_$(VERSION)_aarch64/DEBIAN/control
+	echo "Homepage: https://github.com/dedomorozoff/dmed" >> dist/termux/dmed_$(VERSION)_aarch64/DEBIAN/control
 	echo "Maintainer: dmed contributors" >> dist/termux/dmed_$(VERSION)_aarch64/DEBIAN/control
 	echo "Description: Terminal code editor with AI agents" >> dist/termux/dmed_$(VERSION)_aarch64/DEBIAN/control
 	echo "Version: $(VERSION)" >> dist/termux/dmed_$(VERSION)_aarch64/DEBIAN/control
@@ -212,7 +212,7 @@ freebsd-port: ## Generate FreeBSD port Makefile
 	echo 'LICENSE=        BSD3CLAUSE' >> dist/freebsd-port/Makefile
 	echo '' >> dist/freebsd-port/Makefile
 	echo 'USES=           gmake go' >> dist/freebsd-port/Makefile
-	echo 'GH_ACCOUNT=     user' >> dist/freebsd-port/Makefile
+	echo 'GH_ACCOUNT=     dedomorozoff' >> dist/freebsd-port/Makefile
 	echo 'GH_PROJECT=     dmed' >> dist/freebsd-port/Makefile
 	echo 'GH_TUPLE=       ...' >> dist/freebsd-port/Makefile
 	echo '' >> dist/freebsd-port/Makefile
