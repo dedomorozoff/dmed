@@ -68,7 +68,9 @@ func Open(path string) (*Repo, error) {
 	}, nil
 }
 
-// Init creates a new Git repository at path and returns it.
+// Init creates a new Git repository at path with a real "main" branch and
+// returns it. The repository starts with an empty initial commit on main, so
+// the branch exists immediately and files show up as untracked.
 func Init(path string) (*Repo, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -77,7 +79,11 @@ func Init(path string) (*Repo, error) {
 	if fi, serr := os.Stat(abs); serr == nil && !fi.IsDir() {
 		abs = filepath.Dir(abs)
 	}
-	r, err := git.PlainInit(abs, false)
+	r, err := git.PlainInitWithOptions(abs, &git.PlainInitOptions{
+		InitOptions: git.InitOptions{
+			DefaultBranch: plumbing.NewBranchReferenceName("main"),
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -85,16 +91,37 @@ func Init(path string) (*Repo, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Repo{
-		Root: wt.Filesystem.Root(),
-		r:    r,
-	}, nil
+	rp := &Repo{Root: wt.Filesystem.Root(), r: r}
+	if err := rp.commitInitial(); err != nil {
+		return nil, err
+	}
+	return rp, nil
+}
+
+// commitInitial makes an empty initial commit on the current branch so the
+// branch becomes real and cannot be lost by later branch operations. It is
+// used by Init and by CreateBranch on unborn repositories.
+func (repo *Repo) commitInitial() error {
+	wt, err := repo.r.Worktree()
+	if err != nil {
+		return err
+	}
+	_, err = wt.Commit("initial commit", &git.CommitOptions{
+		Author:            &object.Signature{Name: "dmed", Email: "dmed@local", When: time.Now()},
+		AllowEmptyCommits: true,
+	})
+	return err
 }
 
 // Branch returns the current branch name or short SHA.
 func (repo *Repo) Branch() string {
 	head, err := repo.r.Head()
 	if err != nil {
+		// Unborn branch (fresh repo with no commits yet): read the symbolic
+		// HEAD target so the panel can show e.g. "main".
+		if ref, rerr := repo.r.Reference(plumbing.HEAD, false); rerr == nil && ref.Type() == plumbing.SymbolicReference && ref.Target().IsBranch() {
+			return ref.Target().Short()
+		}
 		return ""
 	}
 	if head.Name().IsBranch() {
@@ -107,27 +134,47 @@ func (repo *Repo) Branch() string {
 	return h
 }
 
-// Branches returns the list of local branch names (except current).
+// Branches returns the sorted list of all local branch names, including the
+// current one (which the panel marks separately). Keeping the current branch
+// in the list lets the user navigate to it and always have something to move
+// between, even with only a couple of branches.
 func (repo *Repo) Branches() ([]string, error) {
 	iter, err := repo.r.Branches()
 	if err != nil {
 		return nil, err
 	}
 	var names []string
-	cur := repo.Branch()
 	_ = iter.ForEach(func(ref *plumbing.Reference) error {
 		name := ref.Name().Short()
-		if name != cur && name != "HEAD" {
+		if name != "HEAD" {
 			names = append(names, name)
 		}
 		return nil
 	})
+	sort.Strings(names)
 	return names, nil
 }
 
 // CreateBranch creates a new branch at the current HEAD and checks it out.
 func (repo *Repo) CreateBranch(name string) error {
 	head, err := repo.r.Head()
+	if err == plumbing.ErrReferenceNotFound {
+		// Unborn HEAD (repository with no commits yet, e.g. an externally
+		// `git init`-ed folder). Repointing the symbolic reference would make
+		// the current branch disappear, so materialize it with an initial
+		// empty commit first: both branches then exist and can be switched
+		// between.
+		if _, rerr := repo.r.Reference(plumbing.NewBranchReferenceName(name), false); rerr == nil {
+			return fmt.Errorf("branch already exists: %s", name)
+		}
+		if err := repo.commitInitial(); err != nil {
+			return err
+		}
+		head, err = repo.r.Head()
+		if err != nil {
+			return err
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -170,8 +217,8 @@ const (
 
 // FileStatus represents one file's staging and worktree status.
 type FileStatus struct {
-	Path    string
-	Staging FileStatusCode
+	Path     string
+	Staging  FileStatusCode
 	Worktree FileStatusCode
 }
 
@@ -496,11 +543,11 @@ func (repo *Repo) Commit(msg string) (plumbing.Hash, error) {
 
 // LogEntry represents one commit in the history.
 type LogEntry struct {
-	Hash    string // short hash (7 chars)
+	Hash     string // short hash (7 chars)
 	FullHash plumbing.Hash
-	Subject string // first line of commit message
-	Author  string
-	When    time.Time
+	Subject  string // first line of commit message
+	Author   string
+	When     time.Time
 }
 
 // Log returns the last n commits on the current branch.

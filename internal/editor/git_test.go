@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -549,6 +550,182 @@ func TestGitKeyNameCyrillicLayout(t *testing.T) {
 	}
 }
 
+func TestEditorGitInitThenCreateBranch(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "code.go")
+	if err := os.WriteFile(f, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	// Open git panel on a non-repo dir: init hint, then init the repo.
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	if !m.gitOpen {
+		t.Fatal("setup: git panel must be open")
+	}
+	m = press(m, tea.KeyPressMsg{Text: string('i')})
+	if m.repo == nil {
+		t.Fatal("git init from panel must set the repo")
+	}
+	if got := m.repo.Branch(); got != "main" {
+		t.Fatalf("expected main after init, got %q", got)
+	}
+
+	// Branch view, then create a new branch.
+	m = press(m, tea.KeyPressMsg{Text: string('b')})
+	if m.gitMode != gitModeBranch {
+		t.Fatalf("expected branch mode after 'b', got %d", m.gitMode)
+	}
+	m = press(m, tea.KeyPressMsg{Text: string('n')})
+	if !m.gitBranchNew {
+		t.Fatal("expected new-branch input after 'n'")
+	}
+	m = typeStr(m, "feature")
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if m.gitMode != gitModeStatus {
+		t.Fatalf("expected to return to status mode after creating branch, got %d", m.gitMode)
+	}
+	if got := m.repo.Branch(); got != "feature" {
+		t.Fatalf("expected branch feature, got %q (msg=%q)", got, m.msg)
+	}
+
+	// main is a real branch and can be switched back to from the panel. The
+	// current branch (feature) is now part of the navigable list too.
+	m = press(m, tea.KeyPressMsg{Text: string('b')})
+	if m.gitMode != gitModeBranch {
+		t.Fatalf("expected branch mode after 'b', got %d", m.gitMode)
+	}
+	if !slices.Contains(m.gitBranchList, "main") || !slices.Contains(m.gitBranchList, "feature") {
+		t.Fatalf("branch list must contain current and other branches, got %v", m.gitBranchList)
+	}
+	for i, n := range m.gitBranchList {
+		if n == "main" {
+			m.gitBranchSel = i
+			break
+		}
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := m.repo.Branch(); got != "main" {
+		t.Fatalf("expected main after switch back, got %q (msg=%q)", got, m.msg)
+	}
+}
+
+func TestEditorGitBranchSwitchFlow(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "code.go")
+	if err := os.WriteFile(f, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	// Init the repo, then make a real commit on main.
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	m = press(m, tea.KeyPressMsg{Text: string('i')})
+	m = press(m, tea.KeyPressMsg{Text: string('a')})
+	m = press(m, tea.KeyPressMsg{Text: string('c')})
+	m = typeStr(m, "work")
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	// Create a second branch off main.
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	m = press(m, tea.KeyPressMsg{Text: string('b')})
+	if !slices.Equal(m.gitBranchList, []string{"main"}) {
+		t.Fatalf("setup: only current branch expected on main, got %v", m.gitBranchList)
+	}
+	m = press(m, tea.KeyPressMsg{Text: string('n')})
+	m = typeStr(m, "feature")
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := m.repo.Branch(); got != "feature" {
+		t.Fatalf("expected feature, got %q (msg=%q)", got, m.msg)
+	}
+
+	// Branch view lists all branches; switching goes back and forth. The
+	// target is selected by index so the test is order-independent.
+	switchTo := func(want string) {
+		m = press(m, tea.KeyPressMsg{Text: string('b')})
+		if !slices.Contains(m.gitBranchList, want) {
+			t.Fatalf("expected %s in branch list, got %v", want, m.gitBranchList)
+		}
+		for i, n := range m.gitBranchList {
+			if n == want {
+				m.gitBranchSel = i
+				break
+			}
+		}
+		m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		if got := m.repo.Branch(); got != want {
+			t.Fatalf("expected %s after switch, got %q (msg=%q)", want, got, m.msg)
+		}
+	}
+	switchTo("main")
+	switchTo("feature")
+	switchTo("main")
+}
+
+func TestEditorGitBranchOnRepoWithoutCommits(t *testing.T) {
+	// A repo created externally (e.g. plain `git init`) has no commits yet.
+	// Creating a branch from the panel must not lose the current branch, and
+	// both branches must be switchable afterwards.
+	dir := t.TempDir()
+	f := filepath.Join(dir, "code.go")
+	if err := os.WriteFile(f, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.PlainInit(dir, false); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(f)
+	m.width, m.height = 80, 24
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	if !m.gitOpen {
+		t.Fatal("setup: git panel must be open")
+	}
+	repoFor := func() *vcs.Repo {
+		r, err := vcs.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	orig := repoFor().Branch()
+	if orig == "" {
+		t.Fatal("expected the unborn HEAD branch name to resolve (e.g. master)")
+	}
+
+	m = press(m, tea.KeyPressMsg{Text: string('b')})
+	if m.gitMode != gitModeBranch {
+		t.Fatalf("expected branch mode after 'b', got %d", m.gitMode)
+	}
+	m = press(m, tea.KeyPressMsg{Text: string('n')})
+	m = typeStr(m, "feature")
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if got := repoFor().Branch(); got != "feature" {
+		t.Fatalf("expected feature after create, got %q (msg=%q)", got, m.msg)
+	}
+	// The original branch must have survived and be listed as switchable.
+	m = press(m, tea.KeyPressMsg{Text: string('b')})
+	if !slices.Contains(m.gitBranchList, orig) {
+		t.Fatalf("expected %s in branch list, got %v", orig, m.gitBranchList)
+	}
+	for i, n := range m.gitBranchList {
+		if n == orig {
+			m.gitBranchSel = i
+			break
+		}
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := repoFor().Branch(); got != orig {
+		t.Fatalf("expected %s after switch back, got %q (msg=%q)", orig, got, m.msg)
+	}
+}
+
 func TestGitBranchViaCyrillicB(t *testing.T) {
 	_, f := initTestGitRepo(t)
 
@@ -569,5 +746,59 @@ func TestGitBranchViaCyrillicB(t *testing.T) {
 	v := m.View()
 	if !strings.Contains(v.Content, "BRANCH") || !strings.Contains(v.Content, "Enter: checkout") {
 		t.Fatalf("branch mode bottom bar must be shown:\n%s", v.Content)
+	}
+}
+
+func TestGitBranchPanelScrollReachesLast(t *testing.T) {
+	f := writeTemp(t, t.TempDir(), "x.txt", "")
+	m := New(f)
+	m.height = 8
+	m.gitMode = gitModeBranch
+
+	list := make([]string, 10)
+	for i := range list {
+		list[i] = fmt.Sprintf("branch-%d", i)
+	}
+	m.gitBranchList = list
+	m.gitBranchSel = len(list) - 1
+	m.clampGitBranchScroll()
+
+	h := m.viewHeight()
+	if want := len(list) - h; m.gitBranchOffset != want {
+		t.Fatalf("offset=%d want %d (list=%d h=%d)", m.gitBranchOffset, want, len(list), h)
+	}
+
+	rows := m.branchPanel(h)
+	if len(rows) != h {
+		t.Fatalf("panel rows=%d want %d", len(rows), h)
+	}
+	if !strings.Contains(strings.Join(rows, "\n"), "branch-9") {
+		t.Fatalf("last branch must be visible after scrolling to it:\n%s", strings.Join(rows, "\n"))
+	}
+}
+
+func TestGitBranchModeCaseInsensitiveKeys(t *testing.T) {
+	_, f := initTestGitRepo(t)
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	// Uppercase 'B' (as hinted) must open branch mode just like lowercase 'b'.
+	m = press(m, tea.KeyPressMsg{Text: "B"})
+	if m.gitMode != gitModeBranch {
+		t.Fatalf("uppercase 'B' must open branch mode, got mode %d", m.gitMode)
+	}
+	// Uppercase 'N' enters the new-branch input, and 'Q' leaves branch mode.
+	m = press(m, tea.KeyPressMsg{Text: "N"})
+	if !m.gitBranchNew {
+		t.Fatal("uppercase 'N' must start new-branch input")
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.gitBranchNew {
+		t.Fatal("esc must cancel new-branch input")
+	}
+	m = press(m, tea.KeyPressMsg{Text: "Q"})
+	if m.gitMode == gitModeBranch {
+		t.Fatal("uppercase 'Q' must leave branch mode")
 	}
 }

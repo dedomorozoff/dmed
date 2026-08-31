@@ -345,6 +345,7 @@ func New(paths ...string) Model {
 		m.watcher = w
 	}
 
+	var files []string
 	for _, p := range paths {
 		if st, err := os.Stat(p); err == nil && st.IsDir() {
 			if m.root == "" {
@@ -353,13 +354,24 @@ func New(paths ...string) Model {
 			}
 			continue
 		}
-		m.openPath(p)
+		files = append(files, p)
 	}
-	if len(paths) == 0 && m.root != "" {
+
+	// Restore the previous session only when the user did not open specific
+	// files and a project root is known — an explicit file list takes
+	// precedence over the session.
+	restoreActiveTab := -1
+	if len(files) == 0 && m.root != "" {
 		if sess, err := session.Load(session.DefaultPath(m.root)); err == nil && len(sess.Files) > 0 {
 			for _, f := range sess.Files {
 				m.openPath(f)
 			}
+			m.restoreCursors(sess.Cursors)
+			restoreActiveTab = sess.ActiveTab
+		}
+	} else {
+		for _, p := range files {
+			m.openPath(p)
 		}
 	}
 	if len(m.tabs) == 0 {
@@ -368,6 +380,9 @@ func New(paths ...string) Model {
 	m.cfg = config.Load(m.root)
 	syntax.SetDefault(m.cfg.Editor.SyntaxTheme)
 	m.initPanes()
+	if restoreActiveTab >= 0 && restoreActiveTab < len(m.tabs) {
+		m.setActiveTab(restoreActiveTab)
+	}
 	if m.root != "" {
 		m.treeVisible = true
 		m.rebuildTree()
@@ -1636,11 +1651,23 @@ func (m *Model) startPalette() {
 	m.paletteOffset = 0
 }
 
+// restoreCursors applies saved per-file cursor positions to the just-opened
+// tabs. Positions are clamped by SetCursor, so stale values are harmless.
+func (m *Model) restoreCursors(cursors map[string]session.CursorPos) {
+	for _, t := range m.tabs {
+		if c, ok := cursors[t.path]; ok {
+			t.buf.SetCursor(c.Line, c.Col)
+		}
+	}
+}
+
 func (m *Model) saveSession() {
 	var files []string
+	cursors := map[string]session.CursorPos{}
 	for _, t := range m.tabs {
 		if t.path != "" {
 			files = append(files, t.path)
+			cursors[t.path] = session.CursorPos{Line: t.buf.CurLine(), Col: t.buf.Col()}
 		}
 	}
 	if len(files) == 0 {
@@ -1652,6 +1679,7 @@ func (m *Model) saveSession() {
 		ActiveTab:  m.activeTabIndex(),
 		Layout:     int(m.layout),
 		ActivePane: m.activePane,
+		Cursors:    cursors,
 	}
 	_ = session.Save(session.DefaultPath(m.root), sess)
 }

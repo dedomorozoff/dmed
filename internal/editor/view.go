@@ -543,9 +543,9 @@ func (m Model) gitStatusLine() string {
 	r := m.repoForCur()
 	var hint string
 	if r == nil {
-		hint = "(I: init repo, Esc: close)"
+		hint = "(i: init repo, esc/q: close)"
 	} else {
-		hint = "(SPC:stage A:all C:commit D:diff L:log B:branch R:refresh)"
+		hint = "(space: stage, a: all, c: commit, d: diff, l: log, b: branch, r: refresh, q: close)"
 	}
 	line := ""
 	if r == nil {
@@ -594,7 +594,7 @@ func (m Model) gitLogStatusLine() string {
 	} else {
 		line = statusHiStyle.Render(" LOG ") + hintStyle.Render(fmt.Sprintf("(%d commits)", len(m.gitLogEntries)))
 	}
-	hint := "(J/K: navigate, Tab: diff focus, Esc: back to files, R: refresh)"
+	hint := "(j/k: navigate, Tab: diff focus, esc/q: back, r: refresh)"
 	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -616,7 +616,7 @@ func (m Model) gitBranchLine() string {
 	if r := m.repoForCur(); r != nil {
 		line = statusHiStyle.Render(" BRANCH ") + statusStyle.Render(r.Branch())
 	}
-	hint := "(J/K: switch, Enter: checkout, N: new branch, Esc: back, R: refresh)"
+	hint := "(j/k: switch, Enter: checkout, n: new branch, esc/q: back, r: refresh)"
 	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
