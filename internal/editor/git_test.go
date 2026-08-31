@@ -211,6 +211,12 @@ func TestEditorGitPanelLeftRail(t *testing.T) {
 
 	found := false
 	for _, row := range rows {
+		// Only the git rail row carries the status marker; the tab bar may
+		// also contain the filename (full path on some platforms) and must
+		// not count.
+		if !strings.HasPrefix(row, "  M ") {
+			continue
+		}
 		if i := strings.Index(row, "code.go"); i >= 0 {
 			found = true
 			if i >= gitPanelWidth {
