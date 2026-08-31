@@ -126,6 +126,7 @@ func (m *Model) openGitPanel() {
 	m.gitMode = gitModeStatus
 	m.gitCommitIn = nil
 	m.gitDiffFocused = false
+	m.treeFocus = false
 	m.refreshGitFiles()
 	m.refreshGitDiffPreview()
 }
@@ -425,14 +426,6 @@ func (m *Model) branchPanel(h int) []string {
 	if r := m.repoForCur(); r != nil {
 		cur = r.Branch()
 	}
-	// Current branch highlighted as a header
-	curLine := " " + gitAddStyle.Render("● "+cur)
-	pad := gitPanelWidth - 1 - lipgloss.Width(curLine)
-	if pad < 0 {
-		pad = 0
-	}
-	rows = append(rows, curLine+strings.Repeat(" ", pad))
-	// Other branches
 	start := m.gitBranchOffset
 	end := start + m.gitBranchListHeight()
 	for i := start; i < end && len(rows) < h; i++ {
@@ -440,19 +433,28 @@ func (m *Model) branchPanel(h int) []string {
 		if i < len(m.gitBranchList) {
 			name = m.gitBranchList[i]
 		}
-		plain := " " + name
+		isCur := name != "" && name == cur
+		prefix := "  "
+		if isCur {
+			prefix = "● "
+		}
+		plain := " " + prefix + name
 		pad := gitPanelWidth - 1 - lipgloss.Width(plain)
 		if pad < 0 {
 			pad = 0
 		}
 		line := plain + strings.Repeat(" ", pad)
 		var cell string
-		if i == m.gitBranchSel {
+		switch {
+		case i == m.gitBranchSel:
 			cell = statusHiStyle.Render(line)
-		} else {
+		case isCur:
+			styled := " " + gitAddStyle.Render(prefix) + name
+			cell = styled + strings.Repeat(" ", maxInt(0, gitPanelWidth-1-lipgloss.Width(styled)))
+		default:
 			cell = line
 		}
-		rows = append(rows, cell)
+		rows = append(rows, cell+" ")
 	}
 	for len(rows) < h {
 		rows = append(rows, strings.Repeat(" ", gitPanelWidth))
@@ -462,53 +464,10 @@ func (m *Model) branchPanel(h int) []string {
 
 func (m *Model) handleGitBranch(msg tea.KeyPressMsg) tea.Cmd {
 	key := gitKeyName(msg)
+	keyL := strings.ToLower(key)
 	r := m.repoForCur()
 
-	switch key {
-	case "esc":
-		m.gitMode = gitModeStatus
-		m.gitDiffFocused = false
-		m.msg = ""
-		return nil
-	case "n":
-		// Create a new branch (enter name)
-		m.gitBranchNew = true
-		m.gitBranchIn = nil
-		m.msg = "new branch name:"
-		return nil
-	case "enter":
-		// Switch to selected branch
-		if r == nil {
-			break
-		}
-		if len(m.gitBranchList) == 0 {
-			break
-		}
-		name := m.gitBranchList[m.gitBranchSel]
-		if err := r.SwitchBranch(name); err != nil {
-			m.msg = "switch error: " + err.Error()
-		} else {
-			m.msg = "switched to " + name
-			m.gitMode = gitModeStatus
-			m.refreshGitFiles()
-			m.refreshGitDiffPreview()
-		}
-	case "up", "k":
-		if m.gitBranchSel > 0 {
-			m.gitBranchSel--
-			m.clampGitBranchScroll()
-		}
-	case "down", "j":
-		if m.gitBranchSel < len(m.gitBranchList)-1 {
-			m.gitBranchSel++
-			m.clampGitBranchScroll()
-		}
-	case "r":
-		m.refreshGitBranches()
-		m.msg = "refreshed"
-	}
-
-	// If creating a new branch, capture name input
+	// While naming a new branch, every key belongs to the name input.
 	if m.gitBranchNew {
 		switch key {
 		case "enter":
@@ -541,6 +500,54 @@ func (m *Model) handleGitBranch(msg tea.KeyPressMsg) tea.Cmd {
 				m.gitBranchIn = append(m.gitBranchIn, []rune(msg.Text)...)
 			}
 		}
+		return nil
+	}
+
+	switch keyL {
+	case "esc":
+		m.gitMode = gitModeStatus
+		m.gitDiffFocused = false
+		m.msg = ""
+	case "q":
+		m.gitMode = gitModeStatus
+		m.gitDiffFocused = false
+		m.msg = ""
+	case "n":
+		// Create a new branch (enter name)
+		m.gitBranchNew = true
+		m.gitBranchIn = nil
+		m.msg = "new branch name:"
+	case "enter":
+		// Switch to selected branch
+		if r == nil || len(m.gitBranchList) == 0 {
+			break
+		}
+		name := m.gitBranchList[m.gitBranchSel]
+		if name == r.Branch() {
+			m.msg = "already on " + name
+			break
+		}
+		if err := r.SwitchBranch(name); err != nil {
+			m.msg = "switch error: " + err.Error()
+		} else {
+			m.msg = "switched to " + name
+			m.gitMode = gitModeStatus
+			m.refreshGitFiles()
+			m.refreshGitDiffPreview()
+		}
+	case "up", "k":
+		if m.gitBranchSel > 0 {
+			m.gitBranchSel--
+			m.clampGitBranchScroll()
+		}
+	case "down", "j":
+		if m.gitBranchSel < len(m.gitBranchList)-1 {
+			m.gitBranchSel++
+			m.clampGitBranchScroll()
+		}
+	case "r":
+		m.refreshGitBranches()
+		m.msg = "refreshed"
 	}
 	return nil
 }
@@ -572,9 +579,13 @@ func (m *Model) handleGit(msg tea.KeyPressMsg) tea.Cmd {
 
 func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 	key := gitKeyName(msg)
+	// Letter commands are case-insensitive so the "D:diff"-style hints work
+	// whether the user types 'd' or 'D'. The diff-focus block below still uses
+	// the raw key to keep 'g' (top) and 'G' (bottom) distinct.
+	keyL := strings.ToLower(key)
 
 	// Global keys
-	switch key {
+	switch keyL {
 	case "esc", "ctrl+g":
 		m.gitOpen = false
 		m.gitDiffFocused = false
@@ -620,7 +631,7 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	// File list has focus
-	switch key {
+	switch keyL {
 	case "right", "tab":
 		if len(m.diffRows) > 0 {
 			m.gitDiffFocused = true
@@ -780,9 +791,10 @@ func (m *Model) handleGitCommit(msg tea.KeyPressMsg) tea.Cmd {
 
 func (m *Model) handleGitLog(msg tea.KeyPressMsg) tea.Cmd {
 	key := gitKeyName(msg)
+	keyL := strings.ToLower(key)
 
 	// Global keys
-	switch key {
+	switch keyL {
 	case "esc", "ctrl+g":
 		m.gitMode = gitModeStatus
 		m.gitDiffFocused = false
@@ -828,7 +840,7 @@ func (m *Model) handleGitLog(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	// Commit list has focus
-	switch key {
+	switch keyL {
 	case "right", "tab":
 		if len(m.diffRows) > 0 {
 			m.gitDiffFocused = true

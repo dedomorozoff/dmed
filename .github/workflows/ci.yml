@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  GOPROXY: https://proxy.golang.org,direct
+  GOSUMDB: sum.golang.org
+
+jobs:
+  test:
+    name: vet + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Static analysis
+        run: make vet
+
+      - name: Unit tests
+        run: make test
+
+      - name: Build (native)
+        run: make build
+
+  cross-build:
+    name: cross-compile (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux-amd64
+          - linux-arm64
+          - freebsd-amd64
+          - openbsd-amd64
+          - netbsd-amd64
+          - darwin-amd64
+          - darwin-arm64
+          - windows-amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build ${{ matrix.platform }}
+        run: make build-${{ matrix.platform }}
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmed-${{ matrix.platform }}
+          path: dist/dmed-${{ matrix.platform }}*
+          if-no-files-found: error

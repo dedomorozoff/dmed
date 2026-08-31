@@ -26,6 +26,10 @@ func (m Model) sidebarOn() bool {
 }
 
 func (m *Model) toggleTree() {
+	if m.gitOpen {
+		m.gitOpen = false
+		m.msg = ""
+	}
 	if !m.treeVisible {
 		m.treeVisible = true
 		m.treeFocus = true

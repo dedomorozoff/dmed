@@ -113,6 +113,9 @@ dmed a.txt b.txt               # multiple files → tabs
 | `Ctrl+Z` / `Ctrl+R` | Undo / redo |
 | `Ctrl+Y` | Delete line |
 | `Alt+↑` / `Alt+↓` | Move line up / down |
+| `Alt+D` | Add multi-cursor at next word occurrence |
+| `Alt+Click` | Add cursor at click position |
+| `Esc` | Exit multi-cursor mode |
 | `Enter` / `Backspace` / `Delete` | Standard editing |
 
 ### Files & Tabs

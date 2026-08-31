@@ -12,6 +12,7 @@ const (
 	EventBufferModified EventType = "buffer:modified"
 	EventBufferSaved    EventType = "buffer:saved"
 	EventGitUpdated     EventType = "git:updated"
+	EventAgentUpdated   EventType = "agent:updated"
 )
 
 // Event represents a system event.

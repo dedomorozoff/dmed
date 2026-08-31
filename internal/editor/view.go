@@ -54,6 +54,7 @@ var helpEntries = []helpEntry{
 	{"Alt+T", "toggle bottom terminal (Esc closes)"},
 	{"Alt+A", "AI chat panel (local Ollama, right side)"},
 	{"Alt+I", "AI inline rewrite (select text, describe change)"},
+	{"Alt+L", "background agent tasks panel (queue, progress, cancel)"},
 	{"Ctrl+B / F9", "project tree; Ctrl+G switches to Git"},
 	{"↑↓/Enter/←→ in tree", "navigate, open, fold"},
 	{"Alt+←/→", "switch tabs in active pane"},
@@ -68,6 +69,9 @@ var helpEntries = []helpEntry{
 	{"Enter/Backspace/Delete/Tab", "edit text"},
 	{"Ctrl+Z / Ctrl+R", "undo / redo"},
 	{"Ctrl+Y / Ctrl+D", "delete line / duplicate line"},
+	{"Alt+D", "multi-cursor: add cursor at next occurrence of word"},
+	{"Alt+Click", "add cursor at click position"},
+	{"Esc", "exit multi-cursor mode"},
 	{"Alt+↑ / Alt+↓", "move line up / down"},
 	{"", ""},
 	{"F1 or Ctrl+E", "toggle this help"},
@@ -144,8 +148,12 @@ func (m Model) View() tea.View {
 		rows = append(rows, m.composeSidebar(diffRows)...)
 	} else if m.aiReviewMode {
 		rows = append(rows, renderSideBySide(m.aiReviewLeft, m.aiReviewRight, m.aiReviewRows, m.aiReviewOffY, m.aiReviewOffX, m.width, h, nil, nil)...)
+	} else if m.agentReviewMode {
+		rows = append(rows, renderSideBySide(m.agentReviewLeft, m.agentReviewRight, m.agentReviewRows, m.agentReviewOffY, m.agentReviewOffX, m.width, h, nil, nil)...)
 	} else if m.conflictOpen && len(m.conflictRows) > 0 {
 		rows = append(rows, renderSideBySide(m.conflictLeftLines, m.conflictRightLines, m.conflictRows, m.conflictOffY, m.conflictOffX, m.width, h, nil, nil)...)
+	} else if m.aiCfgOpen {
+		rows = append(rows, m.aiSettingsPanel(h)...)
 	} else if m.helpOpen {
 		rows = append(rows, m.helpPanel(h)...)
 	} else {
@@ -158,6 +166,10 @@ func (m Model) View() tea.View {
 		bottom = m.diffBottom()
 	} else if m.aiReviewMode {
 		bottom = m.aiReviewBottom()
+	} else if m.agentReviewMode {
+		bottom = m.agentReviewBottom()
+	} else if m.agentPrompt {
+		bottom = m.agentPromptLine()
 	} else if m.aiInlineOpen {
 		bottom = m.aiInlinePrompt()
 	} else if m.aiInlineBusy {
@@ -166,6 +178,12 @@ func (m Model) View() tea.View {
 		bottom = m.conflictLine()
 	} else if m.quitConfirm {
 		bottom = m.quitLine()
+	} else if m.aiCfgOpen {
+		if m.aiCfgEdit {
+			bottom = m.aiCfgEditLine()
+		} else {
+			bottom = m.aiCfgBottom()
+		}
 	} else if m.gitOpen {
 		if m.gitMode == gitModeCommit {
 			bottom = m.gitLine()
@@ -204,7 +222,7 @@ func (m Model) View() tea.View {
 	v.MouseMode = tea.MouseModeCellMotion
 
 	// Terminal cursor: positioned at the editor cursor location.
-	if !m.gitOpen && !m.paletteOpen && !m.helpOpen && !m.searchOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
+	if !m.gitOpen && !m.agentOpen && !m.agentReviewMode && !m.paletteOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
 		cx, cy := m.cursorScreenPos()
 		v.Cursor = tea.NewCursor(cx, cy)
 	}
@@ -285,6 +303,8 @@ func (m Model) composeChatRail(editor []string) []string {
 func (m Model) composeSidebar(editor []string) []string {
 	var rail []string
 	switch {
+	case m.agentOpen:
+		rail = m.agentPanel(len(editor))
 	case m.gitOpen:
 		rail = m.gitPanel(len(editor))
 	case m.sidebarOn():
@@ -368,7 +388,7 @@ func (m Model) sidebarWidth() int {
 // leftRailWidth is the width of the whole left column: the Git panel takes
 // precedence over the project tree while it is open.
 func (m Model) leftRailWidth() int {
-	if m.gitOpen {
+	if m.gitOpen || m.agentOpen {
 		return gitPanelWidth
 	}
 	return m.sidebarWidth()
@@ -474,6 +494,8 @@ func (m Model) promptLine() string {
 	label := " open file: "
 	if m.promptNewFile {
 		label = " new file: "
+	} else if m.promptNewFolder {
+		label = " new folder: "
 	}
 	line := statusHiStyle.Render(label) + statusStyle.Render(string(m.promptIn)) + cursorStyle.Render(" ")
 	fill := m.width - lipgloss.Width(line)
@@ -519,7 +541,13 @@ func (m Model) gitLine() string {
 
 func (m Model) gitStatusLine() string {
 	r := m.repoForCur()
-	var line string
+	var hint string
+	if r == nil {
+		hint = "(i: init repo, esc/q: close)"
+	} else {
+		hint = "(space: stage, a: all, c: commit, d: diff, l: log, b: branch, r: refresh, q: close)"
+	}
+	line := ""
 	if r == nil {
 		line = statusHiStyle.Render(" git: ") + statusStyle.Render(" no repository")
 	} else {
@@ -530,20 +558,33 @@ func (m Model) gitStatusLine() string {
 				staged++
 			}
 		}
-		line = statusHiStyle.Render(" git ") + hintStyle.Render("("+r.Branch()+" "+summary+")") +
-			statusStyle.Render(fmt.Sprintf(" %d changed, %d staged ", len(m.gitFiles), staged))
+		line = statusHiStyle.Render(" git ") +
+			hintStyle.Render("("+r.Branch()+" "+summary+")") +
+			statusStyle.Render(fmt.Sprintf(" %d changed, %d staged", len(m.gitFiles), staged))
 	}
-	hint := ""
-	if r == nil {
-		hint = "(I: init repo, Esc: close)"
-	} else {
-		hint = "(Space: stage, A: all, C: commit, D: diff, L: log, B: branch, R: refresh, Esc: close)"
+	// The hint must stay visible even on narrow terminals: if the summary
+	// doesn't leave room for it on a single status line, trim the summary.
+	fill := m.width - lipgloss.Width(hint) - lipgloss.Width(line)
+	if fill < 0 {
+		line = statusStyle.Render(fitStatusTail(line, m.width-lipgloss.Width(hint)))
+		fill = m.width - lipgloss.Width(hint) - lipgloss.Width(line)
 	}
-	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	return line + hintStyle.Render(hint)
+}
+
+// fitStatusTail strips styling and keeps the tail of s within w visible columns.
+func fitStatusTail(s string, w int) string {
+	r := []rune(stripANSI(s))
+	if len(r) <= w {
+		return s
+	}
+	if w < 1 {
+		return ""
+	}
+	return "…" + string(r[len(r)-(w-1):])
 }
 
 func (m Model) gitLogStatusLine() string {
@@ -553,7 +594,7 @@ func (m Model) gitLogStatusLine() string {
 	} else {
 		line = statusHiStyle.Render(" LOG ") + hintStyle.Render(fmt.Sprintf("(%d commits)", len(m.gitLogEntries)))
 	}
-	hint := "(J/K: navigate, Tab: diff focus, Esc: back to files, R: refresh)"
+	hint := "(j/k: navigate, Tab: diff focus, esc/q: back, r: refresh)"
 	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -575,13 +616,14 @@ func (m Model) gitBranchLine() string {
 	if r := m.repoForCur(); r != nil {
 		line = statusHiStyle.Render(" BRANCH ") + statusStyle.Render(r.Branch())
 	}
-	hint := "(J/K: switch, Enter: checkout, N: new branch, Esc: back, R: refresh)"
+	hint := "(j/k: switch, Enter: checkout, n: new branch, esc/q: back, r: refresh)"
 	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	return line + hintStyle.Render(hint)
 }
+
 // fitPath keeps the tail of long paths (the file name matters most).
 func fitPath(p string, w int) string {
 	r := []rune(p)
@@ -1128,11 +1170,31 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 		}
 	}
 
-	// Cursor position in exp coordinates
-	cx := -1
-	if activePane && ln == t.buf.CurLine() {
-		if t.buf.Col() <= len(raw) {
-			cx = rawToExp[t.buf.Col()]
+	// All cursor positions and per-cursor selections on this line (active pane
+	// only). Secondary cursors render as reverse cells; their selections use
+	// the normal selection style.
+	var carets []int
+	var selRanges [][2]int
+	if activePane {
+		for _, c := range t.buf.Cursors() {
+			if c.Line != ln {
+				continue
+			}
+			if c.Col <= len(raw) {
+				carets = append(carets, rawToExp[c.Col])
+			} else if len(raw) >= 0 {
+				carets = append(carets, rawToExp[len(raw)])
+			}
+			if c.From != c.To {
+				cf, ct := c.From, c.To
+				if cf > len(raw) {
+					cf = len(raw)
+				}
+				if ct > len(raw) {
+					ct = len(raw)
+				}
+				selRanges = append(selRanges, [2]int{rawToExp[cf], rawToExp[ct]})
+			}
 		}
 	}
 
@@ -1188,33 +1250,53 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 
 		if selStart >= 0 && i >= selStart && i < selEnd {
 			st = selectionStyle
+		} else {
+			for _, rng := range selRanges {
+				if i >= rng[0] && i < rng[1] {
+					st = selectionStyle
+					break
+				}
+			}
 		}
 
-		if i == cx {
-			st = cursorStyle
+		for _, cc := range carets {
+			if i == cc {
+				st = cursorStyle
+				break
+			}
 		}
 
 		out.WriteString(st.Render(string(r)))
 	}
 
-	// Cursor at end of line
-	if cx == len(exp) && cx >= start && cx < start+w {
-		out.WriteString(cursorStyle.Render(" "))
+	// Cursor(s) at end of line
+	for _, cc := range carets {
+		if cc == len(exp) && cc >= start && cc < start+w {
+			out.WriteString(cursorStyle.Render(" "))
+		}
 	}
 
 	return out.String()
 }
 
 func (m Model) palettePanel() []string {
+	const paletteVisible = 8
 	hits := m.filterPalette()
 	displayHits := hits
-	if len(displayHits) > 8 {
-		displayHits = displayHits[:8]
+	total := len(displayHits)
+	if total > paletteVisible {
+		if m.paletteOffset > total-paletteVisible {
+			m.paletteOffset = total - paletteVisible
+		}
+		if m.paletteOffset < 0 {
+			m.paletteOffset = 0
+		}
+		displayHits = displayHits[m.paletteOffset : m.paletteOffset+paletteVisible]
 	}
 	rows := make([]string, 0, len(displayHits)+1)
 	for i, hit := range displayHits {
 		label := fmt.Sprintf(" %s — %s ", hit.title, hit.desc)
-		if i == m.paletteSel {
+		if m.paletteOffset+i == m.paletteSel {
 			rows = append(rows, statusHiStyle.Render(label))
 		} else {
 			rows = append(rows, statusStyle.Render(label))
@@ -1260,7 +1342,7 @@ func (m Model) statusBar() string {
 		fileInfo = fmt.Sprintf("%s %s ", endings[t.lineEnding], enc)
 	}
 	hint := ""
-	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode {
+	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiCfgOpen && !m.helpOpen && !m.agentOpen && !m.agentReviewMode {
 		hint = "F1 help "
 		if m.layout != splitNone {
 			hint += "F8 pane "

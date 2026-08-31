@@ -117,3 +117,110 @@ func TestLoadProjectOverridesGlobal(t *testing.T) {
 		t.Errorf("tab_width = %d, want 8 (project overrides global)", cfg.Editor.TabWidth)
 	}
 }
+
+func TestLoadAgentSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := "[agent]\nsystem_prompt = You are a refactor expert\ncontext_max = 12345\n"
+	os.WriteFile(path, []byte(content), 0o644)
+
+	cfg := Defaults()
+	loadFile(path, &cfg)
+
+	if cfg.Agent.SystemPrompt != "You are a refactor expert" {
+		t.Errorf("system_prompt = %q", cfg.Agent.SystemPrompt)
+	}
+	if cfg.Agent.ContextMax != 12345 {
+		t.Errorf("context_max = %d, want 12345", cfg.Agent.ContextMax)
+	}
+}
+
+func TestAgentDefaults(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Agent.SystemPrompt != "" {
+		t.Errorf("default system_prompt should be empty, got %q", cfg.Agent.SystemPrompt)
+	}
+	if cfg.Agent.ContextMax != 256*1024 {
+		t.Errorf("default context_max = %d, want %d", cfg.Agent.ContextMax, 256*1024)
+	}
+}
+
+func TestWriteAIUpdatesSectionPreservesOthers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	original := `[editor]
+tab_width = 2
+
+[ai]
+provider = ollama
+model = llama3
+# keep this comment
+system_prompt = keep me
+
+[ui]
+tree_width = 20
+`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ai := AIConfig{Provider: "openai", Model: "gpt-4o", APIKey: "secret", OllamaURL: "https://api.openai.com/v1", ContextMax: 999}
+	n, err := WriteAI(path, ai)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 5 {
+		t.Errorf("wrote %d keys, want 5", n)
+	}
+
+	data, _ := os.ReadFile(path)
+	out := string(data)
+	for _, want := range []string{"provider = openai", "model = gpt-4o", "api_key = secret",
+		"ollama_url = https://api.openai.com/v1", "context_max = 999",
+		"system_prompt = keep me", "tab_width = 2", "tree_width = 20"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in output:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "provider = ollama") {
+		t.Errorf("stale provider left:\n%s", out)
+	}
+}
+
+func TestWriteAIRetainsMissingKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	if err := os.WriteFile(path, []byte("[ai]\nprovider = ollama\nmodel = llama3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ai := Defaults().AI
+	ai.Model = "llama3"
+	n, err := WriteAI(path, ai)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 5 {
+		t.Errorf("wrote %d keys, want 5 (3 existing + 2 added)", n)
+	}
+	data, _ := os.ReadFile(path)
+	out := string(data)
+	for _, want := range []string{"provider = ollama", "model = llama3", "ollama_url = http://localhost:11434", "context_max = 6000"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in output:\n%s", want, out)
+		}
+	}
+}
+
+func TestWriteAICreatesSectionInEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	if _, err := WriteAI(path, Defaults().AI); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	out := string(data)
+	if !strings.Contains(out, "[ai]") || !strings.Contains(out, "context_max = 6000") {
+		t.Errorf("missing [ai] section or defaults:\n%s", out)
+	}
+}

@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
 
+	"dmed/internal/agent"
 	"dmed/internal/ai"
 	"dmed/internal/buffer"
 	"dmed/internal/config"
@@ -135,21 +136,22 @@ func (t *tab) getDiff(repo *vcs.Repo) vcs.FileDiff {
 }
 
 type Model struct {
-	root   string
-	cfg    config.Config
-	tabs   []tab
-	panes  []pane
-	layout splitLayout
+	root       string
+	cfg        config.Config
+	tabs       []tab
+	panes      []pane
+	layout     splitLayout
 	activePane int
-	width  int
-	height int
-	msg    string
+	width      int
+	height     int
+	msg        string
 
-	promptOpen bool
-	promptIn   []rune
-	promptSave bool
-	promptSaveIn []rune
-	promptNewFile bool
+	promptOpen      bool
+	promptIn        []rune
+	promptSave      bool
+	promptSaveIn    []rune
+	promptNewFile   bool
+	promptNewFolder bool
 
 	finderOpen  bool
 	finderQ     []rune
@@ -158,6 +160,11 @@ type Model struct {
 	finderSel   int
 
 	helpOpen bool
+
+	aiCfgOpen  bool
+	aiCfgField int
+	aiCfgEdit  bool
+	aiCfgIn    []rune
 
 	treeVisible bool
 	treeFocus   bool
@@ -176,24 +183,24 @@ type Model struct {
 	replaceFocusFind   bool
 
 	// Events, watcher, Git
-	bus          *events.Bus
-	watcher      *watcher.Watcher
-	fileEvents   chan string
-	repo         *vcs.Repo
-	conflictOpen bool
-	conflictPath string
+	bus                *events.Bus
+	watcher            *watcher.Watcher
+	fileEvents         chan string
+	repo               *vcs.Repo
+	conflictOpen       bool
+	conflictPath       string
 	conflictRows       []vcs.DiffRow
 	conflictLeftLines  []string
 	conflictRightLines []string
 	conflictOffY       int
 	conflictOffX       int
-	gitOpen      bool
-	gitMode      gitPanelMode
-	gitFiles     []vcs.FileStatus
-	gitSel       int
-	gitOffset    int
-	gitCommitIn  []rune
-	gitDiffFocused bool // true when diff preview area has focus (scrollable)
+	gitOpen            bool
+	gitMode            gitPanelMode
+	gitFiles           []vcs.FileStatus
+	gitSel             int
+	gitOffset          int
+	gitCommitIn        []rune
+	gitDiffFocused     bool // true when diff preview area has focus (scrollable)
 
 	// Git log
 	gitLogEntries []vcs.LogEntry
@@ -201,22 +208,22 @@ type Model struct {
 	gitLogOffset  int
 
 	// Git branch management
-	gitBranchIn    []rune
-	gitBranchList  []string
-	gitBranchSel   int
+	gitBranchIn     []rune
+	gitBranchList   []string
+	gitBranchSel    int
 	gitBranchOffset int
-	gitBranchNew   bool // true when creating a new branch, false when switching
+	gitBranchNew    bool // true when creating a new branch, false when switching
 
 	// Side-by-side diff view (opened from the Git panel)
-	diffViewOpen   bool
-	diffPath       string
-	diffRows       []vcs.DiffRow
-	diffHeadLines  []string
-	diffRightLines []string
+	diffViewOpen    bool
+	diffPath        string
+	diffRows        []vcs.DiffRow
+	diffHeadLines   []string
+	diffRightLines  []string
 	diffHeadSyntax  []syntax.HighlightedLine
 	diffRightSyntax []syntax.HighlightedLine
-	diffOffsetY    int
-	diffOffsetX    int
+	diffOffsetY     int
+	diffOffsetX     int
 
 	// Bottom terminal panel
 	termOpen    bool
@@ -230,10 +237,11 @@ type Model struct {
 	termCh      <-chan []string
 
 	// Command palette & Clipboard
-	paletteOpen bool
-	paletteQ    []rune
-	paletteSel  int
-	clipboard   string
+	paletteOpen   bool
+	paletteQ      []rune
+	paletteSel    int
+	paletteOffset int
+	clipboard     string
 
 	// Right-side AI chat panel (local Ollama)
 	chatOpen   bool
@@ -268,8 +276,32 @@ type Model struct {
 	aiReviewOffX     int
 
 	quitConfirm bool
-	quitTab     bool  // true if confirming close of a single tab (not quit)
+	quitTab     bool // true if confirming close of a single tab (not quit)
 	pendingQuit bool
+
+	// Agent background tasks (M4)
+	agentQueue    *agent.Queue
+	agentRunner   *agent.Runner
+	agentApplier  *agent.Applier
+	agentCommit   *agent.Committer
+	agentCtx      context.Context
+	agentCancel   context.CancelFunc
+	agentCh       chan struct{} // repaint signal from the agent worker
+	agentOpen     bool
+	agentPrompt   bool // entering a new task prompt
+	agentPromptIn []rune
+	agentSel      int
+	agentOffset   int
+
+	// Agent diff review (T6): a task's proposed changes shown side-by-side.
+	agentReviewMode   bool
+	agentReviewTaskID string
+	agentReviewChange int // index into the task's Changes
+	agentReviewRows   []vcs.DiffRow
+	agentReviewLeft   []string
+	agentReviewRight  []string
+	agentReviewOffY   int
+	agentReviewOffX   int
 
 	// Mouse state
 	mouseDown bool
@@ -313,6 +345,7 @@ func New(paths ...string) Model {
 		m.watcher = w
 	}
 
+	var files []string
 	for _, p := range paths {
 		if st, err := os.Stat(p); err == nil && st.IsDir() {
 			if m.root == "" {
@@ -321,13 +354,24 @@ func New(paths ...string) Model {
 			}
 			continue
 		}
-		m.openPath(p)
+		files = append(files, p)
 	}
-	if len(paths) == 0 && m.root != "" {
+
+	// Restore the previous session only when the user did not open specific
+	// files and a project root is known — an explicit file list takes
+	// precedence over the session.
+	restoreActiveTab := -1
+	if len(files) == 0 && m.root != "" {
 		if sess, err := session.Load(session.DefaultPath(m.root)); err == nil && len(sess.Files) > 0 {
 			for _, f := range sess.Files {
 				m.openPath(f)
 			}
+			m.restoreCursors(sess.Cursors)
+			restoreActiveTab = sess.ActiveTab
+		}
+	} else {
+		for _, p := range files {
+			m.openPath(p)
 		}
 	}
 	if len(m.tabs) == 0 {
@@ -336,6 +380,9 @@ func New(paths ...string) Model {
 	m.cfg = config.Load(m.root)
 	syntax.SetDefault(m.cfg.Editor.SyntaxTheme)
 	m.initPanes()
+	if restoreActiveTab >= 0 && restoreActiveTab < len(m.tabs) {
+		m.setActiveTab(restoreActiveTab)
+	}
 	if m.root != "" {
 		m.treeVisible = true
 		m.rebuildTree()
@@ -444,6 +491,12 @@ func (m *Model) startNewFilePrompt() {
 	m.promptIn = nil
 }
 
+func (m *Model) startNewFolderPrompt() {
+	m.promptOpen = true
+	m.promptNewFolder = true
+	m.promptIn = nil
+}
+
 func (m *Model) startSavePrompt() {
 	m.promptSave = true
 	m.promptSaveIn = nil
@@ -479,6 +532,9 @@ func (m *Model) openConfigFile() {
 			"# ollama_url = http://localhost:11434\n" +
 			"# api_key =  # for OpenAI-compatible providers\n" +
 			"# context_max = 6000\n\n" +
+			"[agent]\n" +
+			"# system_prompt =  # optional override for background agent tasks\n" +
+			"# context_max = 262144  # bytes of file context sent to the agent\n\n" +
 			"[ui]\n" +
 			"# tree_width = 25\n" +
 			"# chat_width_pct = 40\n"
@@ -556,12 +612,20 @@ func (m *Model) handlePrompt(msg tea.KeyPressMsg) tea.Cmd {
 	case "esc":
 		m.promptOpen = false
 		m.promptNewFile = false
+		m.promptNewFolder = false
 	case "enter":
 		path := strings.TrimSpace(string(m.promptIn))
+		newFolder := m.promptNewFolder
 		m.promptOpen = false
 		m.promptNewFile = false
+		m.promptNewFolder = false
 		if path != "" {
-			m.openPath(path)
+			if newFolder {
+				_ = os.MkdirAll(path, 0o755)
+				m.msg = "created folder: " + path
+			} else {
+				m.openPath(path)
+			}
 		}
 	case "backspace":
 		if n := len(m.promptIn); n > 0 {
@@ -806,6 +870,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case InlineOutputMsg:
 		cmd := m.handleInlineOutput(msg)
 		return m, cmd
+	case AgentRefreshMsg:
+		return m, waitForAgentRefresh(m.agentCh)
 	case tea.MouseClickMsg:
 		cmd := m.handleMouseClick(msg)
 		return m, cmd
@@ -822,7 +888,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		text := msg.String()
 		if text != "" {
-			m.cur().buf.InsertText(text)
+			if m.cur().buf.HasMultipleCursors() {
+				m.cur().buf.MultiInsertText(text)
+			} else {
+				m.cur().buf.InsertText(text)
+			}
 			m.msg = "pasted"
 		}
 	case tea.KeyPressMsg:
@@ -857,7 +927,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		msg = tea.KeyPressMsg{Code: nr[0], Text: string(nr), Mod: msg.Mod}
 	}
 	s := msg.String()
-	// Quit/close keys must work in every mode (tree, git panel, prompts, search...).
+	// Global keys work in every mode (tree, git panel, prompts, search, agents...).
 	switch s {
 	case "ctrl+q":
 		return m.requestQuit()
@@ -880,6 +950,54 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		return m.closeActiveTab()
+	case "ctrl+p", "ctrl+shift+p", "f2":
+		m.startPalette()
+		return nil
+	case "ctrl+t":
+		m.startPrompt()
+		return nil
+	case "alt+t":
+		if cmd := m.toggleTerminal(); cmd != nil {
+			return cmd
+		}
+		return nil
+	case "alt+a":
+		m.toggleChat()
+		return nil
+	case "alt+l":
+		return m.openAgentPanel()
+	case "alt+i":
+		m.startInlineRequest()
+		return nil
+	case "ctrl+o":
+		m.startFinder()
+		return nil
+	case "f3":
+		m.updateSearchMatches(true)
+		return nil
+	case "shift+f3":
+		m.findPrev()
+		return nil
+	case "ctrl+f":
+		m.startSearch()
+		return nil
+	case "ctrl+h":
+		m.startReplace()
+		return nil
+	case "ctrl+g":
+		if m.gitOpen {
+			m.gitOpen = false
+			m.msg = ""
+		} else {
+			m.openGitPanel()
+		}
+		return nil
+	case "f1", "ctrl+e":
+		m.helpOpen = !m.helpOpen
+		return nil
+	case "ctrl+b", "f9":
+		m.toggleTree()
+		return nil
 	}
 	if m.conflictOpen {
 		switch s {
@@ -947,6 +1065,15 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.termOpen {
 		return m.handleTerm(msg)
 	}
+	if m.agentReviewMode {
+		return m.handleAgentReview(msg)
+	}
+	if m.agentPrompt {
+		return m.handleAgentPrompt(msg)
+	}
+	if m.agentOpen {
+		return m.handleAgent(msg)
+	}
 	if m.chatOpen {
 		return m.handleChat(msg)
 	}
@@ -955,6 +1082,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.paletteOpen {
 		return m.handlePalette(msg)
+	}
+	if m.aiCfgOpen {
+		return m.handleAISettings(msg)
 	}
 	if m.helpOpen {
 		return m.handleHelp(msg)
@@ -991,6 +1121,18 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	switch s {
+	case "alt+d":
+		b := m.cur().buf
+		if !b.AddNextOccurrence() {
+			m.msg = "no more occurrences"
+		} else if !b.HasMultipleCursors() && b.HasSelection() {
+			m.msg = "selected: type to replace all occurrences"
+		} else {
+			m.msg = ""
+		}
+	case "esc":
+		m.cur().buf.ClearCursors()
+		m.msg = ""
 	case "ctrl+s":
 		t := m.cur()
 		if t.path == "" {
@@ -1012,43 +1154,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.cur().buf.Redo() {
 			m.msg = ""
 		}
-	case "ctrl+t":
-		m.startPrompt()
-	case "alt+t":
-		if cmd := m.toggleTerminal(); cmd != nil {
-			return cmd
-		}
-	case "alt+a":
-		m.toggleChat()
-	case "alt+i":
-		m.startInlineRequest()
-	case "ctrl+o":
-		m.startFinder()
-	case "ctrl+p", "ctrl+shift+p", "f2":
-		m.startPalette()
-	case "f3":
-		m.updateSearchMatches(true)
-	case "shift+f3":
-		m.findPrev()
-	case "ctrl+f":
-		m.startSearch()
-	case "ctrl+h":
-		m.startReplace()
-	case "ctrl+g":
-		if m.gitOpen {
-			m.gitOpen = false
-			m.msg = ""
-		} else {
-			m.openGitPanel()
-		}
 	case "alt+[":
 		m.jumpHunk(-1)
 	case "alt+]":
 		m.jumpHunk(1)
-	case "f1", "ctrl+e":
-		m.helpOpen = !m.helpOpen
-	case "ctrl+b", "f9":
-		m.toggleTree()
 	case "ctrl+\\", "f6":
 		m.splitVert()
 	case "ctrl+alt+h", "f7":
@@ -1062,7 +1171,11 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.clipboard = sysClip
 		}
 		if m.clipboard != "" {
-			m.cur().buf.InsertText(m.clipboard)
+			if m.cur().buf.HasMultipleCursors() {
+				m.cur().buf.MultiInsertText(m.clipboard)
+			} else {
+				m.cur().buf.InsertText(m.clipboard)
+			}
 			m.msg = ""
 		}
 		return nil
@@ -1087,13 +1200,29 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "shift+end":
 		m.cur().buf.LineEndWithSelect()
 	case "up":
-		m.cur().buf.MoveUp()
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MoveAllUp()
+		} else {
+			m.cur().buf.MoveUp()
+		}
 	case "down":
-		m.cur().buf.MoveDown()
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MoveAllDown()
+		} else {
+			m.cur().buf.MoveDown()
+		}
 	case "left":
-		m.cur().buf.MoveLeft()
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MoveAllLeft()
+		} else {
+			m.cur().buf.MoveLeft()
+		}
 	case "right":
-		m.cur().buf.MoveRight()
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MoveAllRight()
+		} else {
+			m.cur().buf.MoveRight()
+		}
 	case "home":
 		m.cur().buf.LineStart()
 	case "end":
@@ -1109,21 +1238,41 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			t.buf.MoveDown()
 		}
 	case "enter":
-		m.cur().buf.InsertNewline()
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MultiNewline()
+		} else {
+			m.cur().buf.InsertNewline()
+		}
 		m.msg = ""
 	case "backspace":
-		m.cur().buf.Backspace()
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MultiBackspace()
+		} else {
+			m.cur().buf.Backspace()
+		}
 		m.msg = ""
 	case "delete":
-		m.cur().buf.Delete()
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MultiDelete()
+		} else {
+			m.cur().buf.Delete()
+		}
 		m.msg = ""
 	case "tab":
-		m.cur().buf.Insert('\t')
+		if m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.MultiInsertRune('\t')
+		} else {
+			m.cur().buf.Insert('\t')
+		}
 		m.msg = ""
 	default:
 		if len(msg.Text) > 0 {
-			for _, r := range msg.Text {
-				m.cur().buf.Insert(r)
+			if m.cur().buf.HasMultipleCursors() {
+				m.cur().buf.MultiInsertText(msg.Text)
+			} else {
+				for _, r := range msg.Text {
+					m.cur().buf.Insert(r)
+				}
 			}
 			m.msg = ""
 		} else {
@@ -1146,6 +1295,10 @@ func (m *Model) requestQuit() tea.Cmd {
 func (m *Model) shutdown() {
 	m.cancelChat()
 	m.killTerminal()
+	if m.agentCancel != nil {
+		m.agentCancel()
+		m.agentCancel = nil
+	}
 	if m.watcher != nil {
 		_ = m.watcher.Close()
 	}
@@ -1495,13 +1648,26 @@ func (m *Model) startPalette() {
 	m.paletteOpen = true
 	m.paletteQ = nil
 	m.paletteSel = 0
+	m.paletteOffset = 0
+}
+
+// restoreCursors applies saved per-file cursor positions to the just-opened
+// tabs. Positions are clamped by SetCursor, so stale values are harmless.
+func (m *Model) restoreCursors(cursors map[string]session.CursorPos) {
+	for _, t := range m.tabs {
+		if c, ok := cursors[t.path]; ok {
+			t.buf.SetCursor(c.Line, c.Col)
+		}
+	}
 }
 
 func (m *Model) saveSession() {
 	var files []string
+	cursors := map[string]session.CursorPos{}
 	for _, t := range m.tabs {
 		if t.path != "" {
 			files = append(files, t.path)
+			cursors[t.path] = session.CursorPos{Line: t.buf.CurLine(), Col: t.buf.Col()}
 		}
 	}
 	if len(files) == 0 {
@@ -1513,6 +1679,7 @@ func (m *Model) saveSession() {
 		ActiveTab:  m.activeTabIndex(),
 		Layout:     int(m.layout),
 		ActivePane: m.activePane,
+		Cursors:    cursors,
 	}
 	_ = session.Save(session.DefaultPath(m.root), sess)
 }
@@ -1570,6 +1737,14 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 	lineLen := t.buf.LineLen(ln)
 	if rawCol > lineLen {
 		rawCol = lineLen
+	}
+
+	// Alt+Click adds a secondary cursor instead of moving the main one.
+	if msg.Mod&tea.ModAlt != 0 {
+		if t.buf.AddCursor(ln, rawCol, rawCol, rawCol) {
+			m.msg = "added cursor"
+		}
+		return nil
 	}
 
 	t.buf.SetCursor(ln, rawCol)

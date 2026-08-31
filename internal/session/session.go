@@ -6,13 +6,20 @@ import (
 	"path/filepath"
 )
 
+// CursorPos records a buffer cursor position (0-based line and column).
+type CursorPos struct {
+	Line int `json:"line"`
+	Col  int `json:"col"`
+}
+
 // SessionState captures the editor layout, open files, and cursor positions.
 type SessionState struct {
-	Root       string      `json:"root,omitempty"`
-	Files      []string    `json:"files"`
-	ActiveTab  int         `json:"active_tab"`
-	Layout     int         `json:"layout"`
-	ActivePane int         `json:"active_pane"`
+	Root       string               `json:"root,omitempty"`
+	Files      []string             `json:"files"`
+	ActiveTab  int                  `json:"active_tab"`
+	Layout     int                  `json:"layout"`
+	ActivePane int                  `json:"active_pane"`
+	Cursors    map[string]CursorPos `json:"cursors,omitempty"`
 }
 
 // DefaultPath returns the default session file path for a project root or user home.
