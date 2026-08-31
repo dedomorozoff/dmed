@@ -1,4 +1,5 @@
 dmed
 *.log
 dmed.exe
+dmed.exe~
 dist/
