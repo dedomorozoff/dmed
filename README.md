@@ -197,6 +197,13 @@ tree_width = 25
 chat_width_pct = 40          # percentage of screen width
 ```
 
+## Documentation
+
+- [Plugins (Lua)](docs/PLUGINS.md) — write keybindings, palette commands, events
+- [Autocompletion & LSP](docs/AUTOCOMPLETION.md) — completion popup + language servers
+- [M4 Agents](docs/M4-AGENTS.md) — background agent tasks, queue, diff-review apply
+- [ROADMAP.md](ROADMAP.md) — milestones and status
+
 ## Architecture
 
 ```

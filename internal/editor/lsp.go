@@ -19,13 +19,39 @@ type lspCompletionMsg struct {
 }
 
 // lspServerFor maps a file extension to its LSP server command + language id.
-// Empty command means no LSP support for that extension.
+// Empty command means no LSP support for that extension. The server is only
+// started if the binary is found on PATH, so absent servers degrade gracefully
+// to word-based completion.
 func lspServerFor(ext string) (cmd string, args []string, langID string) {
 	switch ext {
 	case ".go":
 		return "gopls", nil, "go"
 	case ".py":
 		return "pyright-langserver", []string{"--stdio"}, "python"
+	case ".ts", ".mts", ".cts", ".tsx", ".js", ".mjs", ".jsx":
+		return "typescript-language-server", []string{"--stdio"}, "typescript"
+	case ".rs":
+		return "rust-analyzer", nil, "rust"
+	case ".c", ".h":
+		return "clangd", nil, "c"
+	case ".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx":
+		return "clangd", nil, "cpp"
+	case ".lua":
+		return "lua-language-server", nil, "lua"
+	case ".rb":
+		return "solargraph", []string{"stdio"}, "ruby"
+	case ".php":
+		return "intelephense", []string{"--stdio"}, "php"
+	case ".zig":
+		return "zls", nil, "zig"
+	case ".json":
+		return "vscode-json-languageserver", []string{"--stdio"}, "json"
+	case ".yaml", ".yml":
+		return "yaml-language-server", []string{"--stdio"}, "yaml"
+	case ".css", ".scss", ".less":
+		return "vscode-css-languageserver", []string{"--stdio"}, "css"
+	case ".html":
+		return "vscode-html-languageserver", []string{"--stdio"}, "html"
 	}
 	return "", nil, ""
 }

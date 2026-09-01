@@ -9,8 +9,13 @@ import (
 
 func TestLSPServerFor(t *testing.T) {
 	for ext, want := range map[string]string{
-		".go": "gopls",
-		".py": "pyright-langserver",
+		".go":  "gopls",
+		".py":  "pyright-langserver",
+		".rs":  "rust-analyzer",
+		".c":   "clangd",
+		".cpp": "clangd",
+		".ts":  "typescript-language-server",
+		".lua": "lua-language-server",
 	} {
 		cmd, _, lang := lspServerFor(ext)
 		if cmd != want {
