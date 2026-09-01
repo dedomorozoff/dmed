@@ -17,6 +17,7 @@ import (
 	"dmed/internal/buffer"
 	"dmed/internal/config"
 	"dmed/internal/events"
+	"dmed/internal/i18n"
 	"dmed/internal/session"
 	"dmed/internal/syntax"
 	"dmed/internal/vcs"
@@ -138,6 +139,7 @@ func (t *tab) getDiff(repo *vcs.Repo) vcs.FileDiff {
 type Model struct {
 	root       string
 	cfg        config.Config
+	tr         i18n.Translator
 	tabs       []tab
 	panes      []pane
 	layout     splitLayout
@@ -378,6 +380,7 @@ func New(paths ...string) Model {
 		m.tabs = append(m.tabs, tab{buf: buffer.New()})
 	}
 	m.cfg = config.Load(m.root)
+	m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
 	syntax.SetDefault(m.cfg.Editor.SyntaxTheme)
 	m.initPanes()
 	if restoreActiveTab >= 0 && restoreActiveTab < len(m.tabs) {

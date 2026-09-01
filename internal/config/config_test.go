@@ -24,6 +24,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.UI.TreeWidth != 25 {
 		t.Errorf("tree_width = %d, want 25", cfg.UI.TreeWidth)
 	}
+	if cfg.UI.Lang != "en" {
+		t.Errorf("lang = %q, want en", cfg.UI.Lang)
+	}
 }
 
 func TestParseINI(t *testing.T) {
@@ -39,6 +42,7 @@ ollama_url = http://localhost:11434
 
 [ui]
 tree_width = 30
+lang = ru
 `
 	sections := parseINI(strings.NewReader(input))
 
@@ -53,6 +57,9 @@ tree_width = 30
 	}
 	if sections["ui"]["tree_width"] != "30" {
 		t.Errorf("ui.tree_width = %q", sections["ui"]["tree_width"])
+	}
+	if sections["ui"]["lang"] != "ru" {
+		t.Errorf("ui.lang = %q, want ru", sections["ui"]["lang"])
 	}
 }
 

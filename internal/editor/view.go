@@ -34,48 +34,48 @@ var (
 
 type helpEntry struct {
 	keys string
-	desc string
+	desc string // i18n key
 }
 
 var helpEntries = []helpEntry{
-	{"Ctrl+S", "save active tab (untitled: Save As)"},
+	{"Ctrl+S", "help.save"},
 	{"", ""},
-	{"Ctrl+P / F2", "Command Palette (File: New, Save, ...)"},
-	{"Shift+Arrows", "select text range"},
-	{"Ctrl+C / Ctrl+X / Ctrl+V", "copy / cut / paste"},
+	{"Ctrl+P / F2", "help.palette"},
+	{"Shift+Arrows", "help.select"},
+	{"Ctrl+C / Ctrl+X / Ctrl+V", "help.clipboard"},
 	{"", ""},
-	{"Ctrl+F", "search in file (Enter/F3 next, Shift+F3 prev)"},
-	{"Ctrl+H", "search & replace (Tab switch, Enter rep, Ctrl+A all)"},
-	{"Ctrl+G", "Git panel; Ctrl+B switches back to tree"},
-	{"D (in Git panel)", "side-by-side diff vs HEAD"},
-	{"Alt+[ / Alt+]", "jump to previous / next Git hunk"},
-	{"Ctrl+O", "fuzzy file finder"},
-	{"Ctrl+T", "open file by path"},
-	{"Alt+T", "toggle bottom terminal (Esc closes)"},
-	{"Alt+A", "AI chat panel (local Ollama, right side)"},
-	{"Alt+I", "AI inline rewrite (select text, describe change)"},
-	{"Alt+L", "background agent tasks panel (queue, progress, cancel)"},
-	{"Ctrl+B / F9", "project tree; Ctrl+G switches to Git"},
-	{"↑↓/Enter/←→ in tree", "navigate, open, fold"},
-	{"Alt+←/→", "switch tabs in active pane"},
-	{"Alt+1..9", "jump to tab N"},
-	{"Ctrl+\\ / F6", "split vertical (side by side)"},
-	{"Ctrl+Alt+H / F7", "split horizontal (stacked)"},
-	{"Ctrl+Alt+P / F8", "focus other pane"},
-	{"Ctrl+Alt+W", "close pane (unsplit)"},
-	{"Ctrl+W / Ctrl+X", "close tab (last quits)"},
+	{"Ctrl+F", "help.search"},
+	{"Ctrl+H", "help.replace"},
+	{"Ctrl+G", "help.git_panel"},
+	{"D (in Git panel)", "help.git_diff"},
+	{"Alt+[ / Alt+]", "help.hunk"},
+	{"Ctrl+O", "help.finder"},
+	{"Ctrl+T", "help.open"},
+	{"Alt+T", "help.terminal"},
+	{"Alt+A", "help.chat"},
+	{"Alt+I", "help.inline"},
+	{"Alt+L", "help.agent"},
+	{"Ctrl+B / F9", "help.tree"},
+	{"↑↓/Enter/←→ in tree", "help.tree_nav"},
+	{"Alt+←/→", "help.tab_switch"},
+	{"Alt+1..9", "help.tab_jump"},
+	{"Ctrl+\\ / F6", "help.split_vert"},
+	{"Ctrl+Alt+H / F7", "help.split_horiz"},
+	{"Ctrl+Alt+P / F8", "help.split_focus"},
+	{"Ctrl+Alt+W", "help.split_close"},
+	{"Ctrl+W / Ctrl+X", "help.tab_close"},
 	{"", ""},
-	{"Arrows/Home/End/PgUp/PgDn", "move cursor"},
-	{"Enter/Backspace/Delete/Tab", "edit text"},
-	{"Ctrl+Z / Ctrl+R", "undo / redo"},
-	{"Ctrl+Y / Ctrl+D", "delete line / duplicate line"},
-	{"Alt+D", "multi-cursor: add cursor at next occurrence of word"},
-	{"Alt+Click", "add cursor at click position"},
-	{"Esc", "exit multi-cursor mode"},
-	{"Alt+↑ / Alt+↓", "move line up / down"},
+	{"Arrows/Home/End/PgUp/PgDn", "help.move"},
+	{"Enter/Backspace/Delete/Tab", "help.edit"},
+	{"Ctrl+Z / Ctrl+R", "help.undo"},
+	{"Ctrl+Y / Ctrl+D", "help.lines"},
+	{"Alt+D", "help.multicursor_word"},
+	{"Alt+Click", "help.multicursor_click"},
+	{"Esc", "help.multicursor_esc"},
+	{"Alt+↑ / Alt+↓", "help.move_line"},
 	{"", ""},
-	{"F1 or Ctrl+E", "toggle this help"},
-	{"Ctrl+Q / Ctrl+C", "quit"},
+	{"F1 or Ctrl+E", "help.toggle_help"},
+	{"Ctrl+Q / Ctrl+C", "help.quit"},
 }
 
 func (m Model) finderExtraRows() int {
@@ -475,7 +475,7 @@ func padTo(s string, w int) string {
 
 func (m Model) helpPanel(h int) []string {
 	rows := make([]string, 0, h)
-	rows = append(rows, statusHiStyle.Render(" dmed — keys ")+" "+hintStyle.Render("(F1/Esc closes)"))
+	rows = append(rows, statusHiStyle.Render(m.t("help.title"))+" "+hintStyle.Render(m.t("help.close_hint")))
 	for _, e := range helpEntries {
 		if e.keys == "" {
 			rows = append(rows, "")
@@ -485,7 +485,7 @@ func (m Model) helpPanel(h int) []string {
 		if len(key) < 26 {
 			key += strings.Repeat(" ", 26-len(key))
 		}
-		rows = append(rows, " "+statusStyle.Render(key)+e.desc)
+		rows = append(rows, " "+statusStyle.Render(key)+m.t(e.desc))
 	}
 	return rows
 }
@@ -543,13 +543,13 @@ func (m Model) gitStatusLine() string {
 	r := m.repoForCur()
 	var hint string
 	if r == nil {
-		hint = "(i: init repo, esc/q: close)"
+		hint = m.t("git.init_hint")
 	} else {
-		hint = "(space: stage, a: all, c: commit, d: diff, l: log, b: branch, r: refresh, q: close)"
+		hint = m.t("git.hints")
 	}
 	line := ""
 	if r == nil {
-		line = statusHiStyle.Render(" git: ") + statusStyle.Render(" no repository")
+		line = statusHiStyle.Render(" git: ") + statusStyle.Render(m.t("git.no_repo"))
 	} else {
 		summary := r.StatusSummary()
 		staged := 0
@@ -558,15 +558,26 @@ func (m Model) gitStatusLine() string {
 				staged++
 			}
 		}
-		line = statusHiStyle.Render(" git ") +
+		line = statusHiStyle.Render(m.t("git.prefix_status")) +
 			hintStyle.Render("("+r.Branch()+" "+summary+")") +
-			statusStyle.Render(fmt.Sprintf(" %d changed, %d staged", len(m.gitFiles), staged))
+			statusStyle.Render(fmt.Sprintf(" %s", m.t("git.status_count", len(m.gitFiles), staged)))
 	}
-	// The hint must stay visible even on narrow terminals: if the summary
-	// doesn't leave room for it on a single status line, trim the summary.
+	// The hint (keybindings) must stay visible even on narrow terminals: trim the
+	// summary to fit alongside it. If the hint itself is wider than the terminal,
+	// trim the hint too so the summary is not lost entirely.
 	fill := m.width - lipgloss.Width(hint) - lipgloss.Width(line)
 	if fill < 0 {
-		line = statusStyle.Render(fitStatusTail(line, m.width-lipgloss.Width(hint)))
+		if avail := m.width - lipgloss.Width(hint); avail < 4 {
+			if avail < 0 {
+				avail = 0
+			}
+			hint = fitStatusTail(hint, m.width-2)
+		}
+		avail := m.width - lipgloss.Width(hint)
+		if avail < 0 {
+			avail = 0
+		}
+		line = statusStyle.Render(fitStatusTail(line, avail))
 		fill = m.width - lipgloss.Width(hint) - lipgloss.Width(line)
 	}
 	if fill > 0 {
@@ -590,11 +601,11 @@ func fitStatusTail(s string, w int) string {
 func (m Model) gitLogStatusLine() string {
 	var line string
 	if len(m.gitLogEntries) == 0 {
-		line = statusHiStyle.Render(" LOG ") + statusStyle.Render(" no commits")
+		line = statusHiStyle.Render(m.t("git.prefix_log")) + statusStyle.Render(m.t("git.no_commits"))
 	} else {
-		line = statusHiStyle.Render(" LOG ") + hintStyle.Render(fmt.Sprintf("(%d commits)", len(m.gitLogEntries)))
+		line = statusHiStyle.Render(m.t("git.prefix_log")) + hintStyle.Render(m.t("git.commit_count", len(m.gitLogEntries)))
 	}
-	hint := "(j/k: navigate, Tab: diff focus, esc/q: back, r: refresh)"
+	hint := m.t("git.log_hint")
 	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -604,8 +615,8 @@ func (m Model) gitLogStatusLine() string {
 
 func (m Model) gitBranchLine() string {
 	if m.gitBranchNew {
-		line := statusHiStyle.Render(" new branch: ") + statusStyle.Render(string(m.gitBranchIn)) + cursorStyle.Render(" ")
-		line += hintStyle.Render("  (Enter: create, Esc: cancel)")
+		line := statusHiStyle.Render(m.t("git.new_branch_label")) + statusStyle.Render(string(m.gitBranchIn)) + cursorStyle.Render(" ")
+		line += hintStyle.Render("  " + m.t("git.branch_new_hint"))
 		fill := m.width - lipgloss.Width(line)
 		if fill > 0 {
 			line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -614,9 +625,9 @@ func (m Model) gitBranchLine() string {
 	}
 	var line string
 	if r := m.repoForCur(); r != nil {
-		line = statusHiStyle.Render(" BRANCH ") + statusStyle.Render(r.Branch())
+		line = statusHiStyle.Render(m.t("git.prefix_branch")) + statusStyle.Render(r.Branch())
 	}
-	hint := "(j/k: switch, Enter: checkout, n: new branch, esc/q: back, r: refresh)"
+	hint := m.t("git.branch_hint")
 	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))

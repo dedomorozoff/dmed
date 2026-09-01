@@ -49,6 +49,7 @@ type AIConfig struct {
 type UIConfig struct {
 	TreeWidth    int
 	ChatWidthPct int
+	Lang         string
 }
 
 // Defaults returns the default configuration.
@@ -75,6 +76,7 @@ func Defaults() Config {
 		UI: UIConfig{
 			TreeWidth:    25,
 			ChatWidthPct: 40,
+			Lang:         "en",
 		},
 	}
 }
@@ -204,6 +206,9 @@ func loadFile(path string, cfg *Config) {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 80 {
 				cfg.UI.ChatWidthPct = n
 			}
+		}
+		if v, ok := s["lang"]; ok {
+			cfg.UI.Lang = v
 		}
 	}
 }
