@@ -159,7 +159,7 @@ func (m *Model) saveAISettings() {
 
 func (m Model) aiSettingsPanel(h int) []string {
 	rows := make([]string, 0, h)
-	rows = append(rows, statusHiStyle.Render(" AI — settings ")+" "+hintStyle.Render("(↑/↓ move, Enter edit, ←/→ choice, Ctrl+S save, Esc close)"))
+	rows = append(rows, statusHiStyle.Render(m.t("ai.settings"))+" "+hintStyle.Render(m.t("ai.settings_hint")))
 	for i, f := range aiSettingsFields {
 		marker := " "
 		if i == m.aiCfgField {
@@ -167,7 +167,7 @@ func (m Model) aiSettingsPanel(h int) []string {
 		}
 		if i == 0 {
 			v := m.cfg.AI.Provider
-			rows = append(rows, " "+statusHiStyle.Render(marker)+" "+padTo(f.name, 12)+" "+statusStyle.Render(v)+"   "+hintStyle.Render("(←/→ choose)"))
+			rows = append(rows, " "+statusHiStyle.Render(marker)+" "+padTo(f.name, 12)+" "+statusStyle.Render(v)+"   "+hintStyle.Render(m.t("ai.choice")))
 			continue
 		}
 		rows = append(rows, " "+marker+" "+padTo(f.name, 12)+" "+statusStyle.Render(m.aiFieldValue(i)))
@@ -193,7 +193,7 @@ func (m Model) aiCfgEditLine() string {
 }
 
 func (m Model) aiCfgBottom() string {
-	line := statusHiStyle.Render(" AI settings ") + statusStyle.Render("(Ctrl+S save, Esc close)")
+	line := statusHiStyle.Render(m.t("ai.settings")) + statusStyle.Render(m.t("ai.settings_save"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))

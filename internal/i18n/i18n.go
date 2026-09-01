@@ -176,6 +176,13 @@ var enCatalog = map[string]string{
 	"msg.agent_applied":     "agent changes applied and committed",
 	"msg.agent_discarded":   "agent changes discarded",
 
+	// Agent review + AI settings
+	"agent.review_hint": "  (y: apply all, n: reject, Tab: next file, \u2191\u2193 scroll)",
+	"ai.settings":       " AI - settings ",
+	"ai.settings_hint":  "(\u2191/\u2193 move, Enter edit, \u2190/\u2192 choice, Ctrl+S save, Esc close)",
+	"ai.choice":         "(\u2190/\u2192 choose)",
+	"ai.settings_save":  "(Ctrl+S save, Esc close)",
+
 	// Help panel
 	"help.title":             "dmed — keys",
 	"help.close_hint":        "(F1/Esc closes)",
@@ -329,6 +336,13 @@ var ruCatalog = map[string]string{
 	"msg.agent_commit_fail": "изменения применены, но коммит не удался: %s",
 	"msg.agent_applied":     "изменения агента применены и закоммичены",
 	"msg.agent_discarded":   "изменения агента отклонены",
+
+	// Agent review + AI settings
+	"agent.review_hint": "  (y: применить всё, n: отклонить, Tab: след.файл, \u2191\u2193 скролл)",
+	"ai.settings":       " AI - настройки ",
+	"ai.settings_hint":  "(\u2191/\u2193 движение, Enter правка, \u2190/\u2192 выбор, Ctrl+S сохранить, Esc закрыть)",
+	"ai.choice":         "(\u2190/\u2192 выбрать)",
+	"ai.settings_save":  "(Ctrl+S сохранить, Esc закрыть)",
 
 	// Help panel
 	"help.title":             "dmed — клавиши",

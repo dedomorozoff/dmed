@@ -513,7 +513,7 @@ func (m Model) agentReviewBottom() string {
 	}
 	line := statusHiStyle.Render(title) +
 		hintStyle.Render(fmt.Sprintf("  +%d ~%d -%d", added, modified, deleted)) +
-		hintStyle.Render("  (y: apply all, n: reject, Tab: next file, ↑↓ scroll)")
+		hintStyle.Render(m.t("agent.review_hint"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
