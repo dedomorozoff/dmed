@@ -139,6 +139,31 @@ var enCatalog = map[string]string{
 	"msg.added_cursor":        "added cursor",
 	"msg.selected":            "selected: type to replace all occurrences",
 
+	// Diff bottom bar
+	"git.diff_hint":  " Space stage  c commit  a stage-all  r refresh  d full-diff  l log  Tab diff",
+	"git.diff_focus": " j/k scroll  h/l h-scroll  Tab/Esc back",
+	"git.log_hint2":  " j/k commits  Tab diff  Esc files  r refresh",
+	"git.diff_label": " diff ",
+	"git.log_tag":    " LOG ",
+	"git.diff_stats": "  +%d ~%d -%d",
+
+	// Conflict / search / replace / AI / finder lines
+	"conflict.label":  " CONFLICT ",
+	"conflict.msg":    " File modified on disk: [R]eload / [I]gnore? (%s)",
+	"conflict.scroll": "  (\u2191\u2193 scroll)",
+	"search.label":    " search: ",
+	"search.none":     " [no matches]",
+	"search.hint":     "  (Enter/F3: next, Shift+F3: prev, Esc: close)",
+	"replace.find":    " find: ",
+	"replace.with":    " replace: ",
+	"replace.hint":    "  (Tab: switch, Enter: replace, Ctrl+A: all, Esc: close)",
+	"ai.instr":        " AI instruction: ",
+	"ai.instr_hint":   "  (Enter: submit, Esc: cancel)",
+	"ai.thinking":     " AI thinking... ",
+	"ai.diff":         " AI diff ",
+	"ai.review_hint":  "  (y: accept, n: reject, \u2191\u2193 scroll)",
+	"finder.prompt":   " find file: ",
+
 	// Help panel
 	"help.title":             "dmed — keys",
 	"help.close_hint":        "(F1/Esc closes)",
@@ -255,6 +280,31 @@ var ruCatalog = map[string]string{
 	"msg.project":             "проект: %s",
 	"msg.added_cursor":        "курсор добавлен",
 	"msg.selected":            "выбрано: вводите, чтобы заменить все вхождения",
+
+	// Diff bottom bar
+	"git.diff_hint":  " Space stage  c commit  a все  r refresh  d full-diff  l log  Tab diff",
+	"git.diff_focus": " j/k скролл  h/l гориз.скролл  Tab/Esc назад",
+	"git.log_hint2":  " j/k коммиты  Tab diff  Esc файлы  r refresh",
+	"git.diff_label": " diff ",
+	"git.log_tag":    " ЛОГ ",
+	"git.diff_stats": "  +%d ~%d -%d",
+
+	// Conflict / search / replace / AI / finder lines
+	"conflict.label":  " КОНФЛИКТ ",
+	"conflict.msg":    " Файл изменён на диске: [R]перезагрузить / [I]проигнорировать? (%s)",
+	"conflict.scroll": "  (\u2191\u2193 скролл)",
+	"search.label":    " поиск: ",
+	"search.none":     " [нет совпадений]",
+	"search.hint":     "  (Enter/F3: далее, Shift+F3: назад, Esc: закрыть)",
+	"replace.find":    " найти: ",
+	"replace.with":    " заменить: ",
+	"replace.hint":    "  (Tab: переключить, Enter: заменить, Ctrl+A: все, Esc: закрыть)",
+	"ai.instr":        " AI инструкция: ",
+	"ai.instr_hint":   "  (Enter: отправить, Esc: отмена)",
+	"ai.thinking":     " AI думает... ",
+	"ai.diff":         " AI diff ",
+	"ai.review_hint":  "  (y: принять, n: отклонить, \u2191\u2193 скролл)",
+	"finder.prompt":   " найти файл: ",
 
 	// Help panel
 	"help.title":             "dmed — клавиши",

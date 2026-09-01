@@ -867,18 +867,18 @@ func (m Model) diffBottom() string {
 			deleted++
 		}
 	}
-	hint := " Space stage  c commit  a stage-all  r refresh  d full-diff  l log  Tab diff"
+	hint := m.t("git.diff_hint")
 	if m.gitDiffFocused {
-		hint = " j/k scroll  h/l h-scroll  Tab/Esc back"
+		hint = m.t("git.diff_focus")
 	} else if m.gitMode == gitModeLog {
-		hint = " j/k commits  Tab diff  Esc files  r refresh"
+		hint = m.t("git.log_hint2")
 	}
 	modeTag := ""
 	if m.gitMode == gitModeLog {
-		modeTag = statusHiStyle.Render(" LOG ") + " "
+		modeTag = statusHiStyle.Render(m.t("git.log_tag")) + " "
 	}
-	line := modeTag + statusHiStyle.Render(" diff ") + statusStyle.Render(m.diffPath) +
-		hintStyle.Render(fmt.Sprintf("  +%d ~%d -%d", added, modified, deleted)) +
+	line := modeTag + statusHiStyle.Render(m.t("git.diff_label")) + statusStyle.Render(m.diffPath) +
+		hintStyle.Render(m.t("git.diff_stats", added, modified, deleted)) +
 		hintStyle.Render(hint)
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
@@ -990,7 +990,7 @@ func (m Model) chatPanel(h int) []string {
 
 func (m Model) conflictLine() string {
 	fname := filepath.Base(m.conflictPath)
-	line := statusHiStyle.Render(" CONFLICT ") + statusStyle.Render(fmt.Sprintf(" File modified on disk: [R]eload / [I]gnore? (%s)", fname))
+	line := statusHiStyle.Render(m.t("conflict.label")) + statusStyle.Render(fmt.Sprintf(m.t("conflict.msg"), fname))
 	if len(m.conflictRows) > 0 {
 		added, modified, deleted := 0, 0, 0
 		for _, dr := range m.conflictRows {
@@ -1004,7 +1004,7 @@ func (m Model) conflictLine() string {
 			}
 		}
 		line += hintStyle.Render(fmt.Sprintf("  +%d ~%d -%d", added, modified, deleted))
-		line += hintStyle.Render("  (↑↓ scroll)")
+		line += hintStyle.Render(m.t("conflict.scroll"))
 	}
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
@@ -1014,16 +1014,15 @@ func (m Model) conflictLine() string {
 }
 
 func (m Model) searchLine() string {
-	line := statusHiStyle.Render(" search: ") + statusStyle.Render(string(m.searchQuery)) + cursorStyle.Render(" ")
+	line := statusHiStyle.Render(m.t("search.label")) + statusStyle.Render(string(m.searchQuery)) + cursorStyle.Render(" ")
 	if len(m.searchQuery) > 0 {
 		if m.searchTotalMatches > 0 {
 			line += hintStyle.Render(fmt.Sprintf(" [%d/%d]", m.searchMatchIdx+1, m.searchTotalMatches))
 		} else {
-			line += hintStyle.Render(" [no matches]")
+			line += hintStyle.Render(m.t("search.none"))
 		}
 	}
-	hint := "  (Enter/F3: next, Shift+F3: prev, Esc: close)"
-	line += hintStyle.Render(hint)
+	line += hintStyle.Render(m.t("search.hint"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -1032,14 +1031,14 @@ func (m Model) searchLine() string {
 }
 
 func (m Model) replaceLine() string {
-	findPart := statusHiStyle.Render(" find: ") + statusStyle.Render(string(m.searchQuery))
+	findPart := statusHiStyle.Render(m.t("replace.find")) + statusStyle.Render(string(m.searchQuery))
 	if m.replaceFocusFind {
 		findPart += cursorStyle.Render(" ")
 	} else {
 		findPart += " "
 	}
 
-	repPart := statusHiStyle.Render(" replace: ") + statusStyle.Render(string(m.replaceWith))
+	repPart := statusHiStyle.Render(m.t("replace.with")) + statusStyle.Render(string(m.replaceWith))
 	if !m.replaceFocusFind {
 		repPart += cursorStyle.Render(" ")
 	} else {
@@ -1051,11 +1050,10 @@ func (m Model) replaceLine() string {
 		if m.searchTotalMatches > 0 {
 			line += hintStyle.Render(fmt.Sprintf(" [%d/%d]", m.searchMatchIdx+1, m.searchTotalMatches))
 		} else {
-			line += hintStyle.Render(" [no matches]")
+			line += hintStyle.Render(m.t("search.none"))
 		}
 	}
-	hint := "  (Tab: switch, Enter: replace, Ctrl+A: all, Esc: close)"
-	line += hintStyle.Render(hint)
+	line += hintStyle.Render(m.t("replace.hint"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -1064,9 +1062,8 @@ func (m Model) replaceLine() string {
 }
 
 func (m Model) aiInlinePrompt() string {
-	line := statusHiStyle.Render(" AI instruction: ") + statusStyle.Render(string(m.aiInlineInput)) + cursorStyle.Render(" ")
-	hint := "  (Enter: submit, Esc: cancel)"
-	line += hintStyle.Render(hint)
+	line := statusHiStyle.Render(m.t("ai.instr")) + statusStyle.Render(string(m.aiInlineInput)) + cursorStyle.Render(" ")
+	line += hintStyle.Render(m.t("ai.instr_hint"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -1079,7 +1076,7 @@ func (m Model) aiInlineBusyLine() string {
 	if len(preview) > 60 {
 		preview = preview[:60] + "..."
 	}
-	line := statusHiStyle.Render(" AI thinking... ") + hintStyle.Render(preview)
+	line := statusHiStyle.Render(m.t("ai.thinking")) + hintStyle.Render(preview)
 	hint := "  (Esc to cancel)"
 	line += hintStyle.Render(hint)
 	fill := m.width - lipgloss.Width(line)
@@ -1101,9 +1098,9 @@ func (m Model) aiReviewBottom() string {
 			deleted++
 		}
 	}
-	line := statusHiStyle.Render(" AI diff ") +
+	line := statusHiStyle.Render(m.t("ai.diff")) +
 		hintStyle.Render(fmt.Sprintf("  +%d ~%d -%d", added, modified, deleted)) +
-		hintStyle.Render("  (y: accept, n: reject, ↑↓ scroll)")
+		hintStyle.Render(m.t("ai.review_hint"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -1121,7 +1118,7 @@ func (m Model) finderPanel() []string {
 			rows = append(rows, statusStyle.Render(label))
 		}
 	}
-	line := statusHiStyle.Render(" find file: ") + statusStyle.Render(string(m.finderQ)) + cursorStyle.Render(" ")
+	line := statusHiStyle.Render(m.t("finder.prompt")) + statusStyle.Render(string(m.finderQ)) + cursorStyle.Render(" ")
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
