@@ -217,6 +217,11 @@ func TestPaletteSwitchLanguage(t *testing.T) {
 	if !m.langChooserOpen {
 		t.Fatal("language chooser must open")
 	}
+	// The chooser must actually be visible with both languages.
+	content := m.View().Content
+	if !strings.Contains(content, "Русский") || !strings.Contains(content, "English") {
+		t.Fatalf("chooser panel not rendering languages:\n%s", content)
+	}
 	// Navigate down to Русский and select it.
 	m = press(m, tea.KeyPressMsg{Text: "j"})
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})

@@ -115,8 +115,15 @@ func (m Model) termExtraRows() int {
 	return m.termPanelHeight()
 }
 
+func (m Model) langChooserExtraRows() int {
+	if !m.langChooserOpen {
+		return 0
+	}
+	return len(i18n.Supported()) + 1
+}
+
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.termExtraRows()
+	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows()
 	if h < 1 {
 		h = 1
 	}
