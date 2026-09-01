@@ -1303,7 +1303,7 @@ func (m Model) palettePanel() []string {
 	}
 	rows := make([]string, 0, len(displayHits)+1)
 	for i, hit := range displayHits {
-		label := fmt.Sprintf(" %s — %s ", hit.title, hit.desc)
+		label := fmt.Sprintf(" %s — %s ", m.cmdTitle(hit), m.cmdDesc(hit))
 		if m.paletteOffset+i == m.paletteSel {
 			rows = append(rows, statusHiStyle.Render(label))
 		} else {
