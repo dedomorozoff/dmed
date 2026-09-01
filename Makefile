@@ -1,13 +1,11 @@
 GO       := go
-GOPROXY  := https://proxy.golang.org,direct
-GOSUMDB  := sum.golang.org
 
 # Export these so a stale environment (GOROOT in particular) can't interfere.
-# Value-less `export` keeps this file compatible with both GNU make and bmake.
+# The `export VAR=value` form is required by both GNU make and FreeBSD's bmake.
 GOROOT  :=
-export GOROOT
-export GOPROXY
-export GOSUMDB
+export GOROOT=
+export GOPROXY=https://proxy.golang.org,direct
+export GOSUMDB=sum.golang.org
 
 VERSION  ?= 0.6.5
 LDFLAGS  := -s -w -X main.version=$(VERSION)
