@@ -18,7 +18,9 @@ AI-related code.
 - Use plain `go` from PATH (1.25.0, installed at `D:\go\bin`). No special
   path needed; the old `/usr/lib/go/bin/go` (1.22) is gone.
 - A stale `GOROOT` used to be exported pointing at Go 1.15; it is clean now,
-  but the Makefile still does `export GOROOT :=` as insurance — leave it.
+  but the Makefile still does `GOROOT :=` plus a value-less `export GOROOT` as
+  insurance — leave it. The exports and phony lists are written in a form that
+  works under both GNU make and FreeBSD's bmake.
 - Network fetches need explicit `GOPROXY=https://proxy.golang.org,direct`
   and `GOSUMDB=sum.golang.org` (system defaults are wiped). The Makefile
   sets both.
