@@ -137,11 +137,11 @@ func split(n *node, pos int) (*node, *node) {
 	ll := n.left.len
 	if pos < ll {
 		a, b := split(n.left, pos)
-		return a, rebalance(mk(b, n.right))
+		return a, concat(b, n.right)
 	}
 	if pos > ll {
 		c, d := split(n.right, pos-ll)
-		return rebalance(mk(n.left, c)), d
+		return concat(n.left, c), d
 	}
 	return n.left, n.right
 }
