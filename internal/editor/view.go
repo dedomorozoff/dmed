@@ -74,6 +74,7 @@ var helpEntries = []helpEntry{
 	{"Enter/Backspace/Delete/Tab", "help.edit"},
 	{"Ctrl+Z / Ctrl+R", "help.undo"},
 	{"Ctrl+Y / Ctrl+D", "help.lines"},
+	{"Ctrl+U", "help.uppercase"},
 	{"Alt+D", "help.multicursor_word"},
 	{"Alt+Click", "help.multicursor_click"},
 	{"Esc", "help.multicursor_esc"},
@@ -126,8 +127,19 @@ func (m Model) langChooserExtraRows() int {
 	return len(i18n.Supported()) + 1
 }
 
+func (m Model) pluginStoreExtraRows() int {
+	if !m.pluginStoreOpen {
+		return 0
+	}
+	n := len(m.storeItems)
+	if m.storeLoading {
+		n++
+	}
+	return n + 1
+}
+
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.complExtraRows() - m.termExtraRows()
+	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.complExtraRows() - m.termExtraRows() - m.pluginStoreExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -227,6 +239,9 @@ func (m Model) View() tea.View {
 	if m.langChooserOpen {
 		rows = append(rows, m.langChooserPanel()...)
 	}
+	if m.pluginStoreOpen {
+		rows = append(rows, m.pluginStorePanel()...)
+	}
 	if m.complOpen && len(m.complItems) > 0 {
 		rows = append(rows, m.complPanel()...)
 	}
@@ -240,7 +255,7 @@ func (m Model) View() tea.View {
 	v.MouseMode = tea.MouseModeCellMotion
 
 	// Terminal cursor: positioned at the editor cursor location.
-	if !m.gitOpen && !m.agentOpen && !m.agentReviewMode && !m.paletteOpen && !m.langChooserOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
+	if !m.gitOpen && !m.agentOpen && !m.agentReviewMode && !m.paletteOpen && !m.langChooserOpen && !m.pluginStoreOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
 		cx, cy := m.cursorScreenPos()
 		v.Cursor = tea.NewCursor(cx, cy)
 	}
@@ -1365,6 +1380,38 @@ func (m Model) langChooserPanel() []string {
 		} else {
 			rows = append(rows, statusStyle.Render(label))
 		}
+	}
+	return rows
+}
+
+func (m Model) pluginStorePanel() []string {
+	rows := make([]string, 0, len(m.storeItems)+2)
+	rows = append(rows, statusHiStyle.Render(m.t("plugin.store_title")))
+	for i, p := range m.storeItems {
+		status := m.t("plugin.not_installed")
+		if m.pluginInstalled(p.File) {
+			status = m.t("plugin.installed")
+		}
+		src := ""
+		if p.Remote {
+			src = " [github]"
+		}
+		label := fmt.Sprintf(" %s — %s%s [%s] ", p.Name, p.Desc, src, status)
+		pad := m.width - lipgloss.Width(label)
+		if pad < 0 {
+			pad = 0
+		}
+		label += strings.Repeat(" ", pad)
+		if i == m.pluginStoreSel {
+			rows = append(rows, statusHiStyle.Render(label))
+		} else {
+			rows = append(rows, statusStyle.Render(label))
+		}
+	}
+	if m.storeLoading {
+		rows = append(rows, statusStyle.Render(m.t("plugin.loading")))
+	} else if m.storeErr != "" {
+		rows = append(rows, statusStyle.Render("plugin store: "+m.storeErr))
 	}
 	return rows
 }

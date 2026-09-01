@@ -26,6 +26,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "replace", title: "cmd.replace_t", desc: "cmd.replace_d", action: func(m *Model) tea.Cmd { m.startReplace(); return nil }},
 		{id: "undo", title: "cmd.undo_t", desc: "cmd.undo_d", action: func(m *Model) tea.Cmd { m.cur().buf.Undo(); return nil }},
 		{id: "redo", title: "cmd.redo_t", desc: "cmd.redo_d", action: func(m *Model) tea.Cmd { m.cur().buf.Redo(); return nil }},
+		{id: "uppercase", title: "cmd.uppercase_t", desc: "cmd.uppercase_d", action: func(m *Model) tea.Cmd { m.uppercaseActive(); return nil }},
 		{id: "git_commit", title: "cmd.git_commit_t", desc: "cmd.git_commit_d", action: func(m *Model) tea.Cmd { m.openGitPanel(); return nil }},
 		{id: "git_diff", title: "cmd.git_diff_t", desc: "cmd.git_diff_d", action: func(m *Model) tea.Cmd { m.openDiffView(); return nil }},
 		{id: "git_next", title: "cmd.git_next_t", desc: "cmd.git_next_d", action: func(m *Model) tea.Cmd { m.jumpHunk(1); return nil }},
@@ -45,6 +46,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "help", title: "cmd.help_t", desc: "cmd.help_d", action: func(m *Model) tea.Cmd { m.helpOpen = true; return nil }},
 		{id: "quit", title: "cmd.quit_t", desc: "cmd.quit_d", action: func(m *Model) tea.Cmd { return tea.Quit }},
 		{id: "lang_select", title: "cmd.lang_select_t", desc: "cmd.lang_select_d", action: func(m *Model) tea.Cmd { m.openLangChooser(); return nil }},
+		{id: "plugin_store", title: "cmd.plugin_store_t", desc: "cmd.plugin_store_d", action: func(m *Model) tea.Cmd { return m.openPluginStore() }},
 	}
 	for _, c := range m.plugins.Commands() {
 		id := c.ID

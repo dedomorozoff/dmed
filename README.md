@@ -14,7 +14,8 @@ AI agents can read, propose, and apply changes directly to your codebase — but
 *   **Keyboard-First & Terminal-Native:** Fast, lightweight, and works seamlessly over SSH.
 *   **Human-in-the-Loop AI:** High-level autonomy for agents (Ollama, OpenAI, DeepSeek, etc.) with 100% human control via explicit diff reviews.
 *   **Zero-Dependency Git:** Native side-by-side diffs, gutter indicators, and staging directly from the editor without needing an external git binary.
-*   **All-in-One Dev Environment:** Built-in persistent terminal, LSP diagnostics, and smart fuzzy searching out of the box.
+*   **All-in-One Dev Environment:** Built-in persistent terminal, LSP diagnostics,
+    autocompletion, and a plugin store out of the box.
 
 
 ## Features
@@ -30,6 +31,8 @@ AI agents can read, propose, and apply changes directly to your codebase — but
 - Full undo/redo with typing-run grouping
 - Clipboard: copy (`Ctrl+C`), cut (`Ctrl+X`), paste (`Ctrl+V`)
 - Multi-selection with `Shift+Arrows`
+- Uppercase selection or whole buffer (`Ctrl+U`)
+- Rope-backed buffer: O(1) undo, cheap branching
 - Configurable via `.dmed.conf` (INI format, hot-reload on save)
 
 ### AI Integration
@@ -52,7 +55,10 @@ AI agents can read, propose, and apply changes directly to your codebase — but
 ### Developer Tools
 
 - Built-in **terminal** (`Alt+T`) — persistent shell session at the bottom
-- **LSP client** — diagnostics, go-to-definition, go-to-references
+- **LSP client** — diagnostics (rendered in the gutter), completion, go-to-definition; hints the install command when a language server is missing
+- **Autocompletion** (`Ctrl+Space`, auto-trigger) — buffer words + LSP sources for Go, Python, TS/JS, Rust, C/C++, Lua, Ruby, PHP, Zig, JSON, YAML, CSS, HTML
+- **Lua plugins** — keybindings, palette commands and events; hot-reload on edit, plus a built-in store (`Plugins: Install...`) with embedded and GitHub-hosted plugins
+- **Localization** — English/Russian UI, switchable from the palette
 - **Sessions** — auto-save/restore open files across restarts
 - **Command palette** (`Ctrl+P` / `F2`) — fuzzy search all commands
 
@@ -116,6 +122,8 @@ dmed a.txt b.txt               # multiple files → tabs
 | `Alt+D` | Add multi-cursor at next word occurrence |
 | `Alt+Click` | Add cursor at click position |
 | `Esc` | Exit multi-cursor mode |
+| `Ctrl+Space` | Autocomplete (word + LSP) |
+| `Ctrl+U` | Uppercase selection / buffer |
 | `Enter` / `Backspace` / `Delete` | Standard editing |
 
 ### Files & Tabs
@@ -147,7 +155,7 @@ dmed a.txt b.txt               # multiple files → tabs
 |------|--------|
 | `Alt+A` | Toggle AI chat panel |
 | `Alt+I` | Inline rewrite (select text first) |
-| `Ctrl+U` | Clear chat history |
+| `Ctrl+U` | Clear chat history (in chat panel) |
 
 ### Search
 
@@ -195,6 +203,11 @@ system_prompt = You are a helpful coding assistant...
 [ui]
 tree_width = 25
 chat_width_pct = 40          # percentage of screen width
+
+[plugins]                     # remote source for the plugin store
+repo = dedomorozoff/dmed     # "owner/repo"
+dir = plugins                # directory holding .lua plugins
+branch = main
 ```
 
 ## Documentation
@@ -208,7 +221,11 @@ chat_width_pct = 40          # percentage of screen width
 
 ```
 internal/buffer/     pure text buffer + undo/redo (no TUI deps)
+internal/rope/       persistent line-rope backing the buffer (O(1) undo)
 internal/editor/     Bubbletea model: keys, tabs, splits, rendering
+internal/plugin/     Lua plugin framework (gopher-lua)
+internal/bundled/    embedded official plugins for the plugin store
+internal/i18n/       en/ru localization catalogs
 internal/ai/         provider interface: Ollama + OpenAI-compatible
 internal/config/     INI parser, hot-reload, defaults
 internal/syntax/     Chroma-based highlighting

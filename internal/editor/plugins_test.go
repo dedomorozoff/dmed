@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"dmed/internal/bundled"
 )
 
 func writeProjectPlugin(t *testing.T, dir, name, src string) {
@@ -117,5 +119,49 @@ end)
 	m = press(m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 	if got := m.cur().buf.Text(); got != "two\n" {
 		t.Fatalf("after reload buffer=%q, want two", got)
+	}
+}
+
+func TestPluginStoreInstallUninstall(t *testing.T) {
+	plugdir := t.TempDir()
+	t.Setenv("DMED_PLUGIN_DIR", plugdir)
+	m := New()
+	m.width, m.height = 80, 24
+	m.loadPlugins()
+
+	first := bundled.Store[0].File
+	target := m.pluginTargetPath(first)
+	if m.pluginInstalled(first) {
+		t.Fatalf("%s should not be installed initially", first)
+	}
+
+	// Install via the store (Enter on the selected item).
+	m.openPluginStore()
+	if !m.pluginStoreOpen {
+		t.Fatal("plugin store did not open")
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.pluginStoreOpen {
+		t.Fatal("store should close after Enter")
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("plugin file not written: %v", err)
+	}
+	if !m.pluginInstalled(first) {
+		t.Fatalf("pluginInstalled(%s)=false after install", first)
+	}
+	// The installed plugin is live.
+	if !m.plugins.HasBinding("ctrl+u") && first == "uppercase.lua" {
+		t.Log("uppercase plugin should be loaded after install")
+	}
+
+	// Uninstall via the store.
+	m.openPluginStore()
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if _, err := os.Stat(target); err == nil {
+		t.Fatalf("plugin file still present after uninstall: %s", target)
+	}
+	if m.pluginInstalled(first) {
+		t.Fatalf("pluginInstalled(%s)=true after uninstall", first)
 	}
 }

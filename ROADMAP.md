@@ -131,8 +131,11 @@
       — Lua-фреймворк (`internal/plugin`, gopher-lua): `.lua` в
       `~/.dmed/plugins` и `<проект>/.dmed/plugins`, API `dmed.*`
       (on_key/command/on + text/set_text/cursor/insert/status/save).
-      Авто-перезагрузка при изменении `.lua` на диске. Доки в
-      `docs/PLUGINS.md`. Осталось: больше событий/API.
+      Авто-перезагрузка при изменении `.lua` на диске. Магазин плагинов
+      («Plugins: Install...»): встроенные (Emmet, сниппеты) + удалённые из
+      `plugins/` на GitHub (`[plugins] repo/dir/branch`), установка/удаление,
+      без сети — встроенный набор. Uppercase встроен в редактор (Ctrl+U).
+      Доки в `docs/PLUGINS.md`. Осталось: больше событий/API.
 - [x] Конфигурация (`.dmed.conf` INI): tab_width, syntax_theme, line_numbers,
       skipped_dirs, model, ollama_url, system_prompt, context_max,
       tree_width, chat_width_pct. `Settings: Open Config` в палитре,

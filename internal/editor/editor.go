@@ -255,6 +255,15 @@ type Model struct {
 	langChooserOpen bool
 	langChooserSel  int
 
+	// Plugin store (install/uninstall bundled plugins)
+	pluginStoreOpen       bool
+	pluginStoreSel        int
+	pendingPluginRemovals map[string]bool
+	storeItems            []storeItem
+	storeLoading          bool
+	storeErr              string
+	pendingStoreInstall   string
+
 	// Autocompletion popup
 	complOpen   bool
 	complItems  []string
@@ -350,13 +359,14 @@ func normalizeKey(r rune) rune {
 func New(paths ...string) Model {
 	fe := make(chan string, 16)
 	m := Model{
-		width:      80,
-		height:     24,
-		expanded:   map[string]bool{},
-		fileEvents: fe,
-		bus:        events.New(),
-		diagCh:     make(chan lspDiagMsg, 64),
-		diags:      map[string][]lsp.Diagnostic{},
+		width:                 80,
+		height:                24,
+		expanded:              map[string]bool{},
+		fileEvents:            fe,
+		bus:                   events.New(),
+		diagCh:                make(chan lspDiagMsg, 64),
+		diags:                 map[string][]lsp.Diagnostic{},
+		pendingPluginRemovals: map[string]bool{},
 	}
 	if w, err := watcher.New(func(p string) {
 		select {
@@ -571,7 +581,11 @@ func (m *Model) openConfigFile() {
 			"# context_max = 262144  # bytes of file context sent to the agent\n\n" +
 			"[ui]\n" +
 			"# tree_width = 25\n" +
-			"# chat_width_pct = 40\n"
+			"# chat_width_pct = 40\n\n" +
+			"[plugins]\n" +
+			"# repo = dedomorozoff/dmed  # GitHub store for the plugin store\n" +
+			"# dir = plugins\n" +
+			"# branch = main\n"
 		os.WriteFile(path, []byte(content), 0o644)
 	}
 	m.openPath(path)
@@ -818,6 +832,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Hot-reload a changed plugin without restarting the editor.
 		if m.plugins != nil && m.isPluginPath(path) {
+			// Skip events for plugins the store just removed itself.
+			if m.pendingPluginRemovals[path] {
+				delete(m.pendingPluginRemovals, path)
+				return m, waitForFileEvent(m.fileEvents)
+			}
 			m.reloadPlugin(path)
 			return m, waitForFileEvent(m.fileEvents)
 		}
@@ -954,6 +973,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		abs, _ := filepath.Abs(msg.path)
 		m.diags[abs] = msg.diags
 		return m, waitForLSPDiag(m.diagCh)
+	case pluginStoreMsg:
+		m.storeLoading = false
+		if msg.err != nil {
+			m.storeErr = msg.err.Error()
+		} else {
+			for _, it := range msg.items {
+				exists := false
+				for _, e := range m.storeItems {
+					if e.File == it.File {
+						exists = true
+						break
+					}
+				}
+				if !exists {
+					m.storeItems = append(m.storeItems, it)
+				}
+			}
+		}
+	case pluginSourceMsg:
+		m.pendingStoreInstall = ""
+		if msg.err != nil {
+			m.msg = "plugin download error: " + msg.err.Error()
+		} else if m.plugins != nil {
+			m.installFromSource(msg.file, msg.src)
+		}
 	}
 	m.clampScroll()
 	return m, nil
@@ -1148,6 +1192,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.langChooserOpen {
 		return m.handleLangChooser(msg)
 	}
+	if m.pluginStoreOpen {
+		return m.handlePluginStore(msg)
+	}
 	if m.promptOpen {
 		return m.handlePrompt(msg)
 	}
@@ -1217,6 +1264,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+d":
 		m.cur().buf.DuplicateLine()
 		m.msg = ""
+	case "ctrl+u":
+		m.uppercaseActive()
+		return nil
 	case "ctrl+r":
 		if m.cur().buf.Redo() {
 			m.msg = ""

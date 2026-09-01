@@ -57,3 +57,31 @@ func TestSelectionCopyPasteCut(t *testing.T) {
 		t.Fatalf("after cut: %q", m.cur().buf.Text())
 	}
 }
+
+func TestUppercaseSelectionAndBuffer(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "up.txt", "hello world\nsecond line\n")
+
+	// Whole buffer (no selection) via Ctrl+U.
+	m := New(f)
+	m.width, m.height = 80, 24
+	m = press(m, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	if got := m.cur().buf.Text(); got != "HELLO WORLD\nSECOND LINE\n" {
+		t.Fatalf("whole-buffer uppercase got %q", got)
+	}
+
+	// Selection only.
+	m = New(f)
+	m.width, m.height = 80, 24
+	for i := 0; i < 5; i++ {
+		m.cur().buf.MoveRightWithSelect()
+	}
+	m = press(m, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	want := "HELLO world\nsecond line\n"
+	if got := m.cur().buf.Text(); got != want {
+		t.Fatalf("selection uppercase got %q want %q", got, want)
+	}
+	if m.cur().buf.HasSelection() {
+		t.Fatal("selection should clear after uppercase")
+	}
+}

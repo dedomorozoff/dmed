@@ -5,7 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+
 	"dmed/internal/buffer"
+	"dmed/internal/bundled"
 	"dmed/internal/plugin"
 )
 
@@ -23,10 +26,13 @@ func (m *Model) Status(msg string)  { m.msg = msg }
 func (m *Model) Save()              { m.saveActive() }
 
 // pluginDirs returns the plugin directories to search, in load order:
-// global ~/.dmed/plugins first, then the project .dmed/plugins.
+// global ~/.dmed/plugins first (or $DMED_PLUGIN_DIR for tests), then the
+// project .dmed/plugins.
 func (m Model) pluginDirs() []string {
 	var dirs []string
-	if home, err := os.UserHomeDir(); err == nil {
+	if pd := os.Getenv("DMED_PLUGIN_DIR"); pd != "" {
+		dirs = append(dirs, pd)
+	} else if home, err := os.UserHomeDir(); err == nil {
 		dirs = append(dirs, filepath.Join(home, ".dmed", "plugins"))
 	}
 	if m.root != "" {
@@ -71,4 +77,100 @@ func (m *Model) reloadPlugin(path string) {
 	}
 	m.plugins.EmitTo(m, path, "ready")
 	m.msg = m.t("msg.plugin_reloaded", filepath.Base(path))
+}
+
+// openPluginStore opens the built-in plugin store panel and kicks off a
+// background fetch of the remote plugin listing.
+func (m *Model) openPluginStore() tea.Cmd {
+	m.pluginStoreOpen = true
+	m.pluginStoreSel = 0
+	m.paletteOpen = false
+	m.storeItems = storeEmbeddedItems()
+	m.storeLoading = true
+	m.storeErr = ""
+	repo, dir, branch := m.pluginRepoConfig()
+	return m.fetchStoreListCmd(repo, dir, branch)
+}
+
+// pluginTargetPath is where a bundled plugin file installs (global dir).
+func (m Model) pluginTargetPath(file string) string {
+	dirs := m.pluginDirs()
+	if len(dirs) == 0 {
+		return file
+	}
+	return filepath.Join(dirs[0], file)
+}
+
+// pluginInstalled reports whether a bundled plugin file is already present.
+func (m Model) pluginInstalled(file string) bool {
+	_, err := os.Stat(m.pluginTargetPath(file))
+	return err == nil
+}
+
+// handlePluginStore handles keys while the plugin store is open.
+func (m *Model) handlePluginStore(msg tea.KeyPressMsg) tea.Cmd {
+	items := m.storeItems
+	switch msg.String() {
+	case "esc":
+		m.pluginStoreOpen = false
+	case "enter":
+		if m.pluginStoreSel >= 0 && m.pluginStoreSel < len(items) {
+			it := items[m.pluginStoreSel]
+			m.pluginStoreOpen = false
+			if m.pluginInstalled(it.File) {
+				m.uninstallStoreItem(it.File)
+			} else if it.Remote {
+				m.pendingStoreInstall = it.File
+				m.msg = m.t("plugin.downloading", it.File)
+				repo, dir, branch := m.pluginRepoConfig()
+				return m.fetchStoreSourceCmd(repo, dir, branch, it.File)
+			} else {
+				m.installFromSource(it.File, bundled.Source(it.File))
+			}
+			return nil
+		}
+		m.pluginStoreOpen = false
+	case "up", "k":
+		if len(items) > 0 {
+			m.pluginStoreSel = (m.pluginStoreSel - 1 + len(items)) % len(items)
+		}
+	case "down", "j":
+		if len(items) > 0 {
+			m.pluginStoreSel = (m.pluginStoreSel + 1) % len(items)
+		}
+	}
+	return nil
+}
+
+// installFromSource writes a plugin file to the global plugin dir and loads it.
+func (m *Model) installFromSource(file, src string) {
+	target := m.pluginTargetPath(file)
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		m.msg = "plugin install error: " + err.Error()
+		return
+	}
+	if err := os.WriteFile(target, []byte(src), 0o644); err != nil {
+		m.msg = "plugin install error: " + err.Error()
+		return
+	}
+	if m.watcher != nil {
+		_ = m.watcher.Watch(filepath.Dir(target))
+	}
+	if m.plugins != nil {
+		_ = m.plugins.Reload(target)
+	}
+	m.msg = m.t("msg.plugin_installed", file)
+}
+
+// uninstallStoreItem removes a plugin file and drops it from memory. The
+// pendingPluginRemovals guard stops the watcher from reporting a reload error
+// for the file we just deleted ourselves.
+func (m *Model) uninstallStoreItem(file string) {
+	target := m.pluginTargetPath(file)
+	m.pendingPluginRemovals[target] = true
+	_ = os.Remove(target)
+	if m.plugins != nil {
+		m.plugins.Remove(target)
+	}
+	m.msg = m.t("msg.plugin_uninstalled", file)
 }

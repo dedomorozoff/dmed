@@ -152,6 +152,27 @@ func TestAgentDefaults(t *testing.T) {
 	}
 }
 
+func TestPluginsDefaults(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Plugins.Repo != "dedomorozoff/dmed" || cfg.Plugins.Dir != "plugins" || cfg.Plugins.Branch != "main" {
+		t.Errorf("default plugins = %+v", cfg.Plugins)
+	}
+}
+
+func TestLoadPluginsSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := "[plugins]\nrepo = someone/else\ndir = lua\nbranch = dev\n"
+	os.WriteFile(path, []byte(content), 0o644)
+
+	cfg := Defaults()
+	loadFile(path, &cfg)
+
+	if cfg.Plugins.Repo != "someone/else" || cfg.Plugins.Dir != "lua" || cfg.Plugins.Branch != "dev" {
+		t.Errorf("plugins = %+v", cfg.Plugins)
+	}
+}
+
 func TestWriteAIUpdatesSectionPreservesOthers(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".dmed.conf")

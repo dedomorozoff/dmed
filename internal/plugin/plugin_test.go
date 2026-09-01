@@ -3,6 +3,8 @@ package plugin
 import (
 	"os"
 	"testing"
+
+	"dmed/internal/bundled"
 )
 
 // fakeHost is a minimal Host implementation for tests.
@@ -170,5 +172,76 @@ func TestReloadReportsBrokenSource(t *testing.T) {
 	// The old plugin stays registered after a failed reload.
 	if len(m.Names()) != 1 {
 		t.Fatalf("names after failed reload=%v", m.Names())
+	}
+}
+
+func TestManagerRemove(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/r.lua"
+	writeFile(path, `dmed.command("x", "X", "", function() dmed.insert("x") end)`)
+	m := New()
+	if errs := m.Load(dir); len(errs) > 0 {
+		t.Fatalf("load errors: %v", errs)
+	}
+	if len(m.Commands()) != 1 {
+		t.Fatalf("commands=%v", m.Commands())
+	}
+	m.Remove(path)
+	if len(m.Commands()) != 0 {
+		t.Fatalf("commands after remove=%v", m.Commands())
+	}
+	if m.RunCommand(&fakeHost{}, "x") {
+		t.Fatal("removed command still runs")
+	}
+	if len(m.Names()) != 0 {
+		t.Fatalf("names after remove=%v", m.Names())
+	}
+}
+
+// emmetHost drives the bundled emmet plugin in tests.
+type emmetHost struct {
+	lines    []string
+	cursorL  int
+	cursorC  int
+	inserted string
+	status   string
+}
+
+func (h *emmetHost) Text() string       { return "" }
+func (h *emmetHost) SetText(s string)   {}
+func (h *emmetHost) LineCount() int     { return len(h.lines) }
+func (h *emmetHost) Line(i int) string  { return h.lines[i] }
+func (h *emmetHost) Cursor() (int, int) { return h.cursorL, h.cursorC }
+func (h *emmetHost) SetCursor(l, c int) { h.cursorL, h.cursorC = l, c }
+func (h *emmetHost) Insert(s string)    { h.inserted += s }
+func (h *emmetHost) Status(msg string)  { h.status = msg }
+func (h *emmetHost) Save()              {}
+
+func TestBundledEmmetExpansion(t *testing.T) {
+	src := bundled.Source("emmet.lua")
+	if src == "" {
+		t.Fatal("emmet.lua not embedded")
+	}
+	dir := t.TempDir()
+	writeFile(dir+"/emmet.lua", src)
+	m := New()
+	if errs := m.Load(dir); len(errs) > 0 {
+		t.Fatalf("load errors: %v", errs)
+	}
+	h := &emmetHost{lines: []string{"div>ul>li*2"}, cursorL: 0, cursorC: len("div>ul>li*2")}
+	if !m.RunCommand(h, "emmet_expand") {
+		t.Fatalf("emmet_expand command not found; commands=%v", m.Commands())
+	}
+	want := "<div>\n  <ul>\n    <li></li>\n    <li></li>\n  </ul>\n</div>"
+	if h.inserted != want {
+		t.Fatalf("emmet output=%q want %q", h.inserted, want)
+	}
+}
+
+func TestBundledStoreComplete(t *testing.T) {
+	for _, p := range bundled.Store {
+		if src := bundled.Source(p.File); src == "" {
+			t.Errorf("bundled plugin %q has no embedded source", p.File)
+		}
 	}
 }

@@ -11,10 +11,11 @@ import (
 
 // Config holds all editor configuration.
 type Config struct {
-	Editor EditorConfig
-	AI     AIConfig
-	Agent  AgentConfig
-	UI     UIConfig
+	Editor  EditorConfig
+	AI      AIConfig
+	Agent   AgentConfig
+	UI      UIConfig
+	Plugins PluginsConfig
 }
 
 // AgentConfig holds settings for background agent tasks (M4).
@@ -52,6 +53,14 @@ type UIConfig struct {
 	Lang         string
 }
 
+// PluginsConfig configures the remote plugin store. Plugins are listed and
+// installed from a GitHub repo's plugins/ directory.
+type PluginsConfig struct {
+	Repo   string // "owner/repo"
+	Dir    string // path inside the repo holding .lua plugins
+	Branch string // branch to read from
+}
+
 // Defaults returns the default configuration.
 func Defaults() Config {
 	return Config{
@@ -77,6 +86,11 @@ func Defaults() Config {
 			TreeWidth:    25,
 			ChatWidthPct: 40,
 			Lang:         "en",
+		},
+		Plugins: PluginsConfig{
+			Repo:   "dedomorozoff/dmed",
+			Dir:    "plugins",
+			Branch: "main",
 		},
 	}
 }
@@ -111,6 +125,9 @@ func Load(projectRoot string) Config {
 	}
 	if v := os.Getenv("DMED_LANG"); v != "" {
 		cfg.UI.Lang = v
+	}
+	if v := os.Getenv("DMED_PLUGIN_REPO"); v != "" {
+		cfg.Plugins.Repo = v
 	}
 
 	return cfg
@@ -266,6 +283,19 @@ func loadFile(path string, cfg *Config) {
 		}
 		if v, ok := s["lang"]; ok {
 			cfg.UI.Lang = v
+		}
+	}
+
+	// [plugins]
+	if s, ok := sections["plugins"]; ok {
+		if v, ok := s["repo"]; ok {
+			cfg.Plugins.Repo = v
+		}
+		if v, ok := s["dir"]; ok {
+			cfg.Plugins.Dir = v
+		}
+		if v, ok := s["branch"]; ok {
+			cfg.Plugins.Branch = v
 		}
 	}
 }
