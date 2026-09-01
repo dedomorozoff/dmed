@@ -144,6 +144,8 @@ type Model struct {
 	tr         i18n.Translator
 	plugins    *plugin.Manager
 	lspClient  *lsp.Client
+	diagCh     chan lspDiagMsg
+	diags      map[string][]lsp.Diagnostic
 	tabs       []tab
 	panes      []pane
 	layout     splitLayout
@@ -353,6 +355,8 @@ func New(paths ...string) Model {
 		expanded:   map[string]bool{},
 		fileEvents: fe,
 		bus:        events.New(),
+		diagCh:     make(chan lspDiagMsg, 64),
+		diags:      map[string][]lsp.Diagnostic{},
 	}
 	if w, err := watcher.New(func(p string) {
 		select {
@@ -791,7 +795,7 @@ func waitForFileEvent(ch <-chan string) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh), waitForInlineOutput(m.aiInlineCh))
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh), waitForInlineOutput(m.aiInlineCh), waitForLSPDiag(m.diagCh))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -935,6 +939,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.complOpen && msg.path == m.cur().path {
 			m.mergeLSPCompletion(msg.items)
 		}
+	case lspDiagMsg:
+		abs, _ := filepath.Abs(msg.path)
+		m.diags[abs] = msg.diags
+		return m, waitForLSPDiag(m.diagCh)
 	}
 	m.clampScroll()
 	return m, nil

@@ -18,6 +18,23 @@ type lspCompletionMsg struct {
 	err   error
 }
 
+// lspDiagMsg carries async diagnostics for a file from the language server.
+type lspDiagMsg struct {
+	path  string
+	diags []lsp.Diagnostic
+}
+
+// waitForLSPDiag blocks until diagnostics arrive and forwards them as a Msg.
+func waitForLSPDiag(ch chan lspDiagMsg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return msg
+	}
+}
+
 // lspServerFor maps a file extension to its LSP server command + language id.
 // Empty command means no LSP support for that extension. The server is only
 // started if the binary is found on PATH, so absent servers degrade gracefully
@@ -77,7 +94,12 @@ func (m *Model) ensureLSP() {
 	if root == "" {
 		root = filepath.Dir(t.path)
 	}
-	c, err := lsp.Start(cmd, args, root, nil)
+	c, err := lsp.Start(cmd, args, root, func(path string, diags []lsp.Diagnostic) {
+		select {
+		case m.diagCh <- lspDiagMsg{path: path, diags: diags}:
+		default: // drop if the UI is backed up
+		}
+	})
 	if err != nil {
 		return
 	}

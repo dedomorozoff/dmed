@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"dmed/internal/i18n"
+	"dmed/internal/lsp"
 	"dmed/internal/syntax"
 	"dmed/internal/vcs"
 )
@@ -27,6 +28,9 @@ var (
 	gitAddStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
 	gitModStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	gitDelStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	diagErrStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	diagWarnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	diagInfoStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
 	diffAddBg       = lipgloss.NewStyle().Background(lipgloss.Color("22"))
 	diffDelBg       = lipgloss.NewStyle().Background(lipgloss.Color("52"))
 	diffModBg       = lipgloss.NewStyle().Background(lipgloss.Color("58"))
@@ -131,9 +135,9 @@ func (m Model) viewHeight() int {
 }
 
 func (m Model) gutterWidthForTab(t *tab) int {
-	w := len(strconv.Itoa(t.buf.LineCount())) + 2
-	if w < 5 {
-		w = 5
+	w := len(strconv.Itoa(t.buf.LineCount())) + 3
+	if w < 6 {
+		w = 6
 	}
 	return w
 }
@@ -347,6 +351,8 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 
 	syntaxLines := t.getSyntaxLines()
 	diff := t.getDiff(m.repo)
+	diagPath, _ := filepath.Abs(t.path)
+	tabDiags := m.diags[diagPath]
 
 	for row := 0; row < h; row++ {
 		ln := p.offsetY + row
@@ -367,17 +373,34 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 			}
 		}
 
+		diagMark, diagSev := diagMarkFor(tabDiags, ln)
+		diagMarkStyle := gutterStyle
+		switch diagSev {
+		case 1:
+			diagMarkStyle = diagErrStyle
+		case 2:
+			diagMarkStyle = diagWarnStyle
+		default:
+			if diagMark != "" {
+				diagMarkStyle = diagInfoStyle
+			}
+		}
+		if diagMark == "" {
+			diagMark = " "
+		}
+
 		numPad := gw - 2 - len(num)
 		if numPad < 0 {
 			numPad = 0
 		}
-		numStr := strings.Repeat(" ", numPad) + num + " "
+		numStr := strings.Repeat(" ", numPad) + num
 		gutStr := numStr
 		if active && ln == cur && ln < t.buf.LineCount() {
 			gutStr = curGutterStyle.Render(numStr)
 		} else {
 			gutStr = gutterStyle.Render(numStr)
 		}
+		gutStr += diagMarkStyle.Render(diagMark)
 		gutStr += gitMarkStyle.Render(gitMark)
 
 		if ln < t.buf.LineCount() {
@@ -387,6 +410,27 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 		}
 	}
 	return rows
+}
+
+// diagMarkFor returns the gutter marker for a line given the file's
+// diagnostics, and its severity (1: Error, 2: Warning, else Info/Hint). Empty
+// marker means the line has no diagnostics. Lower severity wins on overlap.
+func diagMarkFor(diags []lsp.Diagnostic, line int) (string, int) {
+	mark, sev := "", 0
+	for _, d := range diags {
+		if d.Line != line {
+			continue
+		}
+		if mark == "" || d.Severity < sev {
+			if d.Severity == 1 || d.Severity == 2 {
+				mark = "!"
+			} else {
+				mark = "•"
+			}
+			sev = d.Severity
+		}
+	}
+	return mark, sev
 }
 
 // gitPanelWidth is the width of the left Git rail (like the project tree).
