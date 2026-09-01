@@ -352,7 +352,7 @@ func New(paths ...string) Model {
 		if st, err := os.Stat(p); err == nil && st.IsDir() {
 			if m.root == "" {
 				m.root = normalizePath(".", p)
-				m.msg = "project: " + filepath.Base(m.root)
+				m.msg = m.t("msg.project", filepath.Base(m.root))
 			}
 			continue
 		}
@@ -433,9 +433,9 @@ func (m *Model) openPath(rawPath string) {
 	t := tab{path: path, buf: buffer.New(), lineEnding: "lf", encoding: "utf-8"}
 	if err != nil {
 		if os.IsNotExist(err) {
-			m.msg = "new file: " + path
+			m.msg = m.t("msg.new_file", path)
 		} else {
-			m.msg = "open failed: " + err.Error()
+			m.msg = m.t("msg.open_failed", err.Error())
 		}
 	} else {
 		le, enc := detectFileInfo(data)
@@ -544,7 +544,7 @@ func (m *Model) openConfigFile() {
 		os.WriteFile(path, []byte(content), 0o644)
 	}
 	m.openPath(path)
-	m.msg = "edit config, save to apply"
+	m.msg = m.t("msg.edit_config")
 }
 
 func (m *Model) refind() {
@@ -625,7 +625,7 @@ func (m *Model) handlePrompt(msg tea.KeyPressMsg) tea.Cmd {
 		if path != "" {
 			if newFolder {
 				_ = os.MkdirAll(path, 0o755)
-				m.msg = "created folder: " + path
+				m.msg = m.t("msg.created_folder", path)
 			} else {
 				m.openPath(path)
 			}
@@ -662,11 +662,11 @@ func (m *Model) handleSavePrompt(msg tea.KeyPressMsg) tea.Cmd {
 				text = strings.ReplaceAll(text, "\n", "\r\n")
 			}
 			if err := os.WriteFile(t.path, []byte(text), 0o644); err != nil {
-				m.msg = "save failed: " + err.Error()
+				m.msg = m.t("msg.save_failed", err.Error())
 				return nil
 			}
 			t.buf.MarkSaved()
-			m.msg = "saved"
+			m.msg = m.t("msg.saved")
 			if m.pendingQuit {
 				m.pendingQuit = false
 				m.shutdown()
@@ -713,7 +713,7 @@ func (m *Model) handleQuitConfirm(msg tea.KeyPressMsg) tea.Cmd {
 			m.quitConfirm = false
 			m.pendingQuit = false
 			m.quitTab = false
-			m.msg = "save failed"
+			m.msg = m.t("msg.save_failed_gen")
 			if m.quitTab {
 				m.quitTab = false
 			}
@@ -781,7 +781,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.HasSuffix(path, ".dmed.conf") {
 			m.cfg = config.Load(m.root)
 			syntax.SetDefault(m.cfg.Editor.SyntaxTheme)
-			m.msg = "config reloaded"
+			m.msg = m.t("msg.config_reloaded")
 			return m, waitForFileEvent(m.fileEvents)
 		}
 		for i := range m.tabs {
@@ -796,7 +796,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
 						t.syntaxCached = nil
 						t.diffText = ""
-						m.msg = "reloaded: " + t.name(m.baseDir())
+						m.msg = m.t("msg.reloaded_name", t.name(m.baseDir()))
 					}
 				} else {
 					if data, err := os.ReadFile(t.path); err == nil {
@@ -810,7 +810,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.conflictOpen = true
 					m.conflictPath = path
-					m.msg = "file modified externally: (r)eload or (i)gnore?"
+					m.msg = m.t("msg.external")
 				}
 				break
 			}
@@ -896,7 +896,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.cur().buf.InsertText(text)
 			}
-			m.msg = "pasted"
+			m.msg = m.t("msg.pasted")
 		}
 	case tea.KeyPressMsg:
 		if debugKeys {
@@ -938,7 +938,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.cur().buf.HasSelection() {
 			m.clipboard = m.cur().buf.SelectedText()
 			clipboard.WriteAll(m.clipboard)
-			m.msg = "copied to clipboard"
+			m.msg = m.t("msg.copied")
 			return nil
 		}
 		return m.requestQuit()
@@ -949,7 +949,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.clipboard = m.cur().buf.SelectedText()
 			clipboard.WriteAll(m.clipboard)
 			m.cur().buf.DeleteSelection()
-			m.msg = "cut to clipboard"
+			m.msg = m.t("msg.cut")
 			return nil
 		}
 		return m.closeActiveTab()
@@ -1013,7 +1013,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 						t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
 						t.syntaxCached = nil
 						t.diffText = ""
-						m.msg = "reloaded from disk"
+						m.msg = m.t("msg.reloaded")
 					}
 					break
 				}
@@ -1024,7 +1024,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		case "i", "I", "esc":
 			m.conflictOpen = false
 			m.conflictRows = nil
-			m.msg = "kept buffer changes"
+			m.msg = m.t("msg.kept")
 			return nil
 		case "up", "k":
 			if m.conflictOffY > 0 {
@@ -1127,9 +1127,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "alt+d":
 		b := m.cur().buf
 		if !b.AddNextOccurrence() {
-			m.msg = "no more occurrences"
+			m.msg = m.t("msg.no_more_occurrences")
 		} else if !b.HasMultipleCursors() && b.HasSelection() {
-			m.msg = "selected: type to replace all occurrences"
+			m.msg = m.t("msg.selected")
 		} else {
 			m.msg = ""
 		}
@@ -1348,7 +1348,7 @@ func (m *Model) closeActiveTab() tea.Cmd {
 func (m *Model) saveActive() {
 	t := m.cur()
 	if t.path == "" {
-		m.msg = "cannot save: no file name"
+		m.msg = m.t("msg.cannot_save")
 		return
 	}
 	text := t.buf.Text()
@@ -1356,11 +1356,11 @@ func (m *Model) saveActive() {
 		text = strings.ReplaceAll(text, "\n", "\r\n")
 	}
 	if err := os.WriteFile(t.path, []byte(text), 0o644); err != nil {
-		m.msg = "save failed: " + err.Error()
+		m.msg = m.t("msg.save_failed", err.Error())
 		return
 	}
 	t.buf.MarkSaved()
-	m.msg = "saved"
+	m.msg = m.t("msg.saved")
 }
 
 func (m *Model) clampScroll() {
@@ -1596,7 +1596,7 @@ func (m *Model) doReplace() {
 	}
 
 	t.buf.ReplaceRange(curLine, curCol, qLen, m.replaceWith)
-	m.msg = "replaced 1 occurrence"
+	m.msg = m.t("msg.replaced_one")
 	m.updateSearchMatches(false)
 }
 
@@ -1618,7 +1618,7 @@ func (m *Model) jumpHunk(dir int) {
 	}
 	diff := t.getDiff(m.repo)
 	if len(diff.Hunks) == 0 {
-		m.msg = "no git changes"
+		m.msg = m.t("msg.no_git_changes")
 		return
 	}
 	curLine := t.buf.CurLine()
@@ -1745,7 +1745,7 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 	// Alt+Click adds a secondary cursor instead of moving the main one.
 	if msg.Mod&tea.ModAlt != 0 {
 		if t.buf.AddCursor(ln, rawCol, rawCol, rawCol) {
-			m.msg = "added cursor"
+			m.msg = m.t("msg.added_cursor")
 		}
 		return nil
 	}

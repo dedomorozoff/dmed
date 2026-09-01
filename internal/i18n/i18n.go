@@ -100,6 +100,45 @@ var enCatalog = map[string]string{
 	"git.prefix_branch":    " BRANCH ",
 	"git.new_branch_label": " new branch: ",
 
+	// Status bar
+	"status.f1_help": "F1 help ",
+	"status.f8_pane": "F8 pane ",
+	"status.lncol":   "Ln %d, Col %d ",
+
+	// Prompt / commit lines
+	"prompt.open_file":    " open file: ",
+	"prompt.new_file":     " new file: ",
+	"prompt.new_folder":   " new folder: ",
+	"prompt.save_as":      " save as: ",
+	"prompt.save_changes": " save changes? ",
+	"prompt.yes_no":       "(Y)es / (N)o / (Esc) Cancel",
+	"git.commit_line":     " git commit: ",
+	"git.commit_hint":     "(Enter: commit, Esc: close)",
+
+	// Editor messages
+	"msg.saved":               "saved",
+	"msg.save_failed":         "save failed: %s",
+	"msg.save_failed_gen":     "save failed",
+	"msg.cannot_save":         "cannot save: no file name",
+	"msg.new_file":            "new file: %s",
+	"msg.open_failed":         "open failed: %s",
+	"msg.created_folder":      "created folder: %s",
+	"msg.reloaded":            "reloaded from disk",
+	"msg.reloaded_name":       "reloaded: %s",
+	"msg.kept":                "kept buffer changes",
+	"msg.copied":              "copied to clipboard",
+	"msg.cut":                 "cut to clipboard",
+	"msg.pasted":              "pasted",
+	"msg.external":            "file modified externally: (r)eload or (i)gnore?",
+	"msg.config_reloaded":     "config reloaded",
+	"msg.edit_config":         "edit config, save to apply",
+	"msg.no_git_changes":      "no git changes",
+	"msg.no_more_occurrences": "no more occurrences",
+	"msg.replaced_one":        "replaced 1 occurrence",
+	"msg.project":             "project: %s",
+	"msg.added_cursor":        "added cursor",
+	"msg.selected":            "selected: type to replace all occurrences",
+
 	// Help panel
 	"help.title":             "dmed — keys",
 	"help.close_hint":        "(F1/Esc closes)",
@@ -177,6 +216,45 @@ var ruCatalog = map[string]string{
 	"git.prefix_log":       " ЛОГ ",
 	"git.prefix_branch":    " ВЕТКИ ",
 	"git.new_branch_label": " новая ветка: ",
+
+	// Status bar
+	"status.f1_help": "F1 справка ",
+	"status.f8_pane": "F8 панель ",
+	"status.lncol":   "Стр %d, Кол %d ",
+
+	// Prompt / commit lines
+	"prompt.open_file":    " открыть файл: ",
+	"prompt.new_file":     " новый файл: ",
+	"prompt.new_folder":   " новая папка: ",
+	"prompt.save_as":      " сохранить как: ",
+	"prompt.save_changes": " сохранить изменения? ",
+	"prompt.yes_no":       "(Д)а / (Н)ет / (Esc) отмена",
+	"git.commit_line":     " git коммит: ",
+	"git.commit_hint":     "(Enter: коммит, Esc: закрыть)",
+
+	// Editor messages
+	"msg.saved":               "сохранено",
+	"msg.save_failed":         "ошибка сохранения: %s",
+	"msg.save_failed_gen":     "ошибка сохранения",
+	"msg.cannot_save":         "нельзя сохранить: нет имени файла",
+	"msg.new_file":            "новый файл: %s",
+	"msg.open_failed":         "ошибка открытия: %s",
+	"msg.created_folder":      "создана папка: %s",
+	"msg.reloaded":            "перезагружено с диска",
+	"msg.reloaded_name":       "перезагружено: %s",
+	"msg.kept":                "изменения буфера сохранены",
+	"msg.copied":              "скопировано в буфер обмена",
+	"msg.cut":                 "вырезано в буфер обмена",
+	"msg.pasted":              "вставлено",
+	"msg.external":            "файл изменён извне: (r)перезагрузить или (i)проигнорировать?",
+	"msg.config_reloaded":     "конфиг перезагружен",
+	"msg.edit_config":         "отредактируйте конфиг, сохраните для применения",
+	"msg.no_git_changes":      "нет изменений git",
+	"msg.no_more_occurrences": "больше нет вхождений",
+	"msg.replaced_one":        "заменено 1 вхождение",
+	"msg.project":             "проект: %s",
+	"msg.added_cursor":        "курсор добавлен",
+	"msg.selected":            "выбрано: вводите, чтобы заменить все вхождения",
 
 	// Help panel
 	"help.title":             "dmed — клавиши",

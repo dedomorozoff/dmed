@@ -491,11 +491,11 @@ func (m Model) helpPanel(h int) []string {
 }
 
 func (m Model) promptLine() string {
-	label := " open file: "
+	label := m.t("prompt.open_file")
 	if m.promptNewFile {
-		label = " new file: "
+		label = m.t("prompt.new_file")
 	} else if m.promptNewFolder {
-		label = " new folder: "
+		label = m.t("prompt.new_folder")
 	}
 	line := statusHiStyle.Render(label) + statusStyle.Render(string(m.promptIn)) + cursorStyle.Render(" ")
 	fill := m.width - lipgloss.Width(line)
@@ -506,7 +506,7 @@ func (m Model) promptLine() string {
 }
 
 func (m Model) saveLine() string {
-	line := statusHiStyle.Render(" save as: ") + statusStyle.Render(string(m.promptSaveIn)) + cursorStyle.Render(" ")
+	line := statusHiStyle.Render(m.t("prompt.save_as")) + statusStyle.Render(string(m.promptSaveIn)) + cursorStyle.Render(" ")
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -515,7 +515,7 @@ func (m Model) saveLine() string {
 }
 
 func (m Model) quitLine() string {
-	line := statusHiStyle.Render(" save changes? ") + statusStyle.Render("(Y)es / (N)o / (Esc) Cancel")
+	line := statusHiStyle.Render(m.t("prompt.save_changes")) + statusStyle.Render(m.t("prompt.yes_no"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -524,14 +524,14 @@ func (m Model) quitLine() string {
 }
 
 func (m Model) gitLine() string {
-	line := statusHiStyle.Render(" git commit: ") + statusStyle.Render(string(m.gitCommitIn)) + cursorStyle.Render(" ")
+	line := statusHiStyle.Render(m.t("git.commit_line")) + statusStyle.Render(string(m.gitCommitIn)) + cursorStyle.Render(" ")
 	if m.repo != nil {
 		branch := m.repo.Branch()
 		if branch != "" {
 			line += hintStyle.Render(fmt.Sprintf(" (%s: %s)", branch, m.repo.StatusSummary()))
 		}
 	}
-	line += hintStyle.Render("  (Enter: commit, Esc: close)")
+	line += hintStyle.Render("  " + m.t("git.commit_hint"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -1345,7 +1345,7 @@ func (m Model) statusBar() string {
 	if m.msg != "" {
 		mid = statusStyle.Render("  " + m.msg)
 	}
-	right := fmt.Sprintf("Ln %d, Col %d ", t.buf.CurLine()+1, t.buf.Col()+1)
+	right := m.t("status.lncol", t.buf.CurLine()+1, t.buf.Col()+1)
 	fileInfo := ""
 	if t.path != "" {
 		endings := map[string]string{"lf": "LF", "crlf": "CRLF"}
@@ -1354,9 +1354,9 @@ func (m Model) statusBar() string {
 	}
 	hint := ""
 	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiCfgOpen && !m.helpOpen && !m.agentOpen && !m.agentReviewMode {
-		hint = "F1 help "
+		hint = m.t("status.f1_help")
 		if m.layout != splitNone {
-			hint += "F8 pane "
+			hint += m.t("status.f8_pane")
 		}
 	}
 	rightBar := hintStyle.Render(hint) + statusStyle.Render(fileInfo) + statusStyle.Render(right)
