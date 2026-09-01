@@ -810,6 +810,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.msg = m.t("msg.config_reloaded")
 			return m, waitForFileEvent(m.fileEvents)
 		}
+		// Hot-reload a changed plugin without restarting the editor.
+		if m.plugins != nil && m.isPluginPath(path) {
+			m.reloadPlugin(path)
+			return m, waitForFileEvent(m.fileEvents)
+		}
 		for i := range m.tabs {
 			t := &m.tabs[i]
 			if t.path == "" {

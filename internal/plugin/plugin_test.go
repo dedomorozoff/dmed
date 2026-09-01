@@ -107,3 +107,68 @@ func TestLoadErrorsAreReported(t *testing.T) {
 		t.Fatalf("bad plugin must not be registered, got %v", m.Names())
 	}
 }
+
+func TestReloadReplacesPlugin(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/r.lua"
+	writeFile(path, `
+dmed.on_key("ctrl+r", function()
+  dmed.set_text("old")
+end)
+dmed.command("first", "First", "", function() dmed.insert("1") end)
+`)
+	m := New()
+	if errs := m.Load(dir); len(errs) > 0 {
+		t.Fatalf("load errors: %v", errs)
+	}
+	h := &fakeHost{text: "x"}
+	if !m.HasBinding("ctrl+r") {
+		t.Fatal("expected binding before reload")
+	}
+
+	// Rewrite the plugin on disk and reload it.
+	writeFile(path, `
+dmed.on_key("ctrl+r", function()
+  dmed.set_text("new")
+end)
+dmed.command("second", "Second", "", function() dmed.insert("2") end)
+`)
+	if err := m.Reload(path); err != nil {
+		t.Fatalf("reload error: %v", err)
+	}
+	if len(m.Names()) != 1 || m.Names()[0] != "r.lua" {
+		t.Fatalf("names after reload=%v", m.Names())
+	}
+	// Old command is gone, new one present.
+	if got := len(m.Commands()); got != 1 || m.Commands()[0].ID != "second" {
+		t.Fatalf("commands after reload=%+v", m.Commands())
+	}
+	if m.RunCommand(h, "first") {
+		t.Fatal("stale command 'first' still runnable")
+	}
+	// New keybinding behavior applies.
+	if !m.RunBinding(h, "ctrl+r") {
+		t.Fatal("RunBinding returned false after reload")
+	}
+	if h.text != "new" {
+		t.Fatalf("text after reload=%q", h.text)
+	}
+}
+
+func TestReloadReportsBrokenSource(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/b.lua"
+	writeFile(path, "dmed.on_key('ctrl+x', function() dmed.set_text('ok') end)")
+	m := New()
+	if errs := m.Load(dir); len(errs) > 0 {
+		t.Fatalf("load errors: %v", errs)
+	}
+	writeFile(path, "not lua {{{")
+	if err := m.Reload(path); err == nil {
+		t.Fatal("expected an error for broken source")
+	}
+	// The old plugin stays registered after a failed reload.
+	if len(m.Names()) != 1 {
+		t.Fatalf("names after failed reload=%v", m.Names())
+	}
+}

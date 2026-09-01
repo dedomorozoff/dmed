@@ -16,6 +16,14 @@ Every `*.lua` file in these directories is loaded (in sorted order). A plugin
 that fails to parse is skipped and reported in the status line. Example plugins
 live in [`examples/plugins/`](../examples/plugins/).
 
+## Hot-reload
+
+Plugins are watched and reloaded automatically whenever their `.lua` source
+changes on disk — no editor restart needed. The plugin's `ready` event is fired
+again after each reload so it can re-initialize. If the edited source fails to
+parse, the previous version stays active and the error is shown in the status
+line.
+
 ## API
 
 ### Keybindings
@@ -76,5 +84,5 @@ dmed.command("demo_upper", "Demo: Uppercase Buffer", "Convert the file to upper 
 end)
 ```
 
-Install by copying a `.lua` file into `~/.dmed/plugins/` and restarting dmed
-(plugin hot-reload is on the roadmap).
+Install by copying a `.lua` file into `~/.dmed/plugins/` (it loads on next
+startup, or is hot-reloaded if already running).

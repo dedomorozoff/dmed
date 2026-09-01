@@ -3,6 +3,7 @@ package editor
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"dmed/internal/buffer"
 	"dmed/internal/plugin"
@@ -38,8 +39,36 @@ func (m Model) pluginDirs() []string {
 func (m *Model) loadPlugins() {
 	m.plugins = plugin.New()
 	for _, d := range m.pluginDirs() {
+		if m.watcher != nil {
+			_ = m.watcher.Watch(d)
+		}
 		for _, err := range m.plugins.Load(d) {
 			m.msg = "plugin error: " + err.Error()
 		}
 	}
+}
+
+// isPluginPath reports whether path is a .lua file inside a plugin directory.
+func (m Model) isPluginPath(path string) bool {
+	if !strings.HasSuffix(path, ".lua") {
+		return false
+	}
+	for _, d := range m.pluginDirs() {
+		absD, _ := filepath.Abs(d)
+		absP, _ := filepath.Abs(path)
+		if absD != "" && strings.HasPrefix(absP, absD+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// reloadPlugin hot-reloads a single changed .lua plugin and re-emits "ready".
+func (m *Model) reloadPlugin(path string) {
+	if err := m.plugins.Reload(path); err != nil {
+		m.msg = "plugin error: " + err.Error()
+		return
+	}
+	m.plugins.EmitTo(m, path, "ready")
+	m.msg = m.t("msg.plugin_reloaded", filepath.Base(path))
 }

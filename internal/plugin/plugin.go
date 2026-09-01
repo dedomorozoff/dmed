@@ -43,6 +43,7 @@ type Command struct {
 
 // Plugin is a single loaded .lua plugin.
 type Plugin struct {
+	path          string
 	name          string
 	L             *lua.LState
 	mgr           *Manager
@@ -87,11 +88,22 @@ func (m *Manager) Load(dir string) []error {
 }
 
 func (m *Manager) loadFile(path string) error {
-	src, err := os.ReadFile(path)
+	p, err := m.build(path)
 	if err != nil {
 		return err
 	}
+	m.plugins = append(m.plugins, p)
+	return nil
+}
+
+// build parses a .lua plugin file into a fresh Plugin without registering it.
+func (m *Manager) build(path string) (*Plugin, error) {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
 	p := &Plugin{
+		path:          path,
 		name:          filepath.Base(path),
 		L:             lua.NewState(),
 		mgr:           m,
@@ -102,10 +114,9 @@ func (m *Manager) loadFile(path string) error {
 	installRegAPI(p)
 	if err := p.L.DoString(string(src)); err != nil {
 		p.L.Close()
-		return err
+		return nil, err
 	}
-	m.plugins = append(m.plugins, p)
-	return nil
+	return p, nil
 }
 
 // Names returns the sorted names of successfully loaded plugins.
@@ -168,6 +179,51 @@ func (m *Manager) Emit(host Host, event string) {
 			m.invoke(p, host, fn)
 		}
 	}
+}
+
+// EmitTo dispatches an event only to handlers registered by the plugin loaded
+// from path.
+func (m *Manager) EmitTo(host Host, path, event string) {
+	for _, p := range m.plugins {
+		if p.path == path {
+			for _, fn := range p.eventHandlers[event] {
+				m.invoke(p, host, fn)
+			}
+			return
+		}
+	}
+}
+
+// Reload replaces the plugin loaded from path with a fresh instance, dropping
+// its previously registered keybindings, commands and event handlers. It
+// returns an error if the new source fails to parse.
+func (m *Manager) Reload(path string) error {
+	path = filepath.Clean(path)
+	p, err := m.build(path)
+	if err != nil {
+		return err
+	}
+	for i, old := range m.plugins {
+		if filepath.Clean(old.path) == path {
+			m.removePlugin(i)
+			break
+		}
+	}
+	m.plugins = append(m.plugins, p)
+	return nil
+}
+
+func (m *Manager) removePlugin(i int) {
+	p := m.plugins[i]
+	m.plugins = append(m.plugins[:i], m.plugins[i+1:]...)
+	var kept []*Command
+	for _, c := range m.commands {
+		if c.p != p {
+			kept = append(kept, c)
+		}
+	}
+	m.commands = kept
+	p.L.Close()
 }
 
 // invoke runs a Lua function after binding the `dmed` API to the given host.

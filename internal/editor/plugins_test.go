@@ -87,3 +87,35 @@ end)
 		t.Fatalf("file_open event did not set status, msg=%q", m.msg)
 	}
 }
+
+func TestPluginAutoReloadOnFileChange(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "x.txt", "hello\n")
+	writeProjectPlugin(t, dir, "hot.lua", `
+dmed.on_key("ctrl+k", function()
+  dmed.set_text("one")
+end)
+`)
+	m := New(f)
+	m.width, m.height = 80, 24
+	m.root = dir
+	m.loadPlugins()
+
+	m = press(m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
+	if got := m.cur().buf.Text(); got != "one\n" {
+		t.Fatalf("before reload buffer=%q, want one", got)
+	}
+
+	// Edit the plugin on disk and deliver a file-change event.
+	writeProjectPlugin(t, dir, "hot.lua", `
+dmed.on_key("ctrl+k", function()
+  dmed.set_text("two")
+end)
+`)
+	next, _ := m.Update(FileChangedMsg{Path: filepath.Join(dir, ".dmed", "plugins", "hot.lua")})
+	m = next.(Model)
+	m = press(m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
+	if got := m.cur().buf.Text(); got != "two\n" {
+		t.Fatalf("after reload buffer=%q, want two", got)
+	}
+}
