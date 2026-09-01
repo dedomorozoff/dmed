@@ -109,6 +109,9 @@ func Load(projectRoot string) Config {
 		// Shell is not in Config struct but stored separately in the editor.
 		// This override is handled by the editor.
 	}
+	if v := os.Getenv("DMED_LANG"); v != "" {
+		cfg.UI.Lang = v
+	}
 
 	return cfg
 }

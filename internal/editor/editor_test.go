@@ -9,6 +9,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// The editor test suite asserts English UI strings, so pin the language to
+// English regardless of any lang the developer set in their global config.
+func init() { _ = os.Setenv("DMED_LANG", "en") }
+
 func press(m Model, k tea.KeyPressMsg) Model {
 	next, _ := m.Update(k)
 	return next.(Model)
