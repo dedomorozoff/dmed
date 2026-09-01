@@ -123,7 +123,7 @@ func (m Model) langChooserExtraRows() int {
 }
 
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows()
+	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.complExtraRows() - m.termExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -222,6 +222,9 @@ func (m Model) View() tea.View {
 	}
 	if m.langChooserOpen {
 		rows = append(rows, m.langChooserPanel()...)
+	}
+	if m.complOpen && len(m.complItems) > 0 {
+		rows = append(rows, m.complPanel()...)
 	}
 	if m.termOpen {
 		rows = append(rows, m.terminalPanel()...)

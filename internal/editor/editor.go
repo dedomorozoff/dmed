@@ -251,6 +251,14 @@ type Model struct {
 	langChooserOpen bool
 	langChooserSel  int
 
+	// Autocompletion popup
+	complOpen   bool
+	complItems  []string
+	complSel    int
+	complOffset int
+	complLine   int
+	complStart  int
+
 	// Right-side AI chat panel (local Ollama)
 	chatOpen   bool
 	chatFocus  bool
@@ -927,6 +935,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
+	// Some terminal stacks send bare control bytes (Ctrl+O as 0x0f, Ctrl+C as
+	// 0x03, bare Ctrl as NUL). Normalize them into proper ctrl+key messages so
+	// keybindings work and stray control bytes never reach the buffer.
 	if len(msg.Text) == 1 {
 		if r := rune(msg.Text[0]); r < 32 && r != '\t' {
 			msg = tea.KeyPressMsg{Code: r + 96, Mod: tea.ModCtrl}
@@ -942,7 +953,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		msg = tea.KeyPressMsg{Code: nr[0], Text: string(nr), Mod: msg.Mod}
 	}
 	s := msg.String()
-	// Global keys work in every mode (tree, git panel, prompts, search, agents...).
+
+	// While the completion popup is open, navigation keys control it.
+	if m.complOpen && m.handleCompletionKey(s) {
+		return nil
+	}
+
 	switch s {
 	case "ctrl+q":
 		return m.requestQuit()
@@ -1145,6 +1161,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	}
 	switch s {
+	case "ctrl+space":
+		m.triggerCompletion(true)
+		return nil
 	case "alt+d":
 		b := m.cur().buf
 		if !b.AddNextOccurrence() {
@@ -1275,6 +1294,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.cur().buf.Backspace()
 		}
 		m.msg = ""
+		m.triggerCompletion(false)
 	case "delete":
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MultiDelete()
@@ -1299,6 +1319,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			}
 			m.msg = ""
+			m.triggerCompletion(false)
 		} else {
 			return nil
 		}

@@ -218,6 +218,9 @@ var enCatalog = map[string]string{
 	"lang.choose":  " Select language: ",
 	"lang.current": " (current)",
 
+	// Completion popup
+	"compl.title": "completion",
+
 	// Misc
 	"msg.lang_set": "language set to %s",
 
@@ -417,6 +420,9 @@ var ruCatalog = map[string]string{
 	// Language chooser
 	"lang.choose":  " Выберите язык: ",
 	"lang.current": " (текущий)",
+
+	// Completion popup
+	"compl.title": "дополнение",
 
 	// Misc
 	"msg.lang_set": "язык установлен: %s",
