@@ -1655,6 +1655,19 @@ func (m *Model) startPalette() {
 	m.paletteOffset = 0
 }
 
+// setLang switches the interface language, rebuilding the translator and
+// persisting the choice to the config file (project if available, else global).
+func (m *Model) setLang(lang string) {
+	m.cfg.UI.Lang = lang
+	m.tr = i18n.New(i18n.Resolve(lang))
+	path := config.ProjectConfigPath(m.root)
+	if path == "" {
+		path = config.ConfigPath()
+	}
+	_ = config.WriteLang(path, lang)
+	m.msg = m.t("msg.lang_set", lang)
+}
+
 // restoreCursors applies saved per-file cursor positions to the just-opened
 // tabs. Positions are clamped by SetCursor, so stale values are harmless.
 func (m *Model) restoreCursors(cursors map[string]session.CursorPos) {

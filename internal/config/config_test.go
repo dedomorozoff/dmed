@@ -231,3 +231,45 @@ func TestWriteAICreatesSectionInEmptyFile(t *testing.T) {
 		t.Errorf("missing [ai] section or defaults:\n%s", out)
 	}
 }
+
+func TestWriteLang(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	if err := os.WriteFile(path, []byte("[editor]\ntab_width = 2\n[ui]\ntree_width = 30\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WriteLang(path, "ru"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := os.ReadFile(path)
+	s := string(out)
+	if !strings.Contains(s, "lang = ru") {
+		t.Errorf("lang not set:\n%s", s)
+	}
+	if !strings.Contains(s, "tab_width = 2") || !strings.Contains(s, "tree_width = 30") {
+		t.Errorf("existing content clobbered:\n%s", s)
+	}
+
+	// Updating the value must not duplicate the key.
+	if err := WriteLang(path, "en"); err != nil {
+		t.Fatal(err)
+	}
+	s2, _ := os.ReadFile(path)
+	if strings.Count(string(s2), "lang =") != 1 {
+		t.Errorf("lang key duplicated:\n%s", s2)
+	}
+}
+
+func TestWriteLangCreatesSectionInEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	if err := WriteLang(path, "ru"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := os.ReadFile(path)
+	s := string(out)
+	if !strings.Contains(s, "[ui]") || !strings.Contains(s, "lang = ru") {
+		t.Errorf("missing [ui] lang:\n%s", s)
+	}
+}

@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"dmed/internal/i18n"
 )
 
 func TestCommandPaletteOpenFilterExecute(t *testing.T) {
@@ -191,5 +193,37 @@ func TestPaletteFilterBringsAISettings(t *testing.T) {
 	hits := m.filterPalette()
 	if len(hits) != 1 || hits[0].id != "ai_settings" {
 		t.Fatalf("expected single 'ai_settings' hit, got: %+v", hits)
+	}
+}
+
+func TestPaletteSwitchLanguage(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "lang.txt", "x\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+	m.root = dir
+
+	// Filter for the Russian language command and run it.
+	m.startPalette()
+	// Palette input normalizes Cyrillic to QWERTY, so filter by the Latin
+	// description word.
+	m = typeStr(m, "Russian")
+	hits := m.filterPalette()
+	if len(hits) != 1 || hits[0].id != "lang_ru" {
+		t.Fatalf("expected single 'lang_ru' hit, got: %+v", hits)
+	}
+	m.paletteSel = 0
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if got := m.tr.Lang(); got != i18n.Ru {
+		t.Fatalf("translator lang=%q, want ru", got)
+	}
+	// The choice must persist to the project config.
+	data, err := os.ReadFile(filepath.Join(dir, ".dmed.conf"))
+	if err != nil {
+		t.Fatalf("config not written: %v", err)
+	}
+	if !strings.Contains(string(data), "lang = ru") {
+		t.Fatalf("lang not persisted:\n%s", data)
 	}
 }

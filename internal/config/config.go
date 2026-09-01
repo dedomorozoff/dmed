@@ -113,6 +113,60 @@ func Load(projectRoot string) Config {
 	return cfg
 }
 
+// WriteLang sets the `[ui] lang` value in the INI file at path, preserving all
+// other content. If the file or the [ui] section is missing it is appended.
+func WriteLang(path, lang string) error {
+	data, err := os.ReadFile(path)
+	var lines []string
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err == nil {
+		lines = strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	}
+
+	var out []string
+	inUI := false
+	uiPresent := false
+	wrote := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			name := strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+			inUI = strings.EqualFold(name, "ui")
+			if inUI {
+				uiPresent = true
+			}
+		}
+		if inUI {
+			if idx := strings.IndexByte(line, '='); idx > 0 {
+				if strings.ToLower(strings.TrimSpace(line[:idx])) == "lang" {
+					out = append(out, "lang = "+lang)
+					wrote = true
+					continue
+				}
+			}
+		}
+		out = append(out, line)
+	}
+
+	if !wrote {
+		if !uiPresent {
+			if len(out) > 0 && out[len(out)-1] != "" {
+				out = append(out, "")
+			}
+			out = append(out, "[ui]")
+		}
+		out = append(out, "lang = "+lang)
+	}
+
+	content := strings.Join(out, "\n") + "\n"
+	if len(content) == 1 {
+		content = ""
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
 // ConfigPath returns the path to the global config file.
 func ConfigPath() string {
 	if home, err := os.UserHomeDir(); err == nil {
