@@ -18,6 +18,7 @@ import (
 	"dmed/internal/config"
 	"dmed/internal/events"
 	"dmed/internal/i18n"
+	"dmed/internal/lsp"
 	"dmed/internal/plugin"
 	"dmed/internal/session"
 	"dmed/internal/syntax"
@@ -142,6 +143,7 @@ type Model struct {
 	cfg        config.Config
 	tr         i18n.Translator
 	plugins    *plugin.Manager
+	lspClient  *lsp.Client
 	tabs       []tab
 	panes      []pane
 	layout     splitLayout
@@ -929,6 +931,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd != nil {
 			return m, cmd
 		}
+	case lspCompletionMsg:
+		if m.complOpen && msg.path == m.cur().path {
+			m.mergeLSPCompletion(msg.items)
+		}
 	}
 	m.clampScroll()
 	return m, nil
@@ -1162,8 +1168,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	switch s {
 	case "ctrl+space":
-		m.triggerCompletion(true)
-		return nil
+		return m.triggerCompletion(true)
 	case "alt+d":
 		b := m.cur().buf
 		if !b.AddNextOccurrence() {
@@ -1294,7 +1299,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.cur().buf.Backspace()
 		}
 		m.msg = ""
-		m.triggerCompletion(false)
+		return m.triggerCompletion(false)
 	case "delete":
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MultiDelete()
@@ -1319,7 +1324,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			}
 			m.msg = ""
-			m.triggerCompletion(false)
+			return m.triggerCompletion(false)
 		} else {
 			return nil
 		}
@@ -1346,6 +1351,9 @@ func (m *Model) shutdown() {
 	}
 	if m.watcher != nil {
 		_ = m.watcher.Close()
+	}
+	if m.lspClient != nil {
+		m.lspClient.Close()
 	}
 	m.saveSession()
 }

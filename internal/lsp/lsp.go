@@ -12,24 +12,32 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Diagnostic represents a compiler error, warning, or hint.
 type Diagnostic struct {
-	Line     int    // 0-indexed
-	Col      int    // 0-indexed
-	EndLine  int    // 0-indexed
-	EndCol   int    // 0-indexed
-	Severity int    // 1: Error, 2: Warning, 3: Info, 4: Hint
+	Line     int // 0-indexed
+	Col      int // 0-indexed
+	EndLine  int // 0-indexed
+	EndCol   int // 0-indexed
+	Severity int // 1: Error, 2: Warning, 3: Info, 4: Hint
 	Message  string
 	Source   string
 }
 
 // Location represents a target location in a file.
 type Location struct {
-	Path    string
-	Line    int // 0-indexed
-	Col     int // 0-indexed
+	Path string
+	Line int // 0-indexed
+	Col  int // 0-indexed
+}
+
+// CompletionItem is a single LSP textDocument/completion candidate.
+type CompletionItem struct {
+	Label  string
+	Kind   int
+	Detail string
 }
 
 // Client is a JSON-RPC 2.0 LSP client over stdin/stdout.
@@ -134,6 +142,7 @@ func (c *Client) initialize() {
 				"definition": map[string]interface{}{"dynamicRegistration": false},
 				"hover":      map[string]interface{}{"dynamicRegistration": false},
 				"formatting": map[string]interface{}{"dynamicRegistration": false},
+				"completion": map[string]interface{}{"dynamicRegistration": false},
 			},
 		},
 	}
@@ -251,6 +260,9 @@ func (c *Client) GetDiagnostics(path string) []Diagnostic {
 	return c.diagnostics[abs]
 }
 
+// callTimeout bounds how long call blocks waiting for a server response.
+const callTimeout = 6 * time.Second
+
 func (c *Client) call(method string, params interface{}) (json.RawMessage, error) {
 	id := atomic.AddInt64(&c.nextID, 1)
 	ch := make(chan json.RawMessage, 1)
@@ -278,8 +290,12 @@ func (c *Client) call(method string, params interface{}) (json.RawMessage, error
 		return nil, err
 	}
 
-	res := <-ch
-	return res, nil
+	select {
+	case res := <-ch:
+		return res, nil
+	case <-time.After(callTimeout):
+		return nil, fmt.Errorf("lsp: %s timed out", method)
+	}
 }
 
 func (c *Client) notify(method string, params interface{}) error {
@@ -324,6 +340,38 @@ func (c *Client) DidChange(path, text string, version int) {
 			{"text": text},
 		},
 	})
+}
+
+// Completion requests textDocument/completion at the given position.
+// Returns an empty (non-nil) slice when the server has no suggestions.
+func (c *Client) Completion(path string, line, col int) ([]CompletionItem, error) {
+	abs, _ := filepath.Abs(path)
+	res, err := c.call("textDocument/completion", map[string]interface{}{
+		"textDocument": map[string]interface{}{
+			"uri": pathToURI(abs),
+		},
+		"position": map[string]interface{}{
+			"line":      line,
+			"character": col,
+		},
+		"context": map[string]interface{}{"triggerKind": 1}, // Invoked
+	})
+	if err != nil || len(res) == 0 {
+		return nil, err
+	}
+
+	// Result is either []CompletionItem or {isIncomplete, items:[...]}.
+	var items []CompletionItem
+	if err := json.Unmarshal(res, &items); err == nil && items != nil {
+		return items, nil
+	}
+	var wrap struct {
+		Items []CompletionItem `json:"items"`
+	}
+	if err := json.Unmarshal(res, &wrap); err == nil {
+		return wrap.Items, nil
+	}
+	return nil, nil
 }
 
 // Definition requests the jump target for Go to Definition.

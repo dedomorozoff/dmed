@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -66,17 +67,18 @@ func (m *Model) complWordCandidates(prefix string) []string {
 
 // triggerCompletion recomputes candidates for the word at the cursor and opens
 // or closes the popup. force ignores whether candidates were found, so
-// Ctrl+Space can surface suggestions even mid-word.
-func (m *Model) triggerCompletion(force bool) {
+// Ctrl+Space can surface suggestions even mid-word. It returns a command that
+// fires an async LSP completion request when a language server is available.
+func (m *Model) triggerCompletion(force bool) tea.Cmd {
 	start, prefix := m.complPrefix()
 	if prefix == "" && !force {
 		m.closeCompletion()
-		return
+		return nil
 	}
 	cands := m.complWordCandidates(prefix)
 	if len(cands) == 0 && !force {
 		m.closeCompletion()
-		return
+		return nil
 	}
 	m.complOpen = true
 	m.complItems = cands
@@ -84,6 +86,7 @@ func (m *Model) triggerCompletion(force bool) {
 	m.complLine = m.cur().buf.CurLine()
 	m.complSel = 0
 	m.complOffset = 0
+	return m.lspCompletionCmd()
 }
 
 func (m *Model) closeCompletion() {
