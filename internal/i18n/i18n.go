@@ -162,6 +162,8 @@ var enCatalog = map[string]string{
 	"ai.thinking":     " AI thinking... ",
 	"ai.diff":         " AI diff ",
 	"ai.review_hint":  "  (y: accept, n: reject, \u2191\u2193 scroll)",
+	"ai.no_model":     "no model",
+	"ai.streaming":    " streaming ",
 	"finder.prompt":   " find file: ",
 
 	// Help panel
@@ -304,6 +306,8 @@ var ruCatalog = map[string]string{
 	"ai.thinking":     " AI думает... ",
 	"ai.diff":         " AI diff ",
 	"ai.review_hint":  "  (y: принять, n: отклонить, \u2191\u2193 скролл)",
+	"ai.no_model":     "нет модели",
+	"ai.streaming":    " стриминг ",
 	"finder.prompt":   " найти файл: ",
 
 	// Help panel

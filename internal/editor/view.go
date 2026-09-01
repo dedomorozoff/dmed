@@ -933,11 +933,11 @@ func (m Model) chatPanel(h int) []string {
 
 	model := m.chatModel
 	if model == "" {
-		model = "no model"
+		model = m.t("ai.no_model")
 	}
 	header := statusHiStyle.Render(fmt.Sprintf(" AI · %s ", fitPath(model, w-6)))
 	if m.chatBusy {
-		header += statusStyle.Render(" streaming ")
+		header += statusStyle.Render(m.t("ai.streaming"))
 	}
 	if fill := w - lipgloss.Width(header); fill > 0 {
 		header += statusStyle.Render(strings.Repeat(" ", fill))
