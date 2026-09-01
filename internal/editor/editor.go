@@ -18,6 +18,7 @@ import (
 	"dmed/internal/config"
 	"dmed/internal/events"
 	"dmed/internal/i18n"
+	"dmed/internal/plugin"
 	"dmed/internal/session"
 	"dmed/internal/syntax"
 	"dmed/internal/vcs"
@@ -140,6 +141,7 @@ type Model struct {
 	root       string
 	cfg        config.Config
 	tr         i18n.Translator
+	plugins    *plugin.Manager
 	tabs       []tab
 	panes      []pane
 	layout     splitLayout
@@ -397,6 +399,8 @@ func New(paths ...string) Model {
 	if repo, err := vcs.Open(m.baseDir()); err == nil {
 		m.repo = repo
 	}
+	m.loadPlugins()
+	m.plugins.Emit(&m, "ready")
 	// Watch root directory for tree updates
 	if m.root != "" && m.watcher != nil {
 		m.watcher.Watch(m.root)
@@ -454,6 +458,9 @@ func (m *Model) openPath(rawPath string) {
 	// Only set active tab if panes are already initialized
 	if len(m.panes) > 0 {
 		m.setActiveTab(len(m.tabs) - 1)
+	}
+	if m.plugins != nil {
+		m.plugins.Emit(m, "file_open")
 	}
 }
 
@@ -1131,6 +1138,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.jumpTab(int(s[4] - '1'))
 		return nil
 	}
+	// Plugins get first crack at unhandled keys so they can override built-ins.
+	if m.plugins != nil && m.plugins.HasBinding(s) {
+		if m.plugins.RunBinding(m, s) {
+			return nil
+		}
+	}
 	switch s {
 	case "alt+d":
 		b := m.cur().buf
@@ -1369,6 +1382,9 @@ func (m *Model) saveActive() {
 	}
 	t.buf.MarkSaved()
 	m.msg = m.t("msg.saved")
+	if m.plugins != nil {
+		m.plugins.Emit(m, "save")
+	}
 }
 
 func (m *Model) clampScroll() {

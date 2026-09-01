@@ -14,7 +14,7 @@ type commandItem struct {
 }
 
 func (m *Model) getPaletteCommands() []commandItem {
-	return []commandItem{
+	cmds := []commandItem{
 		{id: "save", title: "cmd.save_t", desc: "cmd.save_d", action: func(m *Model) tea.Cmd { m.saveActive(); return nil }},
 		{id: "save_as", title: "cmd.save_as_t", desc: "cmd.save_as_d", action: func(m *Model) tea.Cmd { m.startSavePrompt(); return nil }},
 		{id: "close_tab", title: "cmd.close_tab_t", desc: "cmd.close_tab_d", action: func(m *Model) tea.Cmd { return m.closeTab() }},
@@ -46,6 +46,11 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "quit", title: "cmd.quit_t", desc: "cmd.quit_d", action: func(m *Model) tea.Cmd { return tea.Quit }},
 		{id: "lang_select", title: "cmd.lang_select_t", desc: "cmd.lang_select_d", action: func(m *Model) tea.Cmd { m.openLangChooser(); return nil }},
 	}
+	for _, c := range m.plugins.Commands() {
+		id := c.ID
+		cmds = append(cmds, commandItem{id: id, title: c.Title, desc: c.Desc, action: func(m *Model) tea.Cmd { m.plugins.RunCommand(m, id); return nil }})
+	}
+	return cmds
 }
 
 // cmdTitle returns the localized command title.
