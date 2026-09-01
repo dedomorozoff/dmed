@@ -6,7 +6,7 @@ export GOROOT :=
 export GOPROXY
 export GOSUMDB
 
-VERSION  ?= 0.5.0
+VERSION  ?= 0.5.2
 LDFLAGS  := -s -w -X main.version=$(VERSION)
 PREFIX   ?= /usr/local
 
