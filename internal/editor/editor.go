@@ -780,6 +780,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Hot-reload config when .dmed.conf changes
 		if strings.HasSuffix(path, ".dmed.conf") {
 			m.cfg = config.Load(m.root)
+			m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
 			syntax.SetDefault(m.cfg.Editor.SyntaxTheme)
 			m.msg = m.t("msg.config_reloaded")
 			return m, waitForFileEvent(m.fileEvents)
