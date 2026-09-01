@@ -123,6 +123,9 @@
 - [x] Сессии: автосохранение и восстановление открытых файлов при перезапуске
 - [x] LSP клиент (`internal/lsp`): JSON-RPC 2.0 over stdin/stdout, диагностика,
       `Definition`, `DidOpen`/`DidChange` (интеграция с `gopls`/`pyright`)
+- [ ] Автодополнение: движок по словам + попап готов (`Ctrl+Space`,
+      авто-триггер при наборе). Осталось подключить LSP-источник
+      (нужно вшить LSP-клиент в редактор) и доки.
 - [ ] Плагины/скрипты
       — Lua-фреймворк (`internal/plugin`, gopher-lua): `.lua` в
       `~/.dmed/plugins` и `<проект>/.dmed/plugins`, API `dmed.*`
