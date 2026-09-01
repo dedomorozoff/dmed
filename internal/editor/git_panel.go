@@ -1,7 +1,6 @@
 package editor
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,6 +120,9 @@ const (
 	gitModeBranch                     // branch input / switch
 )
 
+// t returns the translated UI string for key, formatted with args.
+func (m Model) t(key string, args ...any) string { return m.tr.T(key, args...) }
+
 func (m *Model) openGitPanel() {
 	m.gitOpen = true
 	m.gitMode = gitModeStatus
@@ -140,7 +142,7 @@ func (m *Model) refreshGitFiles() {
 	files, err := r.StatusFiles()
 	if err != nil {
 		m.gitFiles = nil
-		m.msg = "git status error: " + err.Error()
+		m.msg = m.t("git.status_error", err.Error())
 		return
 	}
 	m.gitFiles = files
@@ -250,7 +252,7 @@ func (m *Model) refreshGitLog() {
 	entries, err := r.Log(50)
 	if err != nil {
 		m.gitLogEntries = nil
-		m.msg = "git log error: " + err.Error()
+		m.msg = m.t("git.log_error", err.Error())
 		return
 	}
 	m.gitLogEntries = entries
@@ -319,7 +321,7 @@ func (m *Model) showLogDiff() {
 	diffs, err := r.CommitDiff(entry.FullHash)
 	if err != nil {
 		m.diffRows = nil
-		m.msg = "diff error: " + err.Error()
+		m.msg = m.t("git.diff_error", err.Error())
 		return
 	}
 	// Build concatenated diff with file separator lines.
@@ -382,7 +384,7 @@ func (m *Model) refreshGitBranches() {
 	branches, err := r.Branches()
 	if err != nil {
 		m.gitBranchList = nil
-		m.msg = "git branches error: " + err.Error()
+		m.msg = m.t("git.branches_error", err.Error())
 		return
 	}
 	m.gitBranchList = branches
@@ -473,13 +475,13 @@ func (m *Model) handleGitBranch(msg tea.KeyPressMsg) tea.Cmd {
 		case "enter":
 			if len(m.gitBranchIn) > 0 {
 				if r == nil {
-					m.msg = "no git repo"
+					m.msg = m.t("git.norepo_msg")
 					break
 				}
 				if err := r.CreateBranch(string(m.gitBranchIn)); err != nil {
-					m.msg = "create error: " + err.Error()
+					m.msg = m.t("git.create_error", err.Error())
 				} else {
-					m.msg = "created branch " + string(m.gitBranchIn)
+					m.msg = m.t("git.created", string(m.gitBranchIn))
 					m.gitBranchNew = false
 					m.gitBranchIn = nil
 					m.gitMode = gitModeStatus
@@ -516,7 +518,7 @@ func (m *Model) handleGitBranch(msg tea.KeyPressMsg) tea.Cmd {
 		// Create a new branch (enter name)
 		m.gitBranchNew = true
 		m.gitBranchIn = nil
-		m.msg = "new branch name:"
+		m.msg = m.t("git.new_branch_name")
 	case "enter":
 		// Switch to selected branch
 		if r == nil || len(m.gitBranchList) == 0 {
@@ -524,13 +526,13 @@ func (m *Model) handleGitBranch(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		name := m.gitBranchList[m.gitBranchSel]
 		if name == r.Branch() {
-			m.msg = "already on " + name
+			m.msg = m.t("git.already_on", name)
 			break
 		}
 		if err := r.SwitchBranch(name); err != nil {
-			m.msg = "switch error: " + err.Error()
+			m.msg = m.t("git.switch_error", err.Error())
 		} else {
-			m.msg = "switched to " + name
+			m.msg = m.t("git.switched", name)
 			m.gitMode = gitModeStatus
 			m.refreshGitFiles()
 			m.refreshGitDiffPreview()
@@ -547,7 +549,7 @@ func (m *Model) handleGitBranch(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "r":
 		m.refreshGitBranches()
-		m.msg = "refreshed"
+		m.msg = m.t("git.refreshed")
 	}
 	return nil
 }
@@ -661,15 +663,15 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 		absPath := filepath.Join(r.Root, filepath.FromSlash(fs.Path))
 		if fs.IsStaged() {
 			if err := r.Unstage(absPath); err != nil {
-				m.msg = "unstage error: " + err.Error()
+				m.msg = m.t("git.unstage_error", err.Error())
 			} else {
-				m.msg = "unstaged: " + fs.Path
+				m.msg = m.t("git.unstaged", fs.Path)
 			}
 		} else {
 			if err := r.Stage(absPath); err != nil {
-				m.msg = "stage error: " + err.Error()
+				m.msg = m.t("git.stage_error", err.Error())
 			} else {
-				m.msg = "staged: " + fs.Path
+				m.msg = m.t("git.staged", fs.Path)
 			}
 		}
 		m.refreshGitFiles()
@@ -696,7 +698,7 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 	case "r":
 		m.refreshGitFiles()
 		m.refreshGitDiffPreview()
-		m.msg = "refreshed"
+		m.msg = m.t("git.refreshed")
 	case "a":
 		r := m.repoForCur()
 		if r == nil {
@@ -710,10 +712,10 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		m.refreshGitFiles()
 		m.refreshGitDiffPreview()
-		m.msg = fmt.Sprintf("staged all (%d files)", len(m.gitFiles))
+		m.msg = m.t("git.staged_all", len(m.gitFiles))
 	case "i":
 		if m.repoForCur() != nil {
-			m.msg = "already a git repo"
+			m.msg = m.t("git.already_repo")
 			break
 		}
 		m.gitInit()
@@ -731,16 +733,16 @@ func (m *Model) gitInit() {
 		}
 	}
 	if dir == "" {
-		m.msg = "no directory to init"
+		m.msg = m.t("git.no_dir")
 		return
 	}
 	repo, err := vcs.Init(dir)
 	if err != nil {
-		m.msg = "git init failed: " + err.Error()
+		m.msg = m.t("git.init_failed", err.Error())
 		return
 	}
 	m.repo = repo
-	m.msg = "initialized git repo at " + repo.Root
+	m.msg = m.t("git.init_ok", repo.Root)
 	m.refreshGitFiles()
 	m.refreshGitDiffPreview()
 }
@@ -759,14 +761,14 @@ func (m *Model) handleGitCommit(msg tea.KeyPressMsg) tea.Cmd {
 			break
 		}
 		if r == nil {
-			m.msg = "no git repo"
+			m.msg = m.t("git.norepo_msg")
 			break
 		}
 		hash, err := r.Commit(string(m.gitCommitIn))
 		if err != nil {
-			m.msg = "commit failed: " + err.Error()
+			m.msg = m.t("git.commit_failed", err.Error())
 		} else {
-			m.msg = "committed: " + hash.String()[:7]
+			m.msg = m.t("git.committed", hash.String()[:7])
 			m.gitCommitIn = nil
 			m.gitMode = gitModeStatus
 			m.gitOpen = false
@@ -883,7 +885,7 @@ func (m *Model) handleGitLog(msg tea.KeyPressMsg) tea.Cmd {
 	case "r":
 		m.refreshGitLog()
 		m.showLogDiff()
-		m.msg = "refreshed"
+		m.msg = m.t("git.refreshed")
 	}
 	return nil
 }

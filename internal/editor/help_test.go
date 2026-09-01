@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"dmed/internal/i18n"
 )
 
 func TestHelpToggle(t *testing.T) {
@@ -61,5 +63,19 @@ func TestNulByteIsIgnored(t *testing.T) {
 	}
 	if m.tabs[0].buf.Text() != "\n" {
 		t.Fatal("NUL must not insert into buffer")
+	}
+}
+
+func TestHelpRussianLocale(t *testing.T) {
+	m := New()
+	m.width, m.height = 80, 24
+	m.cfg.UI.Lang = "ru"
+	m.tr = i18n.New(i18n.Resolve("ru"))
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyF1})
+	v := m.View()
+	for _, want := range []string{"клавиши", "сохранить активную вкладку", "быстрый поиск файлов"} {
+		if !strings.Contains(v.Content, want) {
+			t.Fatalf("ru help view missing %q", want)
+		}
 	}
 }

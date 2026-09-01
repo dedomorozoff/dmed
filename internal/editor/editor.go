@@ -17,6 +17,9 @@ import (
 	"dmed/internal/buffer"
 	"dmed/internal/config"
 	"dmed/internal/events"
+	"dmed/internal/i18n"
+	"dmed/internal/lsp"
+	"dmed/internal/plugin"
 	"dmed/internal/session"
 	"dmed/internal/syntax"
 	"dmed/internal/vcs"
@@ -138,6 +141,11 @@ func (t *tab) getDiff(repo *vcs.Repo) vcs.FileDiff {
 type Model struct {
 	root       string
 	cfg        config.Config
+	tr         i18n.Translator
+	plugins    *plugin.Manager
+	lspClient  *lsp.Client
+	diagCh     chan lspDiagMsg
+	diags      map[string][]lsp.Diagnostic
 	tabs       []tab
 	panes      []pane
 	layout     splitLayout
@@ -243,6 +251,18 @@ type Model struct {
 	paletteOffset int
 	clipboard     string
 
+	// Language chooser
+	langChooserOpen bool
+	langChooserSel  int
+
+	// Autocompletion popup
+	complOpen   bool
+	complItems  []string
+	complSel    int
+	complOffset int
+	complLine   int
+	complStart  int
+
 	// Right-side AI chat panel (local Ollama)
 	chatOpen   bool
 	chatFocus  bool
@@ -335,6 +355,8 @@ func New(paths ...string) Model {
 		expanded:   map[string]bool{},
 		fileEvents: fe,
 		bus:        events.New(),
+		diagCh:     make(chan lspDiagMsg, 64),
+		diags:      map[string][]lsp.Diagnostic{},
 	}
 	if w, err := watcher.New(func(p string) {
 		select {
@@ -350,7 +372,7 @@ func New(paths ...string) Model {
 		if st, err := os.Stat(p); err == nil && st.IsDir() {
 			if m.root == "" {
 				m.root = normalizePath(".", p)
-				m.msg = "project: " + filepath.Base(m.root)
+				m.msg = m.t("msg.project", filepath.Base(m.root))
 			}
 			continue
 		}
@@ -378,6 +400,7 @@ func New(paths ...string) Model {
 		m.tabs = append(m.tabs, tab{buf: buffer.New()})
 	}
 	m.cfg = config.Load(m.root)
+	m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
 	syntax.SetDefault(m.cfg.Editor.SyntaxTheme)
 	m.initPanes()
 	if restoreActiveTab >= 0 && restoreActiveTab < len(m.tabs) {
@@ -390,6 +413,8 @@ func New(paths ...string) Model {
 	if repo, err := vcs.Open(m.baseDir()); err == nil {
 		m.repo = repo
 	}
+	m.loadPlugins()
+	m.plugins.Emit(&m, "ready")
 	// Watch root directory for tree updates
 	if m.root != "" && m.watcher != nil {
 		m.watcher.Watch(m.root)
@@ -430,9 +455,9 @@ func (m *Model) openPath(rawPath string) {
 	t := tab{path: path, buf: buffer.New(), lineEnding: "lf", encoding: "utf-8"}
 	if err != nil {
 		if os.IsNotExist(err) {
-			m.msg = "new file: " + path
+			m.msg = m.t("msg.new_file", path)
 		} else {
-			m.msg = "open failed: " + err.Error()
+			m.msg = m.t("msg.open_failed", err.Error())
 		}
 	} else {
 		le, enc := detectFileInfo(data)
@@ -447,6 +472,15 @@ func (m *Model) openPath(rawPath string) {
 	// Only set active tab if panes are already initialized
 	if len(m.panes) > 0 {
 		m.setActiveTab(len(m.tabs) - 1)
+	}
+	if m.plugins != nil {
+		m.plugins.Emit(m, "file_open")
+	}
+	// Hint when this file's language needs an LSP server that isn't installed.
+	if err == nil {
+		if hint := lspMissingHint(t.path); hint != "" {
+			m.msg = m.t("msg.lsp_missing", hint)
+		}
 	}
 }
 
@@ -541,7 +575,7 @@ func (m *Model) openConfigFile() {
 		os.WriteFile(path, []byte(content), 0o644)
 	}
 	m.openPath(path)
-	m.msg = "edit config, save to apply"
+	m.msg = m.t("msg.edit_config")
 }
 
 func (m *Model) refind() {
@@ -622,7 +656,7 @@ func (m *Model) handlePrompt(msg tea.KeyPressMsg) tea.Cmd {
 		if path != "" {
 			if newFolder {
 				_ = os.MkdirAll(path, 0o755)
-				m.msg = "created folder: " + path
+				m.msg = m.t("msg.created_folder", path)
 			} else {
 				m.openPath(path)
 			}
@@ -659,11 +693,11 @@ func (m *Model) handleSavePrompt(msg tea.KeyPressMsg) tea.Cmd {
 				text = strings.ReplaceAll(text, "\n", "\r\n")
 			}
 			if err := os.WriteFile(t.path, []byte(text), 0o644); err != nil {
-				m.msg = "save failed: " + err.Error()
+				m.msg = m.t("msg.save_failed", err.Error())
 				return nil
 			}
 			t.buf.MarkSaved()
-			m.msg = "saved"
+			m.msg = m.t("msg.saved")
 			if m.pendingQuit {
 				m.pendingQuit = false
 				m.shutdown()
@@ -710,7 +744,7 @@ func (m *Model) handleQuitConfirm(msg tea.KeyPressMsg) tea.Cmd {
 			m.quitConfirm = false
 			m.pendingQuit = false
 			m.quitTab = false
-			m.msg = "save failed"
+			m.msg = m.t("msg.save_failed_gen")
 			if m.quitTab {
 				m.quitTab = false
 			}
@@ -767,7 +801,7 @@ func waitForFileEvent(ch <-chan string) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh), waitForInlineOutput(m.aiInlineCh))
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh), waitForInlineOutput(m.aiInlineCh), waitForLSPDiag(m.diagCh))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -777,8 +811,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Hot-reload config when .dmed.conf changes
 		if strings.HasSuffix(path, ".dmed.conf") {
 			m.cfg = config.Load(m.root)
+			m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
 			syntax.SetDefault(m.cfg.Editor.SyntaxTheme)
-			m.msg = "config reloaded"
+			m.msg = m.t("msg.config_reloaded")
+			return m, waitForFileEvent(m.fileEvents)
+		}
+		// Hot-reload a changed plugin without restarting the editor.
+		if m.plugins != nil && m.isPluginPath(path) {
+			m.reloadPlugin(path)
 			return m, waitForFileEvent(m.fileEvents)
 		}
 		for i := range m.tabs {
@@ -793,7 +833,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
 						t.syntaxCached = nil
 						t.diffText = ""
-						m.msg = "reloaded: " + t.name(m.baseDir())
+						m.msg = m.t("msg.reloaded_name", t.name(m.baseDir()))
 					}
 				} else {
 					if data, err := os.ReadFile(t.path); err == nil {
@@ -807,7 +847,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.conflictOpen = true
 					m.conflictPath = path
-					m.msg = "file modified externally: (r)eload or (i)gnore?"
+					m.msg = m.t("msg.external")
 				}
 				break
 			}
@@ -893,7 +933,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.cur().buf.InsertText(text)
 			}
-			m.msg = "pasted"
+			m.msg = m.t("msg.pasted")
 		}
 	case tea.KeyPressMsg:
 		if debugKeys {
@@ -906,12 +946,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd != nil {
 			return m, cmd
 		}
+	case lspCompletionMsg:
+		if m.complOpen && msg.path == m.cur().path {
+			m.mergeLSPCompletion(msg.items)
+		}
+	case lspDiagMsg:
+		abs, _ := filepath.Abs(msg.path)
+		m.diags[abs] = msg.diags
+		return m, waitForLSPDiag(m.diagCh)
 	}
 	m.clampScroll()
 	return m, nil
 }
 
 func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
+	// Some terminal stacks send bare control bytes (Ctrl+O as 0x0f, Ctrl+C as
+	// 0x03, bare Ctrl as NUL). Normalize them into proper ctrl+key messages so
+	// keybindings work and stray control bytes never reach the buffer.
 	if len(msg.Text) == 1 {
 		if r := rune(msg.Text[0]); r < 32 && r != '\t' {
 			msg = tea.KeyPressMsg{Code: r + 96, Mod: tea.ModCtrl}
@@ -927,7 +978,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		msg = tea.KeyPressMsg{Code: nr[0], Text: string(nr), Mod: msg.Mod}
 	}
 	s := msg.String()
-	// Global keys work in every mode (tree, git panel, prompts, search, agents...).
+
+	// While the completion popup is open, navigation keys control it.
+	if m.complOpen && m.handleCompletionKey(s) {
+		return nil
+	}
+
 	switch s {
 	case "ctrl+q":
 		return m.requestQuit()
@@ -935,7 +991,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.cur().buf.HasSelection() {
 			m.clipboard = m.cur().buf.SelectedText()
 			clipboard.WriteAll(m.clipboard)
-			m.msg = "copied to clipboard"
+			m.msg = m.t("msg.copied")
 			return nil
 		}
 		return m.requestQuit()
@@ -946,7 +1002,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.clipboard = m.cur().buf.SelectedText()
 			clipboard.WriteAll(m.clipboard)
 			m.cur().buf.DeleteSelection()
-			m.msg = "cut to clipboard"
+			m.msg = m.t("msg.cut")
 			return nil
 		}
 		return m.closeActiveTab()
@@ -1010,7 +1066,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 						t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
 						t.syntaxCached = nil
 						t.diffText = ""
-						m.msg = "reloaded from disk"
+						m.msg = m.t("msg.reloaded")
 					}
 					break
 				}
@@ -1021,7 +1077,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		case "i", "I", "esc":
 			m.conflictOpen = false
 			m.conflictRows = nil
-			m.msg = "kept buffer changes"
+			m.msg = m.t("msg.kept")
 			return nil
 		case "up", "k":
 			if m.conflictOffY > 0 {
@@ -1089,6 +1145,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.helpOpen {
 		return m.handleHelp(msg)
 	}
+	if m.langChooserOpen {
+		return m.handleLangChooser(msg)
+	}
 	if m.promptOpen {
 		return m.handlePrompt(msg)
 	}
@@ -1120,13 +1179,21 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.jumpTab(int(s[4] - '1'))
 		return nil
 	}
+	// Plugins get first crack at unhandled keys so they can override built-ins.
+	if m.plugins != nil && m.plugins.HasBinding(s) {
+		if m.plugins.RunBinding(m, s) {
+			return nil
+		}
+	}
 	switch s {
+	case "ctrl+space":
+		return m.triggerCompletion(true)
 	case "alt+d":
 		b := m.cur().buf
 		if !b.AddNextOccurrence() {
-			m.msg = "no more occurrences"
+			m.msg = m.t("msg.no_more_occurrences")
 		} else if !b.HasMultipleCursors() && b.HasSelection() {
-			m.msg = "selected: type to replace all occurrences"
+			m.msg = m.t("msg.selected")
 		} else {
 			m.msg = ""
 		}
@@ -1251,6 +1318,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.cur().buf.Backspace()
 		}
 		m.msg = ""
+		return m.triggerCompletion(false)
 	case "delete":
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MultiDelete()
@@ -1275,6 +1343,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			}
 			m.msg = ""
+			return m.triggerCompletion(false)
 		} else {
 			return nil
 		}
@@ -1301,6 +1370,9 @@ func (m *Model) shutdown() {
 	}
 	if m.watcher != nil {
 		_ = m.watcher.Close()
+	}
+	if m.lspClient != nil {
+		m.lspClient.Close()
 	}
 	m.saveSession()
 }
@@ -1345,7 +1417,7 @@ func (m *Model) closeActiveTab() tea.Cmd {
 func (m *Model) saveActive() {
 	t := m.cur()
 	if t.path == "" {
-		m.msg = "cannot save: no file name"
+		m.msg = m.t("msg.cannot_save")
 		return
 	}
 	text := t.buf.Text()
@@ -1353,11 +1425,14 @@ func (m *Model) saveActive() {
 		text = strings.ReplaceAll(text, "\n", "\r\n")
 	}
 	if err := os.WriteFile(t.path, []byte(text), 0o644); err != nil {
-		m.msg = "save failed: " + err.Error()
+		m.msg = m.t("msg.save_failed", err.Error())
 		return
 	}
 	t.buf.MarkSaved()
-	m.msg = "saved"
+	m.msg = m.t("msg.saved")
+	if m.plugins != nil {
+		m.plugins.Emit(m, "save")
+	}
 }
 
 func (m *Model) clampScroll() {
@@ -1593,7 +1668,7 @@ func (m *Model) doReplace() {
 	}
 
 	t.buf.ReplaceRange(curLine, curCol, qLen, m.replaceWith)
-	m.msg = "replaced 1 occurrence"
+	m.msg = m.t("msg.replaced_one")
 	m.updateSearchMatches(false)
 }
 
@@ -1615,7 +1690,7 @@ func (m *Model) jumpHunk(dir int) {
 	}
 	diff := t.getDiff(m.repo)
 	if len(diff.Hunks) == 0 {
-		m.msg = "no git changes"
+		m.msg = m.t("msg.no_git_changes")
 		return
 	}
 	curLine := t.buf.CurLine()
@@ -1649,6 +1724,49 @@ func (m *Model) startPalette() {
 	m.paletteQ = nil
 	m.paletteSel = 0
 	m.paletteOffset = 0
+}
+
+// setLang switches the interface language, rebuilding the translator and
+// persisting the choice to the config file (project if available, else global).
+func (m *Model) setLang(lang string) {
+	m.cfg.UI.Lang = lang
+	m.tr = i18n.New(i18n.Resolve(lang))
+	path := config.ProjectConfigPath(m.root)
+	if path == "" {
+		path = config.ConfigPath()
+	}
+	_ = config.WriteLang(path, lang)
+	m.msg = m.t("msg.lang_set", lang)
+}
+
+// openLangChooser opens the language selection list.
+func (m *Model) openLangChooser() {
+	m.langChooserOpen = true
+	m.langChooserSel = 0
+	m.paletteOpen = false
+}
+
+// handleLangChooser handles keys while the language chooser is open.
+func (m *Model) handleLangChooser(msg tea.KeyPressMsg) tea.Cmd {
+	langs := i18n.Supported()
+	switch msg.String() {
+	case "esc":
+		m.langChooserOpen = false
+	case "enter":
+		if m.langChooserSel >= 0 && m.langChooserSel < len(langs) {
+			m.setLang(langs[m.langChooserSel].Code)
+		}
+		m.langChooserOpen = false
+	case "up", "k":
+		if len(langs) > 0 {
+			m.langChooserSel = (m.langChooserSel - 1 + len(langs)) % len(langs)
+		}
+	case "down", "j":
+		if len(langs) > 0 {
+			m.langChooserSel = (m.langChooserSel + 1) % len(langs)
+		}
+	}
+	return nil
 }
 
 // restoreCursors applies saved per-file cursor positions to the just-opened
@@ -1742,7 +1860,7 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 	// Alt+Click adds a secondary cursor instead of moving the main one.
 	if msg.Mod&tea.ModAlt != 0 {
 		if t.buf.AddCursor(ln, rawCol, rawCol, rawCol) {
-			m.msg = "added cursor"
+			m.msg = m.t("msg.added_cursor")
 		}
 		return nil
 	}

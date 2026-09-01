@@ -4,14 +4,16 @@ import "strings"
 
 const maxUndo = 1000
 
+// snapshot records the persistent document root before a change; because the
+// tree is immutable, restoring undo is just swapping the root pointer (O(1)).
 type snapshot struct {
-	lines [][]rune
-	line  int
-	col   int
+	root *lnode
+	line int
+	col  int
 }
 
 type Buffer struct {
-	lines         [][]rune
+	d             *doc
 	line          int
 	col           int
 	goalCol       int
@@ -32,7 +34,7 @@ type Buffer struct {
 }
 
 func New() *Buffer {
-	return &Buffer{lines: [][]rune{{}}, saved: "\n"}
+	return &Buffer{d: newDoc([][]rune{{}}), saved: "\n"}
 }
 
 func Load(s string) *Buffer {
@@ -40,28 +42,30 @@ func Load(s string) *Buffer {
 	if s == "" {
 		return b
 	}
-	lines := strings.Split(s, "\n")
-	if len(lines) > 1 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
+	split := strings.Split(s, "\n")
+	if len(split) > 1 && split[len(split)-1] == "" {
+		split = split[:len(split)-1]
 	}
-	b.lines = make([][]rune, len(lines))
-	for i, l := range lines {
-		b.lines[i] = []rune(l)
+	lines := make([][]rune, len(split))
+	for i, l := range split {
+		lines[i] = []rune(l)
 	}
+	b.d = newDoc(lines)
 	b.saved = b.Text()
 	return b
 }
 
-func clone(lines [][]rune) [][]rune {
-	out := make([][]rune, len(lines))
-	for i, l := range lines {
-		out[i] = append([]rune(nil), l...)
-	}
-	return out
-}
+// linesCopy returns the document as a flat slice of lines (for the multi-
+// cursor edit paths, which operate on a flat view).
+func (b *Buffer) linesCopy() [][]rune { return b.d.lines() }
+
+// setLines replaces the whole document from a flat slice of lines.
+func (b *Buffer) setLines(m [][]rune) { b.d = newDoc(m) }
+
+func (b *Buffer) lineLen(i int) int { return len(b.d.lineAt(i)) }
 
 func (b *Buffer) pushUndo() {
-	b.undoStack = append(b.undoStack, snapshot{clone(b.lines), b.line, b.col})
+	b.undoStack = append(b.undoStack, snapshot{b.d.root, b.line, b.col})
 	if len(b.undoStack) > maxUndo {
 		b.undoStack = b.undoStack[1:]
 	}
@@ -76,19 +80,13 @@ func (b *Buffer) beginChange() {
 	b.redoStack = nil
 }
 
-func (b *Buffer) Text() string {
-	parts := make([]string, len(b.lines))
-	for i, l := range b.lines {
-		parts[i] = string(l)
-	}
-	return strings.Join(parts, "\n") + "\n"
-}
+func (b *Buffer) Text() string { return b.d.text() }
 
 func (b *Buffer) MarkSaved()  { b.saved = b.Text() }
 func (b *Buffer) Dirty() bool { return b.Text() != b.saved }
 
-func (b *Buffer) LineCount() int      { return len(b.lines) }
-func (b *Buffer) LineAt(i int) []rune { return b.lines[i] }
+func (b *Buffer) LineCount() int      { return b.d.count() }
+func (b *Buffer) LineAt(i int) []rune { return b.d.lineAt(i) }
 func (b *Buffer) CurLine() int        { return b.line }
 func (b *Buffer) Col() int            { return b.col }
 
@@ -127,12 +125,7 @@ func (b *Buffer) DragSelect(line, col int) {
 }
 
 // LineLen returns the number of runes in the given line.
-func (b *Buffer) LineLen(i int) int {
-	if i < 0 || i >= len(b.lines) {
-		return 0
-	}
-	return len(b.lines[i])
-}
+func (b *Buffer) LineLen(i int) int { return b.lineLen(i) }
 
 func (b *Buffer) SelectionRange() (startLine, startCol, endLine, endCol int) {
 	if !b.hasSelection {
@@ -150,14 +143,14 @@ func (b *Buffer) SelectedText() string {
 	}
 	sl, sc, el, ec := b.SelectionRange()
 	if sl == el {
-		return string(b.lines[sl][sc:ec])
+		return string(b.d.lineAt(sl)[sc:ec])
 	}
 	var parts []string
-	parts = append(parts, string(b.lines[sl][sc:]))
+	parts = append(parts, string(b.d.lineAt(sl)[sc:]))
 	for i := sl + 1; i < el; i++ {
-		parts = append(parts, string(b.lines[i]))
+		parts = append(parts, string(b.d.lineAt(i)))
 	}
-	parts = append(parts, string(b.lines[el][:ec]))
+	parts = append(parts, string(b.d.lineAt(el)[:ec]))
 	return strings.Join(parts, "\n")
 }
 
@@ -166,18 +159,11 @@ func (b *Buffer) deleteSelectionWithoutUndo() (int, int) {
 		return b.line, b.col
 	}
 	sl, sc, el, ec := b.SelectionRange()
-	startLineRunes := b.lines[sl][:sc]
-	endLineRunes := b.lines[el][ec:]
-	combined := append(append([]rune(nil), startLineRunes...), endLineRunes...)
-
-	newLines := make([][]rune, 0, len(b.lines)-(el-sl))
-	newLines = append(newLines, b.lines[:sl]...)
-	newLines = append(newLines, combined)
-	if el+1 < len(b.lines) {
-		newLines = append(newLines, b.lines[el+1:]...)
-	}
-
-	b.lines = newLines
+	start := b.d.lineAt(sl)[:sc]
+	end := b.d.lineAt(el)[ec:]
+	combined := append(append([]rune(nil), start...), end...)
+	b.d.root = b.d.setLine(sl, combined)
+	b.d.root = b.d.deleteLines(sl+1, el-sl)
 	b.line = sl
 	b.col = sc
 	b.goalCol = b.col
@@ -195,6 +181,15 @@ func (b *Buffer) DeleteSelection() bool {
 	return true
 }
 
+func splitTextLines(text string) [][]rune {
+	parts := strings.Split(text, "\n")
+	out := make([][]rune, len(parts))
+	for i, p := range parts {
+		out[i] = []rune(p)
+	}
+	return out
+}
+
 func (b *Buffer) InsertText(text string) {
 	if text == "" && !b.HasSelection() {
 		return
@@ -205,41 +200,30 @@ func (b *Buffer) InsertText(text string) {
 		b.deleteSelectionWithoutUndo()
 	}
 
-	lines := strings.Split(text, "\n")
-	curLine := b.lines[b.line]
-	before := curLine[:b.col]
-	after := curLine[b.col:]
+	ins := splitTextLines(text)
+	cur := b.d.lineAt(b.line)
+	before := cur[:b.col]
+	after := cur[b.col:]
 
-	if len(lines) == 1 {
-		runes := []rune(lines[0])
-		newL := append(append([]rune(nil), before...), runes...)
-		newL = append(newL, after...)
-		b.lines[b.line] = newL
-		b.col += len(runes)
+	if len(ins) == 1 {
+		nl := append(append([]rune(nil), before...), ins[0]...)
+		nl = append(nl, after...)
+		b.d.root = b.d.setLine(b.line, nl)
+		b.col += len(ins[0])
 		b.goalCol = b.col
 		return
 	}
 
-	firstLine := append(append([]rune(nil), before...), []rune(lines[0])...)
-	lastLine := append([]rune(lines[len(lines)-1]), after...)
+	first := append(append([]rune(nil), before...), ins[0]...)
+	last := append(append([]rune(nil), ins[len(ins)-1]...), after...)
+	tail := make([][]rune, 0, len(ins)-1)
+	tail = append(tail, ins[1:len(ins)-1]...)
+	tail = append(tail, last)
 
-	insertedLines := make([][]rune, len(lines))
-	insertedLines[0] = firstLine
-	for i := 1; i < len(lines)-1; i++ {
-		insertedLines[i] = []rune(lines[i])
-	}
-	insertedLines[len(lines)-1] = lastLine
-
-	newLines := make([][]rune, 0, len(b.lines)+len(lines)-1)
-	newLines = append(newLines, b.lines[:b.line]...)
-	newLines = append(newLines, insertedLines...)
-	if b.line+1 < len(b.lines) {
-		newLines = append(newLines, b.lines[b.line+1:]...)
-	}
-
-	b.lines = newLines
-	b.line = b.line + len(lines) - 1
-	b.col = len([]rune(lines[len(lines)-1]))
+	b.d.root = b.d.setLine(b.line, first)
+	b.d.root = b.d.insertLines(b.line+1, tail)
+	b.line = b.line + len(ins) - 1
+	b.col = len(ins[len(ins)-1])
 	b.goalCol = b.col
 }
 
@@ -248,24 +232,24 @@ func (b *Buffer) SetCursor(line, col int) {
 	b.hasSelection = false
 	if line < 0 {
 		line = 0
-	} else if line >= len(b.lines) {
-		line = len(b.lines) - 1
+	} else if line >= b.d.count() {
+		line = b.d.count() - 1
 	}
 	b.line = line
 	if col < 0 {
 		col = 0
-	} else if col > len(b.lines[b.line]) {
-		col = len(b.lines[b.line])
+	} else if col > b.lineLen(b.line) {
+		col = b.lineLen(b.line)
 	}
 	b.col = col
 	b.goalCol = b.col
 }
 
 func (b *Buffer) ReplaceRange(line, col, length int, replacement []rune) bool {
-	if line < 0 || line >= len(b.lines) {
+	if line < 0 || line >= b.d.count() {
 		return false
 	}
-	l := b.lines[line]
+	l := b.d.lineAt(line)
 	if col < 0 || col > len(l) || col+length > len(l) {
 		return false
 	}
@@ -275,7 +259,7 @@ func (b *Buffer) ReplaceRange(line, col, length int, replacement []rune) bool {
 	newLine = append(newLine, l[:col]...)
 	newLine = append(newLine, replacement...)
 	newLine = append(newLine, l[col+length:]...)
-	b.lines[line] = newLine
+	b.d.root = b.d.setLine(line, newLine)
 	b.line = line
 	b.col = col + len(replacement)
 	b.goalCol = b.col
@@ -288,27 +272,26 @@ func (b *Buffer) ReplaceAll(find, replace string) int {
 		return 0
 	}
 	count := 0
-	for _, l := range b.lines {
-		str := string(l)
-		count += strings.Count(str, find)
+	n := b.d.count()
+	for i := 0; i < n; i++ {
+		count += strings.Count(string(b.d.lineAt(i)), find)
 	}
 	if count == 0 {
 		return 0
 	}
 	b.beginChange()
 	b.pushUndo()
-	for i, l := range b.lines {
-		str := string(l)
+	for i := 0; i < n; i++ {
+		str := string(b.d.lineAt(i))
 		if strings.Contains(str, find) {
-			newStr := strings.ReplaceAll(str, find, replace)
-			b.lines[i] = []rune(newStr)
+			b.d.root = b.d.setLine(i, []rune(strings.ReplaceAll(str, find, replace)))
 		}
 	}
-	if b.line >= len(b.lines) {
-		b.line = len(b.lines) - 1
+	if b.line >= b.d.count() {
+		b.line = b.d.count() - 1
 	}
-	if b.col > len(b.lines[b.line]) {
-		b.col = len(b.lines[b.line])
+	if b.col > b.lineLen(b.line) {
+		b.col = b.lineLen(b.line)
 	}
 	b.goalCol = b.col
 	b.hasSelection = false
@@ -318,18 +301,20 @@ func (b *Buffer) ReplaceAll(find, replace string) int {
 func (b *Buffer) Insert(r rune) {
 	if b.HasSelection() {
 		b.DeleteSelection()
+		return
 	}
 	grouped := b.lastWasInsert && b.line == b.lastLine && b.col == b.lastCol
 	b.breakGroup()
 	if !grouped {
 		b.pushUndo()
 	}
-	post := b.col + 1
-	l := append(b.lines[b.line], 0)
-	copy(l[b.col+1:], l[b.col:])
-	l[b.col] = r
-	b.lines[b.line] = l
-	b.col = post
+	cur := b.d.lineAt(b.line)
+	nl := make([]rune, 0, len(cur)+1)
+	nl = append(nl, cur[:b.col]...)
+	nl = append(nl, r)
+	nl = append(nl, cur[b.col:]...)
+	b.d.root = b.d.setLine(b.line, nl)
+	b.col++
 	b.goalCol = b.col
 	b.lastWasInsert = true
 	b.lastLine = b.line
@@ -340,15 +325,14 @@ func (b *Buffer) Insert(r rune) {
 func (b *Buffer) InsertNewline() {
 	if b.HasSelection() {
 		b.DeleteSelection()
+		return
 	}
 	b.beginChange()
 	b.pushUndo()
-	l := b.lines[b.line]
+	l := b.d.lineAt(b.line)
 	rest := append([]rune(nil), l[b.col:]...)
-	b.lines[b.line] = l[:b.col:b.col]
-	b.lines = append(b.lines, nil)
-	copy(b.lines[b.line+2:], b.lines[b.line+1:])
-	b.lines[b.line+1] = rest
+	b.d.root = b.d.setLine(b.line, l[:b.col:b.col])
+	b.d.root = b.d.insertLines(b.line+1, [][]rune{rest})
 	b.line++
 	b.col = 0
 	b.goalCol = 0
@@ -363,17 +347,19 @@ func (b *Buffer) Backspace() {
 	b.beginChange()
 	if b.col > 0 {
 		b.pushUndo()
-		l := b.lines[b.line]
-		copy(l[b.col-1:], l[b.col:])
-		l[len(l)-1] = 0
-		b.lines[b.line] = l[:len(l)-1]
+		cur := b.d.lineAt(b.line)
+		nl := make([]rune, 0, len(cur)-1)
+		nl = append(nl, cur[:b.col-1]...)
+		nl = append(nl, cur[b.col:]...)
+		b.d.root = b.d.setLine(b.line, nl)
 		b.col--
 	} else if b.line > 0 {
 		b.pushUndo()
-		prev := b.lines[b.line-1]
-		cur := b.lines[b.line]
-		b.lines[b.line-1] = append(append([]rune(nil), prev...), cur...)
-		b.lines = append(b.lines[:b.line], b.lines[b.line+1:]...)
+		prev := b.d.lineAt(b.line - 1)
+		cur := b.d.lineAt(b.line)
+		merged := append(append([]rune(nil), prev...), cur...)
+		b.d.root = b.d.setLine(b.line-1, merged)
+		b.d.root = b.d.deleteLines(b.line, 1)
 		b.line--
 		b.col = len(prev)
 	} else {
@@ -388,33 +374,35 @@ func (b *Buffer) Delete() {
 		return
 	}
 	b.beginChange()
-	l := b.lines[b.line]
-	if b.col < len(l) {
+	cur := b.d.lineAt(b.line)
+	if b.col < len(cur) {
 		b.pushUndo()
-		copy(l[b.col:], l[b.col+1:])
-		l[len(l)-1] = 0
-		b.lines[b.line] = l[:len(l)-1]
-	} else if b.line < len(b.lines)-1 {
+		nl := make([]rune, 0, len(cur)-1)
+		nl = append(nl, cur[:b.col]...)
+		nl = append(nl, cur[b.col+1:]...)
+		b.d.root = b.d.setLine(b.line, nl)
+	} else if b.line < b.d.count()-1 {
 		b.pushUndo()
-		next := b.lines[b.line+1]
-		b.lines[b.line] = append(append([]rune(nil), l...), next...)
-		b.lines = append(b.lines[:b.line+1], b.lines[b.line+2:]...)
+		next := b.d.lineAt(b.line + 1)
+		merged := append(append([]rune(nil), cur...), next...)
+		b.d.root = b.d.setLine(b.line, merged)
+		b.d.root = b.d.deleteLines(b.line+1, 1)
 	}
 }
 
 func (b *Buffer) DeleteLine() {
 	b.beginChange()
 	b.pushUndo()
-	if len(b.lines) == 1 {
-		b.lines[0] = []rune{}
+	if b.d.count() == 1 {
+		b.d.root = b.d.setLine(0, []rune{})
 		b.line = 0
 		b.col = 0
 		b.goalCol = 0
 		return
 	}
-	b.lines = append(b.lines[:b.line], b.lines[b.line+1:]...)
-	if b.line >= len(b.lines) {
-		b.line = len(b.lines) - 1
+	b.d.root = b.d.deleteLines(b.line, 1)
+	if b.line >= b.d.count() {
+		b.line = b.d.count() - 1
 	}
 	b.col = 0
 	b.goalCol = 0
@@ -429,18 +417,11 @@ func (b *Buffer) DuplicateLine() {
 		sl = b.line
 		el = b.line
 	}
-	// Copy lines[sl..el] and insert after el
 	dup := make([][]rune, el-sl+1)
 	for i := sl; i <= el; i++ {
-		dup[i-sl] = append([]rune(nil), b.lines[i]...)
+		dup[i-sl] = append([]rune(nil), b.d.lineAt(i)...)
 	}
-	newLines := make([][]rune, 0, len(b.lines)+len(dup))
-	newLines = append(newLines, b.lines[:el+1]...)
-	newLines = append(newLines, dup...)
-	if el+1 < len(b.lines) {
-		newLines = append(newLines, b.lines[el+1:]...)
-	}
-	b.lines = newLines
+	b.d.root = b.d.insertLines(el+1, dup)
 	b.line = el + 1
 	b.goalCol = b.col
 	b.hasSelection = false
@@ -453,7 +434,7 @@ func (b *Buffer) MoveLeft() {
 		b.col--
 	} else if b.line > 0 {
 		b.line--
-		b.col = len(b.lines[b.line])
+		b.col = b.lineLen(b.line)
 	}
 	b.goalCol = b.col
 }
@@ -461,9 +442,9 @@ func (b *Buffer) MoveLeft() {
 func (b *Buffer) MoveRight() {
 	b.hasSelection = false
 	b.breakGroup()
-	if b.col < len(b.lines[b.line]) {
+	if b.col < b.lineLen(b.line) {
 		b.col++
-	} else if b.line < len(b.lines)-1 {
+	} else if b.line < b.d.count()-1 {
 		b.line++
 		b.col = 0
 	}
@@ -483,7 +464,7 @@ func (b *Buffer) MoveUp() {
 func (b *Buffer) MoveDown() {
 	b.hasSelection = false
 	b.breakGroup()
-	if b.line >= len(b.lines)-1 {
+	if b.line >= b.d.count()-1 {
 		return
 	}
 	b.line++
@@ -497,7 +478,7 @@ func (b *Buffer) MoveLeftWithSelect() {
 		b.col--
 	} else if b.line > 0 {
 		b.line--
-		b.col = len(b.lines[b.line])
+		b.col = b.lineLen(b.line)
 	}
 	b.goalCol = b.col
 }
@@ -505,9 +486,9 @@ func (b *Buffer) MoveLeftWithSelect() {
 func (b *Buffer) MoveRightWithSelect() {
 	b.StartSelection()
 	b.breakGroup()
-	if b.col < len(b.lines[b.line]) {
+	if b.col < b.lineLen(b.line) {
 		b.col++
-	} else if b.line < len(b.lines)-1 {
+	} else if b.line < b.d.count()-1 {
 		b.line++
 		b.col = 0
 	}
@@ -527,11 +508,20 @@ func (b *Buffer) MoveUpWithSelect() {
 func (b *Buffer) MoveDownWithSelect() {
 	b.StartSelection()
 	b.breakGroup()
-	if b.line >= len(b.lines)-1 {
+	if b.line >= b.d.count()-1 {
 		return
 	}
 	b.line++
 	b.clampCol()
+}
+
+// groupLines materializes lines[from..to] inclusive.
+func (b *Buffer) groupLines(from, to int) [][]rune {
+	out := make([][]rune, 0, to-from+1)
+	for i := from; i <= to; i++ {
+		out = append(out, append([]rune(nil), b.d.lineAt(i)...))
+	}
+	return out
 }
 
 // MoveLineUp moves the current line (or all selected lines) up by one position.
@@ -546,17 +536,13 @@ func (b *Buffer) MoveLineUp() {
 	if sl == 0 {
 		return
 	}
-	// swap lines[sl-1] with lines[sl..el]
-	above := b.lines[sl-1]
-	group := b.lines[sl : el+1]
-	newLines := make([][]rune, 0, len(b.lines))
-	newLines = append(newLines, b.lines[:sl-1]...)
-	newLines = append(newLines, group...)
-	newLines = append(newLines, above)
-	if el+1 < len(b.lines) {
-		newLines = append(newLines, b.lines[el+1:]...)
-	}
-	b.lines = newLines
+	above := b.d.lineAt(sl - 1)
+	group := b.groupLines(sl, el)
+	// Remove [above group] then re-insert [group above] at sl-1.
+	b.d.root = b.d.deleteLines(sl-1, el-sl+2)
+	reinsert := append([][]rune(nil), group...)
+	reinsert = append(reinsert, append([]rune(nil), above...))
+	b.d.root = b.d.insertLines(sl-1, reinsert)
 	b.line = sl - 1
 	b.goalCol = b.col
 	b.hasSelection = false
@@ -571,27 +557,22 @@ func (b *Buffer) MoveLineDown() {
 		sl = b.line
 		el = b.line
 	}
-	if el >= len(b.lines)-1 {
+	if el >= b.d.count()-1 {
 		return
 	}
-	// swap lines[el+1] with lines[sl..el]
-	below := b.lines[el+1]
-	group := b.lines[sl : el+1]
-	newLines := make([][]rune, 0, len(b.lines))
-	newLines = append(newLines, b.lines[:sl]...)
-	newLines = append(newLines, below)
-	newLines = append(newLines, group...)
-	if el+2 < len(b.lines) {
-		newLines = append(newLines, b.lines[el+2:]...)
-	}
-	b.lines = newLines
+	below := b.d.lineAt(el + 1)
+	group := b.groupLines(sl, el)
+	// Remove [group below] then re-insert [below group] at sl.
+	b.d.root = b.d.deleteLines(sl, el-sl+2)
+	reinsert := append([][]rune{append([]rune(nil), below...)}, group...)
+	b.d.root = b.d.insertLines(sl, reinsert)
 	b.line = sl + 1
 	b.goalCol = b.col
 	b.hasSelection = false
 }
 
 func (b *Buffer) clampCol() {
-	n := len(b.lines[b.line])
+	n := b.lineLen(b.line)
 	if b.goalCol < n {
 		b.col = b.goalCol
 	} else {
@@ -609,7 +590,7 @@ func (b *Buffer) LineStart() {
 func (b *Buffer) LineEnd() {
 	b.hasSelection = false
 	b.breakGroup()
-	b.col = len(b.lines[b.line])
+	b.col = b.lineLen(b.line)
 	b.goalCol = b.col
 }
 
@@ -623,7 +604,7 @@ func (b *Buffer) LineStartWithSelect() {
 func (b *Buffer) LineEndWithSelect() {
 	b.StartSelection()
 	b.breakGroup()
-	b.col = len(b.lines[b.line])
+	b.col = b.lineLen(b.line)
 	b.goalCol = b.col
 }
 
@@ -634,8 +615,8 @@ func (b *Buffer) Undo() bool {
 	}
 	s := b.undoStack[len(b.undoStack)-1]
 	b.undoStack = b.undoStack[:len(b.undoStack)-1]
-	b.redoStack = append(b.redoStack, snapshot{clone(b.lines), b.line, b.col})
-	b.lines, b.line, b.col = s.lines, s.line, s.col
+	b.redoStack = append(b.redoStack, snapshot{b.d.root, b.line, b.col})
+	b.d.root, b.line, b.col = s.root, s.line, s.col
 	b.goalCol = b.col
 	return true
 }
@@ -648,7 +629,7 @@ func (b *Buffer) Redo() bool {
 	s := b.redoStack[len(b.redoStack)-1]
 	b.redoStack = b.redoStack[:len(b.redoStack)-1]
 	b.pushUndo()
-	b.lines, b.line, b.col = s.lines, s.line, s.col
+	b.d.root, b.line, b.col = s.root, s.line, s.col
 	b.goalCol = b.col
 	return true
 }

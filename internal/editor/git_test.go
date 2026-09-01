@@ -13,6 +13,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 
+	"dmed/internal/i18n"
 	"dmed/internal/vcs"
 )
 
@@ -806,5 +807,39 @@ func TestGitBranchModeCaseInsensitiveKeys(t *testing.T) {
 	m = press(m, tea.KeyPressMsg{Text: "Q"})
 	if m.gitMode == gitModeBranch {
 		t.Fatal("uppercase 'Q' must leave branch mode")
+	}
+}
+
+func TestGitPanelRussianLocale(t *testing.T) {
+	_, f := initTestGitRepo(t)
+	if err := os.WriteFile(f, []byte("package main\n\nfunc main() { changed }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(f)
+	m.width, m.height = 120, 24
+	m.cfg.UI.Lang = "ru"
+	m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
+
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	if m.gitMode != gitModeStatus {
+		t.Fatal("setup: git panel must be in status mode")
+	}
+	// Status-line hints and counters are localized.
+	line := m.gitStatusLine()
+	if !strings.Contains(line, "q: закрыть") {
+		t.Fatalf("expected Russian status hint, got %q", line)
+	}
+	if !strings.Contains(line, "изменено:") {
+		t.Fatalf("expected Russian counter label, got %q", line)
+	}
+
+	// Messages from actions are localized too.
+	m = press(m, tea.KeyPressMsg{Text: string('a')}) // stage all
+	m = press(m, tea.KeyPressMsg{Text: string('c')}) // commit mode
+	m = typeStr(m, "работа")
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !strings.Contains(m.msg, "закоммичено:") {
+		t.Fatalf("expected Russian commit message, got %q", m.msg)
 	}
 }

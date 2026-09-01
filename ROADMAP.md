@@ -58,7 +58,11 @@
 - [x] Мультикурсор: несколько курсоров (`Alt+Click`, `Alt+D` — следующее вхождение),
       редактирование/навигация по всем курсорам одновременно (ввод, backspace,
       delete, newline, вставка; стрелки двигают все курсоры; `Esc` — сброс)
-- [ ] Rope-структура вместо [][]rune (если упрёмся в производительность)
+- [x] Rope-структура вместо `[][]rune`: буфер хранится как persistent
+      сбалансированное дерево строк (`internal/buffer/doc.go`), доступ и правки
+      O(log n), undo/redo по указателю корня (O(1), без клонирования).
+      Мультикурсор работает на материализованном виде. + `internal/rope` —
+      базовый рун-rope (фундамент).
 - [x] Подсветка синтаксиса (chroma), поиск/замена (`Ctrl+F` поиск, `Ctrl+H` замена, `F3`/`Shift+F3` навигация)
 
 ### M2 — tracking изменений
@@ -119,7 +123,16 @@
 - [x] Сессии: автосохранение и восстановление открытых файлов при перезапуске
 - [x] LSP клиент (`internal/lsp`): JSON-RPC 2.0 over stdin/stdout, диагностика,
       `Definition`, `DidOpen`/`DidChange` (интеграция с `gopls`/`pyright`)
-- [ ] Плагины/скрипты
+- [x] Автодополнение: попап (`Ctrl+Space`, авто-триггер), источники — слова из
+      буфера + LSP (gopls/pyright/typescript/rust-analyzer/clangd/lua/ruby/php/
+      zls/json/yaml/css/html), асинхронно, с fallback на слова. Доки в
+      `docs/AUTOCOMPLETION.md`. Диагностика LSP выводится в gutter.
+- [x] Плагины/скрипты
+      — Lua-фреймворк (`internal/plugin`, gopher-lua): `.lua` в
+      `~/.dmed/plugins` и `<проект>/.dmed/plugins`, API `dmed.*`
+      (on_key/command/on + text/set_text/cursor/insert/status/save).
+      Авто-перезагрузка при изменении `.lua` на диске. Доки в
+      `docs/PLUGINS.md`. Осталось: больше событий/API.
 - [x] Конфигурация (`.dmed.conf` INI): tab_width, syntax_theme, line_numbers,
       skipped_dirs, model, ollama_url, system_prompt, context_max,
       tree_width, chat_width_pct. `Settings: Open Config` в палитре,
@@ -127,6 +140,18 @@
 - [x] Встроенный терминал (`Alt+T`): постоянная сессия cmd внизу редактора,
       история команд по ↑/↓, скроллбэк PgUp/PgDn, `Esc` закрыть (сессия живёт).
       Pipe-based: интерактивные TUI-программы внутри не запускаются.
+
+## Инфраструктура: CI и релизы
+
+- [x] GitHub Actions CI (`ci.yml`): vet + unit-тесты + кросс-сборка 8 платформ
+      на каждый push в `main` и на каждый PR.
+- [x] Авторелиз (`release.yml`): на пуш тега `v*` автоматически
+      - собирает бинари для 8 платформ (с версией из тега),
+      - собирает пакеты в дистро-контейнерах: `.deb` (Ubuntu), `.rpm` (Fedora),
+        `.pkg.tar.zst` (Arch, makepkg под не-root пользователем),
+        Termux `.deb`, Windows `.zip`,
+      - публикует GitHub Release со всеми артефактами и автогенерацией заметок.
+- [ ] Публикация пакетов во внешние репозитории (AUR / COPR / PPA) — пока не требуется.
 
 ## Правило развития
 

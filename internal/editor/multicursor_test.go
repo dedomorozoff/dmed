@@ -48,7 +48,7 @@ func TestAltClickAddsCursor(t *testing.T) {
 	m := New()
 	m.tabs[0].buf = buffer.Load("hello world")
 	// Click normally to place the main cursor at (0,2).
-	next, _ := m.Update(tea.MouseClickMsg{X: 7, Y: 1})
+	next, _ := m.Update(tea.MouseClickMsg{X: 8, Y: 1})
 	m = next.(Model)
 	if m.cur().buf.CurLine() != 0 || m.cur().buf.Col() != 2 {
 		t.Fatalf("main cursor not placed: line=%d col=%d", m.cur().buf.CurLine(), m.cur().buf.Col())

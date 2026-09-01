@@ -9,6 +9,8 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"dmed/internal/i18n"
+	"dmed/internal/lsp"
 	"dmed/internal/syntax"
 	"dmed/internal/vcs"
 )
@@ -26,6 +28,9 @@ var (
 	gitAddStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
 	gitModStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	gitDelStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	diagErrStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	diagWarnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	diagInfoStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
 	diffAddBg       = lipgloss.NewStyle().Background(lipgloss.Color("22"))
 	diffDelBg       = lipgloss.NewStyle().Background(lipgloss.Color("52"))
 	diffModBg       = lipgloss.NewStyle().Background(lipgloss.Color("58"))
@@ -34,48 +39,48 @@ var (
 
 type helpEntry struct {
 	keys string
-	desc string
+	desc string // i18n key
 }
 
 var helpEntries = []helpEntry{
-	{"Ctrl+S", "save active tab (untitled: Save As)"},
+	{"Ctrl+S", "help.save"},
 	{"", ""},
-	{"Ctrl+P / F2", "Command Palette (File: New, Save, ...)"},
-	{"Shift+Arrows", "select text range"},
-	{"Ctrl+C / Ctrl+X / Ctrl+V", "copy / cut / paste"},
+	{"Ctrl+P / F2", "help.palette"},
+	{"Shift+Arrows", "help.select"},
+	{"Ctrl+C / Ctrl+X / Ctrl+V", "help.clipboard"},
 	{"", ""},
-	{"Ctrl+F", "search in file (Enter/F3 next, Shift+F3 prev)"},
-	{"Ctrl+H", "search & replace (Tab switch, Enter rep, Ctrl+A all)"},
-	{"Ctrl+G", "Git panel; Ctrl+B switches back to tree"},
-	{"D (in Git panel)", "side-by-side diff vs HEAD"},
-	{"Alt+[ / Alt+]", "jump to previous / next Git hunk"},
-	{"Ctrl+O", "fuzzy file finder"},
-	{"Ctrl+T", "open file by path"},
-	{"Alt+T", "toggle bottom terminal (Esc closes)"},
-	{"Alt+A", "AI chat panel (local Ollama, right side)"},
-	{"Alt+I", "AI inline rewrite (select text, describe change)"},
-	{"Alt+L", "background agent tasks panel (queue, progress, cancel)"},
-	{"Ctrl+B / F9", "project tree; Ctrl+G switches to Git"},
-	{"↑↓/Enter/←→ in tree", "navigate, open, fold"},
-	{"Alt+←/→", "switch tabs in active pane"},
-	{"Alt+1..9", "jump to tab N"},
-	{"Ctrl+\\ / F6", "split vertical (side by side)"},
-	{"Ctrl+Alt+H / F7", "split horizontal (stacked)"},
-	{"Ctrl+Alt+P / F8", "focus other pane"},
-	{"Ctrl+Alt+W", "close pane (unsplit)"},
-	{"Ctrl+W / Ctrl+X", "close tab (last quits)"},
+	{"Ctrl+F", "help.search"},
+	{"Ctrl+H", "help.replace"},
+	{"Ctrl+G", "help.git_panel"},
+	{"D (in Git panel)", "help.git_diff"},
+	{"Alt+[ / Alt+]", "help.hunk"},
+	{"Ctrl+O", "help.finder"},
+	{"Ctrl+T", "help.open"},
+	{"Alt+T", "help.terminal"},
+	{"Alt+A", "help.chat"},
+	{"Alt+I", "help.inline"},
+	{"Alt+L", "help.agent"},
+	{"Ctrl+B / F9", "help.tree"},
+	{"↑↓/Enter/←→ in tree", "help.tree_nav"},
+	{"Alt+←/→", "help.tab_switch"},
+	{"Alt+1..9", "help.tab_jump"},
+	{"Ctrl+\\ / F6", "help.split_vert"},
+	{"Ctrl+Alt+H / F7", "help.split_horiz"},
+	{"Ctrl+Alt+P / F8", "help.split_focus"},
+	{"Ctrl+Alt+W", "help.split_close"},
+	{"Ctrl+W / Ctrl+X", "help.tab_close"},
 	{"", ""},
-	{"Arrows/Home/End/PgUp/PgDn", "move cursor"},
-	{"Enter/Backspace/Delete/Tab", "edit text"},
-	{"Ctrl+Z / Ctrl+R", "undo / redo"},
-	{"Ctrl+Y / Ctrl+D", "delete line / duplicate line"},
-	{"Alt+D", "multi-cursor: add cursor at next occurrence of word"},
-	{"Alt+Click", "add cursor at click position"},
-	{"Esc", "exit multi-cursor mode"},
-	{"Alt+↑ / Alt+↓", "move line up / down"},
+	{"Arrows/Home/End/PgUp/PgDn", "help.move"},
+	{"Enter/Backspace/Delete/Tab", "help.edit"},
+	{"Ctrl+Z / Ctrl+R", "help.undo"},
+	{"Ctrl+Y / Ctrl+D", "help.lines"},
+	{"Alt+D", "help.multicursor_word"},
+	{"Alt+Click", "help.multicursor_click"},
+	{"Esc", "help.multicursor_esc"},
+	{"Alt+↑ / Alt+↓", "help.move_line"},
 	{"", ""},
-	{"F1 or Ctrl+E", "toggle this help"},
-	{"Ctrl+Q / Ctrl+C", "quit"},
+	{"F1 or Ctrl+E", "help.toggle_help"},
+	{"Ctrl+Q / Ctrl+C", "help.quit"},
 }
 
 func (m Model) finderExtraRows() int {
@@ -114,8 +119,15 @@ func (m Model) termExtraRows() int {
 	return m.termPanelHeight()
 }
 
+func (m Model) langChooserExtraRows() int {
+	if !m.langChooserOpen {
+		return 0
+	}
+	return len(i18n.Supported()) + 1
+}
+
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.termExtraRows()
+	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.complExtraRows() - m.termExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -123,9 +135,9 @@ func (m Model) viewHeight() int {
 }
 
 func (m Model) gutterWidthForTab(t *tab) int {
-	w := len(strconv.Itoa(t.buf.LineCount())) + 2
-	if w < 5 {
-		w = 5
+	w := len(strconv.Itoa(t.buf.LineCount())) + 3
+	if w < 6 {
+		w = 6
 	}
 	return w
 }
@@ -212,6 +224,12 @@ func (m Model) View() tea.View {
 	if m.paletteOpen {
 		rows = append(rows, m.palettePanel()...)
 	}
+	if m.langChooserOpen {
+		rows = append(rows, m.langChooserPanel()...)
+	}
+	if m.complOpen && len(m.complItems) > 0 {
+		rows = append(rows, m.complPanel()...)
+	}
 	if m.termOpen {
 		rows = append(rows, m.terminalPanel()...)
 	}
@@ -222,7 +240,7 @@ func (m Model) View() tea.View {
 	v.MouseMode = tea.MouseModeCellMotion
 
 	// Terminal cursor: positioned at the editor cursor location.
-	if !m.gitOpen && !m.agentOpen && !m.agentReviewMode && !m.paletteOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
+	if !m.gitOpen && !m.agentOpen && !m.agentReviewMode && !m.paletteOpen && !m.langChooserOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
 		cx, cy := m.cursorScreenPos()
 		v.Cursor = tea.NewCursor(cx, cy)
 	}
@@ -333,6 +351,8 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 
 	syntaxLines := t.getSyntaxLines()
 	diff := t.getDiff(m.repo)
+	diagPath, _ := filepath.Abs(t.path)
+	tabDiags := m.diags[diagPath]
 
 	for row := 0; row < h; row++ {
 		ln := p.offsetY + row
@@ -353,17 +373,34 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 			}
 		}
 
+		diagMark, diagSev := diagMarkFor(tabDiags, ln)
+		diagMarkStyle := gutterStyle
+		switch diagSev {
+		case 1:
+			diagMarkStyle = diagErrStyle
+		case 2:
+			diagMarkStyle = diagWarnStyle
+		default:
+			if diagMark != "" {
+				diagMarkStyle = diagInfoStyle
+			}
+		}
+		if diagMark == "" {
+			diagMark = " "
+		}
+
 		numPad := gw - 2 - len(num)
 		if numPad < 0 {
 			numPad = 0
 		}
-		numStr := strings.Repeat(" ", numPad) + num + " "
+		numStr := strings.Repeat(" ", numPad) + num
 		gutStr := numStr
 		if active && ln == cur && ln < t.buf.LineCount() {
 			gutStr = curGutterStyle.Render(numStr)
 		} else {
 			gutStr = gutterStyle.Render(numStr)
 		}
+		gutStr += diagMarkStyle.Render(diagMark)
 		gutStr += gitMarkStyle.Render(gitMark)
 
 		if ln < t.buf.LineCount() {
@@ -373,6 +410,27 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 		}
 	}
 	return rows
+}
+
+// diagMarkFor returns the gutter marker for a line given the file's
+// diagnostics, and its severity (1: Error, 2: Warning, else Info/Hint). Empty
+// marker means the line has no diagnostics. Lower severity wins on overlap.
+func diagMarkFor(diags []lsp.Diagnostic, line int) (string, int) {
+	mark, sev := "", 0
+	for _, d := range diags {
+		if d.Line != line {
+			continue
+		}
+		if mark == "" || d.Severity < sev {
+			if d.Severity == 1 || d.Severity == 2 {
+				mark = "!"
+			} else {
+				mark = "•"
+			}
+			sev = d.Severity
+		}
+	}
+	return mark, sev
 }
 
 // gitPanelWidth is the width of the left Git rail (like the project tree).
@@ -475,7 +533,7 @@ func padTo(s string, w int) string {
 
 func (m Model) helpPanel(h int) []string {
 	rows := make([]string, 0, h)
-	rows = append(rows, statusHiStyle.Render(" dmed — keys ")+" "+hintStyle.Render("(F1/Esc closes)"))
+	rows = append(rows, statusHiStyle.Render(m.t("help.title"))+" "+hintStyle.Render(m.t("help.close_hint")))
 	for _, e := range helpEntries {
 		if e.keys == "" {
 			rows = append(rows, "")
@@ -485,17 +543,17 @@ func (m Model) helpPanel(h int) []string {
 		if len(key) < 26 {
 			key += strings.Repeat(" ", 26-len(key))
 		}
-		rows = append(rows, " "+statusStyle.Render(key)+e.desc)
+		rows = append(rows, " "+statusStyle.Render(key)+m.t(e.desc))
 	}
 	return rows
 }
 
 func (m Model) promptLine() string {
-	label := " open file: "
+	label := m.t("prompt.open_file")
 	if m.promptNewFile {
-		label = " new file: "
+		label = m.t("prompt.new_file")
 	} else if m.promptNewFolder {
-		label = " new folder: "
+		label = m.t("prompt.new_folder")
 	}
 	line := statusHiStyle.Render(label) + statusStyle.Render(string(m.promptIn)) + cursorStyle.Render(" ")
 	fill := m.width - lipgloss.Width(line)
@@ -506,7 +564,7 @@ func (m Model) promptLine() string {
 }
 
 func (m Model) saveLine() string {
-	line := statusHiStyle.Render(" save as: ") + statusStyle.Render(string(m.promptSaveIn)) + cursorStyle.Render(" ")
+	line := statusHiStyle.Render(m.t("prompt.save_as")) + statusStyle.Render(string(m.promptSaveIn)) + cursorStyle.Render(" ")
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -515,7 +573,7 @@ func (m Model) saveLine() string {
 }
 
 func (m Model) quitLine() string {
-	line := statusHiStyle.Render(" save changes? ") + statusStyle.Render("(Y)es / (N)o / (Esc) Cancel")
+	line := statusHiStyle.Render(m.t("prompt.save_changes")) + statusStyle.Render(m.t("prompt.yes_no"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -524,14 +582,14 @@ func (m Model) quitLine() string {
 }
 
 func (m Model) gitLine() string {
-	line := statusHiStyle.Render(" git commit: ") + statusStyle.Render(string(m.gitCommitIn)) + cursorStyle.Render(" ")
+	line := statusHiStyle.Render(m.t("git.commit_line")) + statusStyle.Render(string(m.gitCommitIn)) + cursorStyle.Render(" ")
 	if m.repo != nil {
 		branch := m.repo.Branch()
 		if branch != "" {
 			line += hintStyle.Render(fmt.Sprintf(" (%s: %s)", branch, m.repo.StatusSummary()))
 		}
 	}
-	line += hintStyle.Render("  (Enter: commit, Esc: close)")
+	line += hintStyle.Render("  " + m.t("git.commit_hint"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -543,13 +601,13 @@ func (m Model) gitStatusLine() string {
 	r := m.repoForCur()
 	var hint string
 	if r == nil {
-		hint = "(i: init repo, esc/q: close)"
+		hint = m.t("git.init_hint")
 	} else {
-		hint = "(space: stage, a: all, c: commit, d: diff, l: log, b: branch, r: refresh, q: close)"
+		hint = m.t("git.hints")
 	}
 	line := ""
 	if r == nil {
-		line = statusHiStyle.Render(" git: ") + statusStyle.Render(" no repository")
+		line = statusHiStyle.Render(" git: ") + statusStyle.Render(m.t("git.no_repo"))
 	} else {
 		summary := r.StatusSummary()
 		staged := 0
@@ -558,15 +616,26 @@ func (m Model) gitStatusLine() string {
 				staged++
 			}
 		}
-		line = statusHiStyle.Render(" git ") +
+		line = statusHiStyle.Render(m.t("git.prefix_status")) +
 			hintStyle.Render("("+r.Branch()+" "+summary+")") +
-			statusStyle.Render(fmt.Sprintf(" %d changed, %d staged", len(m.gitFiles), staged))
+			statusStyle.Render(fmt.Sprintf(" %s", m.t("git.status_count", len(m.gitFiles), staged)))
 	}
-	// The hint must stay visible even on narrow terminals: if the summary
-	// doesn't leave room for it on a single status line, trim the summary.
+	// The hint (keybindings) must stay visible even on narrow terminals: trim the
+	// summary to fit alongside it. If the hint itself is wider than the terminal,
+	// trim the hint too so the summary is not lost entirely.
 	fill := m.width - lipgloss.Width(hint) - lipgloss.Width(line)
 	if fill < 0 {
-		line = statusStyle.Render(fitStatusTail(line, m.width-lipgloss.Width(hint)))
+		if avail := m.width - lipgloss.Width(hint); avail < 4 {
+			if avail < 0 {
+				avail = 0
+			}
+			hint = fitStatusTail(hint, m.width-2)
+		}
+		avail := m.width - lipgloss.Width(hint)
+		if avail < 0 {
+			avail = 0
+		}
+		line = statusStyle.Render(fitStatusTail(line, avail))
 		fill = m.width - lipgloss.Width(hint) - lipgloss.Width(line)
 	}
 	if fill > 0 {
@@ -590,11 +659,11 @@ func fitStatusTail(s string, w int) string {
 func (m Model) gitLogStatusLine() string {
 	var line string
 	if len(m.gitLogEntries) == 0 {
-		line = statusHiStyle.Render(" LOG ") + statusStyle.Render(" no commits")
+		line = statusHiStyle.Render(m.t("git.prefix_log")) + statusStyle.Render(m.t("git.no_commits"))
 	} else {
-		line = statusHiStyle.Render(" LOG ") + hintStyle.Render(fmt.Sprintf("(%d commits)", len(m.gitLogEntries)))
+		line = statusHiStyle.Render(m.t("git.prefix_log")) + hintStyle.Render(m.t("git.commit_count", len(m.gitLogEntries)))
 	}
-	hint := "(j/k: navigate, Tab: diff focus, esc/q: back, r: refresh)"
+	hint := m.t("git.log_hint")
 	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -604,8 +673,8 @@ func (m Model) gitLogStatusLine() string {
 
 func (m Model) gitBranchLine() string {
 	if m.gitBranchNew {
-		line := statusHiStyle.Render(" new branch: ") + statusStyle.Render(string(m.gitBranchIn)) + cursorStyle.Render(" ")
-		line += hintStyle.Render("  (Enter: create, Esc: cancel)")
+		line := statusHiStyle.Render(m.t("git.new_branch_label")) + statusStyle.Render(string(m.gitBranchIn)) + cursorStyle.Render(" ")
+		line += hintStyle.Render("  " + m.t("git.branch_new_hint"))
 		fill := m.width - lipgloss.Width(line)
 		if fill > 0 {
 			line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -614,9 +683,9 @@ func (m Model) gitBranchLine() string {
 	}
 	var line string
 	if r := m.repoForCur(); r != nil {
-		line = statusHiStyle.Render(" BRANCH ") + statusStyle.Render(r.Branch())
+		line = statusHiStyle.Render(m.t("git.prefix_branch")) + statusStyle.Render(r.Branch())
 	}
-	hint := "(j/k: switch, Enter: checkout, n: new branch, esc/q: back, r: refresh)"
+	hint := m.t("git.branch_hint")
 	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -856,18 +925,18 @@ func (m Model) diffBottom() string {
 			deleted++
 		}
 	}
-	hint := " Space stage  c commit  a stage-all  r refresh  d full-diff  l log  Tab diff"
+	hint := m.t("git.diff_hint")
 	if m.gitDiffFocused {
-		hint = " j/k scroll  h/l h-scroll  Tab/Esc back"
+		hint = m.t("git.diff_focus")
 	} else if m.gitMode == gitModeLog {
-		hint = " j/k commits  Tab diff  Esc files  r refresh"
+		hint = m.t("git.log_hint2")
 	}
 	modeTag := ""
 	if m.gitMode == gitModeLog {
-		modeTag = statusHiStyle.Render(" LOG ") + " "
+		modeTag = statusHiStyle.Render(m.t("git.log_tag")) + " "
 	}
-	line := modeTag + statusHiStyle.Render(" diff ") + statusStyle.Render(m.diffPath) +
-		hintStyle.Render(fmt.Sprintf("  +%d ~%d -%d", added, modified, deleted)) +
+	line := modeTag + statusHiStyle.Render(m.t("git.diff_label")) + statusStyle.Render(m.diffPath) +
+		hintStyle.Render(m.t("git.diff_stats", added, modified, deleted)) +
 		hintStyle.Render(hint)
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
@@ -922,11 +991,11 @@ func (m Model) chatPanel(h int) []string {
 
 	model := m.chatModel
 	if model == "" {
-		model = "no model"
+		model = m.t("ai.no_model")
 	}
 	header := statusHiStyle.Render(fmt.Sprintf(" AI · %s ", fitPath(model, w-6)))
 	if m.chatBusy {
-		header += statusStyle.Render(" streaming ")
+		header += statusStyle.Render(m.t("ai.streaming"))
 	}
 	if fill := w - lipgloss.Width(header); fill > 0 {
 		header += statusStyle.Render(strings.Repeat(" ", fill))
@@ -979,7 +1048,7 @@ func (m Model) chatPanel(h int) []string {
 
 func (m Model) conflictLine() string {
 	fname := filepath.Base(m.conflictPath)
-	line := statusHiStyle.Render(" CONFLICT ") + statusStyle.Render(fmt.Sprintf(" File modified on disk: [R]eload / [I]gnore? (%s)", fname))
+	line := statusHiStyle.Render(m.t("conflict.label")) + statusStyle.Render(fmt.Sprintf(m.t("conflict.msg"), fname))
 	if len(m.conflictRows) > 0 {
 		added, modified, deleted := 0, 0, 0
 		for _, dr := range m.conflictRows {
@@ -993,7 +1062,7 @@ func (m Model) conflictLine() string {
 			}
 		}
 		line += hintStyle.Render(fmt.Sprintf("  +%d ~%d -%d", added, modified, deleted))
-		line += hintStyle.Render("  (↑↓ scroll)")
+		line += hintStyle.Render(m.t("conflict.scroll"))
 	}
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
@@ -1003,16 +1072,15 @@ func (m Model) conflictLine() string {
 }
 
 func (m Model) searchLine() string {
-	line := statusHiStyle.Render(" search: ") + statusStyle.Render(string(m.searchQuery)) + cursorStyle.Render(" ")
+	line := statusHiStyle.Render(m.t("search.label")) + statusStyle.Render(string(m.searchQuery)) + cursorStyle.Render(" ")
 	if len(m.searchQuery) > 0 {
 		if m.searchTotalMatches > 0 {
 			line += hintStyle.Render(fmt.Sprintf(" [%d/%d]", m.searchMatchIdx+1, m.searchTotalMatches))
 		} else {
-			line += hintStyle.Render(" [no matches]")
+			line += hintStyle.Render(m.t("search.none"))
 		}
 	}
-	hint := "  (Enter/F3: next, Shift+F3: prev, Esc: close)"
-	line += hintStyle.Render(hint)
+	line += hintStyle.Render(m.t("search.hint"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -1021,14 +1089,14 @@ func (m Model) searchLine() string {
 }
 
 func (m Model) replaceLine() string {
-	findPart := statusHiStyle.Render(" find: ") + statusStyle.Render(string(m.searchQuery))
+	findPart := statusHiStyle.Render(m.t("replace.find")) + statusStyle.Render(string(m.searchQuery))
 	if m.replaceFocusFind {
 		findPart += cursorStyle.Render(" ")
 	} else {
 		findPart += " "
 	}
 
-	repPart := statusHiStyle.Render(" replace: ") + statusStyle.Render(string(m.replaceWith))
+	repPart := statusHiStyle.Render(m.t("replace.with")) + statusStyle.Render(string(m.replaceWith))
 	if !m.replaceFocusFind {
 		repPart += cursorStyle.Render(" ")
 	} else {
@@ -1040,11 +1108,10 @@ func (m Model) replaceLine() string {
 		if m.searchTotalMatches > 0 {
 			line += hintStyle.Render(fmt.Sprintf(" [%d/%d]", m.searchMatchIdx+1, m.searchTotalMatches))
 		} else {
-			line += hintStyle.Render(" [no matches]")
+			line += hintStyle.Render(m.t("search.none"))
 		}
 	}
-	hint := "  (Tab: switch, Enter: replace, Ctrl+A: all, Esc: close)"
-	line += hintStyle.Render(hint)
+	line += hintStyle.Render(m.t("replace.hint"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -1053,9 +1120,8 @@ func (m Model) replaceLine() string {
 }
 
 func (m Model) aiInlinePrompt() string {
-	line := statusHiStyle.Render(" AI instruction: ") + statusStyle.Render(string(m.aiInlineInput)) + cursorStyle.Render(" ")
-	hint := "  (Enter: submit, Esc: cancel)"
-	line += hintStyle.Render(hint)
+	line := statusHiStyle.Render(m.t("ai.instr")) + statusStyle.Render(string(m.aiInlineInput)) + cursorStyle.Render(" ")
+	line += hintStyle.Render(m.t("ai.instr_hint"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -1068,7 +1134,7 @@ func (m Model) aiInlineBusyLine() string {
 	if len(preview) > 60 {
 		preview = preview[:60] + "..."
 	}
-	line := statusHiStyle.Render(" AI thinking... ") + hintStyle.Render(preview)
+	line := statusHiStyle.Render(m.t("ai.thinking")) + hintStyle.Render(preview)
 	hint := "  (Esc to cancel)"
 	line += hintStyle.Render(hint)
 	fill := m.width - lipgloss.Width(line)
@@ -1090,9 +1156,9 @@ func (m Model) aiReviewBottom() string {
 			deleted++
 		}
 	}
-	line := statusHiStyle.Render(" AI diff ") +
+	line := statusHiStyle.Render(m.t("ai.diff")) +
 		hintStyle.Render(fmt.Sprintf("  +%d ~%d -%d", added, modified, deleted)) +
-		hintStyle.Render("  (y: accept, n: reject, ↑↓ scroll)")
+		hintStyle.Render(m.t("ai.review_hint"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -1110,7 +1176,7 @@ func (m Model) finderPanel() []string {
 			rows = append(rows, statusStyle.Render(label))
 		}
 	}
-	line := statusHiStyle.Render(" find file: ") + statusStyle.Render(string(m.finderQ)) + cursorStyle.Render(" ")
+	line := statusHiStyle.Render(m.t("finder.prompt")) + statusStyle.Render(string(m.finderQ)) + cursorStyle.Render(" ")
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -1279,6 +1345,30 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 	return out.String()
 }
 
+func (m Model) langChooserPanel() []string {
+	langs := i18n.Supported()
+	rows := make([]string, 0, len(langs)+1)
+	rows = append(rows, statusHiStyle.Render(m.t("lang.choose")))
+	for i, l := range langs {
+		label := " " + l.Native
+		if l.Code == m.cfg.UI.Lang {
+			label += m.t("lang.current")
+		}
+		label += "  "
+		pad := m.width - lipgloss.Width(label)
+		if pad < 0 {
+			pad = 0
+		}
+		label += strings.Repeat(" ", pad)
+		if i == m.langChooserSel {
+			rows = append(rows, statusHiStyle.Render(label))
+		} else {
+			rows = append(rows, statusStyle.Render(label))
+		}
+	}
+	return rows
+}
+
 func (m Model) palettePanel() []string {
 	const paletteVisible = 8
 	hits := m.filterPalette()
@@ -1295,7 +1385,7 @@ func (m Model) palettePanel() []string {
 	}
 	rows := make([]string, 0, len(displayHits)+1)
 	for i, hit := range displayHits {
-		label := fmt.Sprintf(" %s — %s ", hit.title, hit.desc)
+		label := fmt.Sprintf(" %s — %s ", m.cmdTitle(hit), m.cmdDesc(hit))
 		if m.paletteOffset+i == m.paletteSel {
 			rows = append(rows, statusHiStyle.Render(label))
 		} else {
@@ -1334,7 +1424,7 @@ func (m Model) statusBar() string {
 	if m.msg != "" {
 		mid = statusStyle.Render("  " + m.msg)
 	}
-	right := fmt.Sprintf("Ln %d, Col %d ", t.buf.CurLine()+1, t.buf.Col()+1)
+	right := m.t("status.lncol", t.buf.CurLine()+1, t.buf.Col()+1)
 	fileInfo := ""
 	if t.path != "" {
 		endings := map[string]string{"lf": "LF", "crlf": "CRLF"}
@@ -1343,9 +1433,9 @@ func (m Model) statusBar() string {
 	}
 	hint := ""
 	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiCfgOpen && !m.helpOpen && !m.agentOpen && !m.agentReviewMode {
-		hint = "F1 help "
+		hint = m.t("status.f1_help")
 		if m.layout != splitNone {
-			hint += "F8 pane "
+			hint += m.t("status.f8_pane")
 		}
 	}
 	rightBar := hintStyle.Render(hint) + statusStyle.Render(fileInfo) + statusStyle.Render(right)

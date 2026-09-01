@@ -2,19 +2,25 @@ GO       := go
 GOPROXY  := https://proxy.golang.org,direct
 GOSUMDB  := sum.golang.org
 
-export GOROOT :=
+# Export these so a stale environment (GOROOT in particular) can't interfere.
+# Value-less `export` keeps this file compatible with both GNU make and bmake.
+GOROOT  :=
+export GOROOT
 export GOPROXY
 export GOSUMDB
 
-VERSION  ?= 0.5.2
+VERSION  ?= 0.6.5
 LDFLAGS  := -s -w -X main.version=$(VERSION)
 PREFIX   ?= /usr/local
 
-.DEFAULT_GOAL := help
+BUILD_TARGETS := build-linux-amd64 build-linux-arm64 build-freebsd-amd64 \
+                 build-openbsd-amd64 build-netbsd-amd64 build-darwin-amd64 \
+                 build-darwin-arm64 build-windows-amd64
 
+# help is the first rule, so it is the default target under both make flavors.
 .PHONY: help build test vet run clean dist install install-man
 .PHONY: deb rpm pkg termux win-zip freebsd-port
-.PHONY: $(addprefix build-,$(PLATFORMS))
+.PHONY: $(BUILD_TARGETS)
 
 help: ## Show this help
 	@echo "dmed $(VERSION)"
@@ -22,7 +28,7 @@ help: ## Show this help
 	@echo "Usage: make <target> [OPTIONS]"
 	@echo ""
 	@echo "Targets:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | sort | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Options:"
@@ -93,9 +99,7 @@ build-windows-amd64: ## Build for Windows amd64 (.exe)
 	@mkdir -p $(DISTDIR)
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(DISTDIR)/dmed-windows-amd64.exe .
 
-PLATFORMS := linux-amd64 linux-arm64 freebsd-amd64 openbsd-amd64 netbsd-amd64 darwin-amd64 darwin-arm64 windows-amd64
-
-dist: $(addprefix build-,$(PLATFORMS)) ## Build all platforms
+dist: $(BUILD_TARGETS) ## Build all platforms
 	@echo "Built binaries:"
 	@ls -lh $(DISTDIR)/dmed-*
 

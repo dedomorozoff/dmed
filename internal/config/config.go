@@ -49,6 +49,7 @@ type AIConfig struct {
 type UIConfig struct {
 	TreeWidth    int
 	ChatWidthPct int
+	Lang         string
 }
 
 // Defaults returns the default configuration.
@@ -75,6 +76,7 @@ func Defaults() Config {
 		UI: UIConfig{
 			TreeWidth:    25,
 			ChatWidthPct: 40,
+			Lang:         "en",
 		},
 	}
 }
@@ -107,8 +109,65 @@ func Load(projectRoot string) Config {
 		// Shell is not in Config struct but stored separately in the editor.
 		// This override is handled by the editor.
 	}
+	if v := os.Getenv("DMED_LANG"); v != "" {
+		cfg.UI.Lang = v
+	}
 
 	return cfg
+}
+
+// WriteLang sets the `[ui] lang` value in the INI file at path, preserving all
+// other content. If the file or the [ui] section is missing it is appended.
+func WriteLang(path, lang string) error {
+	data, err := os.ReadFile(path)
+	var lines []string
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err == nil {
+		lines = strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	}
+
+	var out []string
+	inUI := false
+	uiPresent := false
+	wrote := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			name := strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+			inUI = strings.EqualFold(name, "ui")
+			if inUI {
+				uiPresent = true
+			}
+		}
+		if inUI {
+			if idx := strings.IndexByte(line, '='); idx > 0 {
+				if strings.ToLower(strings.TrimSpace(line[:idx])) == "lang" {
+					out = append(out, "lang = "+lang)
+					wrote = true
+					continue
+				}
+			}
+		}
+		out = append(out, line)
+	}
+
+	if !wrote {
+		if !uiPresent {
+			if len(out) > 0 && out[len(out)-1] != "" {
+				out = append(out, "")
+			}
+			out = append(out, "[ui]")
+		}
+		out = append(out, "lang = "+lang)
+	}
+
+	content := strings.Join(out, "\n") + "\n"
+	if len(content) == 1 {
+		content = ""
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
 }
 
 // ConfigPath returns the path to the global config file.
@@ -204,6 +263,9 @@ func loadFile(path string, cfg *Config) {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 80 {
 				cfg.UI.ChatWidthPct = n
 			}
+		}
+		if v, ok := s["lang"]; ok {
+			cfg.UI.Lang = v
 		}
 	}
 }

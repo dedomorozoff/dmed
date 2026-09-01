@@ -170,7 +170,7 @@ func (m *Model) handleAgentPrompt(msg tea.KeyPressMsg) tea.Cmd {
 		m.agentQueue.Enqueue(prompt)
 		m.agentPrompt = false
 		m.agentPromptIn = nil
-		m.msg = "agent task queued"
+		m.msg = m.t("msg.agent_queued")
 	case "backspace":
 		if n := len(m.agentPromptIn); n > 0 {
 			m.agentPromptIn = m.agentPromptIn[:n-1]
@@ -241,7 +241,7 @@ func (m *Model) cancelAgentSel() {
 	}
 	id := tasks[m.agentSel].ID
 	m.agentRunner.Cancel(id)
-	m.msg = "cancelled " + id
+	m.msg = m.t("msg.agent_cancelled", id)
 }
 
 // agentListHeight is how many tasks fit on screen at once.
@@ -337,7 +337,7 @@ func progressBar(p float32, width int) string {
 
 // agentPromptLine renders the bottom input line while entering a new task.
 func (m Model) agentPromptLine() string {
-	line := statusHiStyle.Render(" Agent task: ") + statusStyle.Render(string(m.agentPromptIn)) + cursorStyle.Render(" ")
+	line := statusHiStyle.Render(m.t("agent.task_label")) + statusStyle.Render(string(m.agentPromptIn)) + cursorStyle.Render(" ")
 	hint := "  (Enter: queue, Esc: cancel)"
 	line += hintStyle.Render(hint)
 	fill := m.width - lipgloss.Width(line)
@@ -354,7 +354,7 @@ func (m Model) agentPromptLine() string {
 func (m *Model) startAgentReview(id string) {
 	task := m.agentQueue.Find(id)
 	if task == nil || task.Status != agent.StatusReview || len(task.Changes) == 0 {
-		m.msg = "nothing to review for this task"
+		m.msg = m.t("msg.agent_nothing")
 		return
 	}
 	m.agentReviewMode = true
@@ -458,7 +458,7 @@ func (m *Model) acceptAgentReview() {
 	}
 
 	if err := m.agentApplier.Apply(task.Changes); err != nil {
-		m.msg = "apply failed: " + err.Error()
+		m.msg = m.t("msg.agent_apply_fail", err.Error())
 		m.agentReviewMode = false
 		return
 	}
@@ -468,9 +468,9 @@ func (m *Model) acceptAgentReview() {
 		paths[i] = task.Changes[i].Path
 	}
 	if err := m.agentCommit.Commit(paths, task.Prompt); err != nil {
-		m.msg = "changes applied but commit failed: " + err.Error()
+		m.msg = m.t("msg.agent_commit_fail", err.Error())
 	} else {
-		m.msg = "agent changes applied and committed"
+		m.msg = m.t("msg.agent_applied")
 	}
 
 	m.agentQueue.SetStatus(task.ID, agent.StatusApplied)
@@ -486,7 +486,7 @@ func (m *Model) acceptAgentReview() {
 func (m *Model) rejectAgentReview() {
 	m.agentQueue.SetStatus(m.agentReviewTaskID, agent.StatusDone)
 	m.agentReviewMode = false
-	m.msg = "agent changes discarded"
+	m.msg = m.t("msg.agent_discarded")
 }
 
 // agentReviewBottom renders the status line while reviewing a task's diff.
@@ -513,7 +513,7 @@ func (m Model) agentReviewBottom() string {
 	}
 	line := statusHiStyle.Render(title) +
 		hintStyle.Render(fmt.Sprintf("  +%d ~%d -%d", added, modified, deleted)) +
-		hintStyle.Render("  (y: apply all, n: reject, Tab: next file, ↑↓ scroll)")
+		hintStyle.Render(m.t("agent.review_hint"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
