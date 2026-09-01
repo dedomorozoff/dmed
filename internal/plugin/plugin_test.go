@@ -228,13 +228,39 @@ func TestBundledEmmetExpansion(t *testing.T) {
 	if errs := m.Load(dir); len(errs) > 0 {
 		t.Fatalf("load errors: %v", errs)
 	}
-	h := &emmetHost{lines: []string{"div>ul>li*2"}, cursorL: 0, cursorC: len("div>ul>li*2")}
-	if !m.RunCommand(h, "emmet_expand") {
-		t.Fatalf("emmet_expand command not found; commands=%v", m.Commands())
+
+	cases := []struct{ abbr, want string }{
+		{"div>ul>li*2",
+			"<div>\n  <ul>\n    <li></li>\n    <li></li>\n  </ul>\n</div>"},
+		// A parenthesised group flattens into the parent (no wrapper div).
+		{"div>(a+b)",
+			"<div>\n  <a></a>\n  <b></b>\n</div>"},
+		// Repeating a whole group.
+		{"ul>(li>a)*2",
+			"<ul>\n  <li>\n    <a></a>\n  </li>\n  <li>\n    <a></a>\n  </li>\n</ul>"},
+		// Siblings at the top level.
+		{"h1+p",
+			"<h1></h1>\n<p></p>"},
+		// Classes and id.
+		{"div.wrap#main",
+			`<div id="main" class="wrap"></div>`},
+		// Literal text content.
+		{"a>{Click}",
+			"<a>Click</a>"},
+		// Deep nesting.
+		{"a>b>c",
+			"<a>\n  <b>\n    <c></c>\n  </b>\n</a>"},
 	}
-	want := "<div>\n  <ul>\n    <li></li>\n    <li></li>\n  </ul>\n</div>"
-	if h.inserted != want {
-		t.Fatalf("emmet output=%q want %q", h.inserted, want)
+
+	for _, c := range cases {
+		h := &emmetHost{lines: []string{c.abbr}, cursorL: 0, cursorC: len(c.abbr)}
+		h.inserted = ""
+		if !m.RunCommand(h, "emmet_expand") {
+			t.Fatalf("abbr %q: emmet_expand command not found", c.abbr)
+		}
+		if h.inserted != c.want {
+			t.Errorf("abbr %q:\n got  %q\n want %q", c.abbr, h.inserted, c.want)
+		}
 	}
 }
 
