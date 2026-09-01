@@ -14,8 +14,8 @@ type Cursor struct {
 }
 
 // cursorEdit describes a single replacement at a cursor: replace runes
-// [from,to) of lines[line] with ins (a slice of lines). An empty ins deletes
-// the range. caretLine/caretCol is where the caret should rest afterwards.
+// [from,to) of a line with ins (a slice of lines). An empty ins deletes the
+// range. caretLine/caretCol is where the caret should rest afterwards.
 type cursorEdit struct {
 	line, from, to int
 	ins            [][]rune
@@ -66,10 +66,10 @@ func isWordRune(r rune) bool {
 // WordAt returns the [from,to) word boundaries on the given line containing
 // col, or from==to==col when there is no word there.
 func (b *Buffer) WordAt(line, col int) (from, to int) {
-	if line < 0 || line >= len(b.lines) {
+	if line < 0 || line >= b.d.count() {
 		return col, col
 	}
-	l := b.lines[line]
+	l := b.d.lineAt(line)
 	from, to = col, col
 	for from > 0 && isWordRune(l[from-1]) {
 		from--
@@ -87,8 +87,8 @@ func (b *Buffer) NextOccurrence(afterLine, afterCol int, word []rune) (int, int,
 		return 0, 0, false
 	}
 	w := string(word)
-	for ln := afterLine; ln < len(b.lines); ln++ {
-		str := string(b.lines[ln])
+	for ln := afterLine; ln < b.d.count(); ln++ {
+		str := string(b.d.lineAt(ln))
 		start := 0
 		if ln == afterLine {
 			start = afterCol + 1
@@ -109,11 +109,11 @@ func (b *Buffer) currentWord() []rune {
 	if b.HasSelection() {
 		sl, sc, el, ec := b.SelectionRange()
 		if sl == el {
-			return append([]rune(nil), b.lines[sl][sc:ec]...)
+			return append([]rune(nil), b.d.lineAt(sl)[sc:ec]...)
 		}
 	}
 	f, t := b.WordAt(b.line, b.col)
-	return append([]rune(nil), b.lines[b.line][f:t]...)
+	return append([]rune(nil), b.d.lineAt(b.line)[f:t]...)
 }
 
 // AddNextOccurrence implements Alt+D: the first call selects the word under
@@ -125,7 +125,7 @@ func (b *Buffer) AddNextOccurrence() bool {
 		if f == t {
 			return false
 		}
-		b.word = string(b.lines[b.line][f:t])
+		b.word = string(b.d.lineAt(b.line)[f:t])
 		// Select the word at the main cursor.
 		b.hasSelection = true
 		b.selLine, b.selCol = b.line, f
@@ -138,8 +138,6 @@ func (b *Buffer) AddNextOccurrence() bool {
 		last := b.cursors[len(b.cursors)-1]
 		lastLine, lastCol = last.Line, last.Col
 	}
-	// The original word (where multi mode was armed) sits at the main
-	// selection; reaching it again means we have wrapped fully around.
 	originLine, originCol := b.selLine, b.selCol
 	stoppedAtOrigin := func(ln, col int) bool {
 		return ln == originLine && col == originCol
@@ -147,14 +145,11 @@ func (b *Buffer) AddNextOccurrence() bool {
 
 	ln, col, ok := b.NextOccurrence(lastLine, lastCol, []rune(b.word))
 	if !ok {
-		// Wrap around from the top; stop once we reach a position that already
-		// holds a cursor or the original word so Alt+D terminates.
 		ln, col, ok = b.NextOccurrence(0, -1, []rune(b.word))
 		if !ok || b.cursorAt(ln, col) || stoppedAtOrigin(ln, col) {
 			return false
 		}
 	} else {
-		// Skip positions that already hold a cursor.
 		for b.cursorAt(ln, col) || stoppedAtOrigin(ln, col) {
 			ln, col, ok = b.NextOccurrence(ln, col, []rune(b.word))
 			if !ok {
@@ -215,7 +210,7 @@ func (b *Buffer) setFromPoints(pts []Cursor) {
 	}
 }
 
-// buildEdits converts edit points into insert edits (replacing any selection).
+// buildInsertEdits converts edit points into insert edits (replacing any selection).
 func buildInsertEdits(pts []Cursor, ins [][]rune) []cursorEdit {
 	edits := make([]cursorEdit, len(pts))
 	for i, p := range pts {
@@ -232,10 +227,9 @@ func buildInsertEdits(pts []Cursor, ins [][]rune) []cursorEdit {
 	return edits
 }
 
-// multiApply applies edits bottom-up, correcting carets for same-line edits.
-// Edits are expected not to split lines (single-line insertions/deletions).
-func (b *Buffer) multiApplyNoSplit(edits []cursorEdit) []Cursor {
-	// Group edits by line.
+// applyNoSplit applies single-line edits to a flat line slice, bottom-up,
+// correcting carets for same-line edits. Edits are expected not to split lines.
+func applyNoSplit(mat [][]rune, edits []cursorEdit) []Cursor {
 	byLine := map[int][]cursorEdit{}
 	var lines []int
 	for _, e := range edits {
@@ -246,14 +240,10 @@ func (b *Buffer) multiApplyNoSplit(edits []cursorEdit) []Cursor {
 	}
 	sort.Sort(sort.Reverse(sort.IntSlice(lines)))
 
-	// A caret offset per line to track same-line shifts.
-	lineShift := map[int]int{}
-
 	for _, ln := range lines {
 		es := byLine[ln]
-		// Sort by from ascending so edits are applied left-to-right.
 		sort.SliceStable(es, func(i, j int) bool { return es[i].from < es[j].from })
-		cur := b.lines[ln]
+		cur := mat[ln]
 		var out []rune
 		pos := 0
 		shift := 0
@@ -280,11 +270,9 @@ func (b *Buffer) multiApplyNoSplit(edits []cursorEdit) []Cursor {
 			pos = e.to
 		}
 		out = append(out, cur[pos:]...)
-		b.lines[ln] = out
-		lineShift[ln] = shift
+		mat[ln] = out
 	}
 
-	// Apply the accumulated line shift to carets for edits sharing a line.
 	res := make([]Cursor, len(edits))
 	for i, e := range edits {
 		res[i] = Cursor{Line: e.caretLine, Col: e.caretCol}
@@ -309,7 +297,9 @@ func (b *Buffer) MultiInsertText(text string) {
 		ins[i] = []rune(l)
 	}
 	edits := buildInsertEdits(pts, ins)
-	res := b.multiApplyNoSplit(edits)
+	mat := b.linesCopy()
+	res := applyNoSplit(mat, edits)
+	b.setLines(mat)
 	b.setFromPoints(res)
 }
 
@@ -332,7 +322,6 @@ func (b *Buffer) MultiNewline() {
 	b.pushUndo()
 
 	pts := b.allPoints()
-	// Bottom-up so line-splitting below doesn't disturb upper cursors.
 	idxs := make([]int, len(pts))
 	for i := range idxs {
 		idxs[i] = i
@@ -345,19 +334,19 @@ func (b *Buffer) MultiNewline() {
 		return a.Col > bb.Col
 	})
 
+	mat := b.linesCopy()
 	res := make([]Cursor, len(pts))
-	placed := map[int]bool{}
 	for _, ii := range idxs {
 		p := pts[ii]
-		l := b.lines[p.Line]
+		l := mat[p.Line]
 		rest := append([]rune(nil), l[p.From:]...)
-		b.lines[p.Line] = l[:p.From:p.From]
-		b.lines = append(b.lines, nil)
-		copy(b.lines[p.Line+2:], b.lines[p.Line+1:])
-		b.lines[p.Line+1] = rest
+		mat[p.Line] = l[:p.From:p.From]
+		mat = append(mat, nil)
+		copy(mat[p.Line+2:], mat[p.Line+1:])
+		mat[p.Line+1] = rest
 		res[ii] = Cursor{Line: p.Line + 1, Col: 0}
-		placed[ii] = true
 	}
+	b.setLines(mat)
 	b.setFromPoints(res)
 }
 
@@ -383,9 +372,9 @@ func (b *Buffer) MultiBackspace() {
 		}
 	}
 
+	mat := b.linesCopy()
 	if len(edits) > 0 {
-		res := b.multiApplyNoSplit(edits)
-		// Map results back into join-less cursors and merge with joins.
+		res := applyNoSplit(mat, edits)
 		bi := 0
 		out := make([]Cursor, 0, len(pts))
 		for _, p := range pts {
@@ -396,27 +385,27 @@ func (b *Buffer) MultiBackspace() {
 				out = append(out, Cursor{Line: p.Line, Col: 0})
 			}
 		}
-		// Process joins bottom-up.
 		for j := len(joins) - 1; j >= 0; j-- {
 			L := joins[j].Line
-			if L <= 0 || L >= len(b.lines) {
+			if L <= 0 || L >= len(mat) {
 				continue
 			}
-			merged := append(append([]rune(nil), b.lines[L-1]...), b.lines[L]...)
-			caretCol := len(b.lines[L-1])
-			b.lines[L-1] = merged
-			b.lines = append(b.lines[:L], b.lines[L+1:]...)
+			merged := append(append([]rune(nil), mat[L-1]...), mat[L]...)
+			caretCol := len(mat[L-1])
+			mat[L-1] = merged
+			mat = append(mat[:L], mat[L+1:]...)
 			for k := range out {
 				if out[k].Line == L {
 					out[k] = Cursor{Line: L - 1, Col: caretCol}
 				}
 			}
 		}
+		b.setLines(mat)
 		b.setFromPoints(out)
 		return
 	}
 
-	// Only joins.
+	b.setLines(mat)
 	b.setFromPoints(pts)
 }
 
@@ -433,47 +422,50 @@ func (b *Buffer) MultiDelete() {
 	var edits []cursorEdit
 	joins := []Cursor{} // cursors at EOL needing a line join
 	for _, p := range pts {
-		l := b.lines[p.Line]
+		l := b.lineLen(p.Line)
 		if p.From != p.To {
 			edits = append(edits, cursorEdit{line: p.Line, from: p.From, to: p.To, caretLine: p.Line, caretCol: p.From})
-		} else if p.Col < len(l) {
+		} else if p.Col < l {
 			edits = append(edits, cursorEdit{line: p.Line, from: p.Col, to: p.Col + 1, caretLine: p.Line, caretCol: p.Col})
-		} else if p.Line < len(b.lines)-1 {
-			joins = append(joins, Cursor{Line: p.Line, Col: len(l)})
+		} else if p.Line < b.d.count()-1 {
+			joins = append(joins, Cursor{Line: p.Line, Col: l})
 		}
 	}
 
+	mat := b.linesCopy()
 	if len(edits) > 0 {
-		res := b.multiApplyNoSplit(edits)
+		res := applyNoSplit(mat, edits)
 		bi := 0
 		out := make([]Cursor, 0, len(pts))
 		for _, p := range pts {
-			l := b.lines[p.Line]
-			if p.From != p.To || p.Col < len(l) {
+			l := b.lineLen(p.Line)
+			if p.From != p.To || p.Col < l {
 				out = append(out, res[bi])
 				bi++
-			} else if p.Line < len(b.lines)-1 {
-				out = append(out, Cursor{Line: p.Line, Col: len(l)})
+			} else if p.Line < b.d.count()-1 {
+				out = append(out, Cursor{Line: p.Line, Col: l})
 			}
 		}
 		for j := len(joins) - 1; j >= 0; j-- {
 			L := joins[j].Line
-			if L < 0 || L >= len(b.lines)-1 {
+			if L < 0 || L >= len(mat)-1 {
 				continue
 			}
-			next := b.lines[L+1]
-			merged := append(append([]rune(nil), b.lines[L]...), next...)
-			b.lines[L] = merged
-			b.lines = append(b.lines[:L+1], b.lines[L+2:]...)
+			next := mat[L+1]
+			merged := append(append([]rune(nil), mat[L]...), next...)
+			mat[L] = merged
+			mat = append(mat[:L+1], mat[L+2:]...)
 			for k := range out {
 				if out[k].Line == L {
 					out[k] = Cursor{Line: L, Col: out[k].Col}
 				}
 			}
 		}
+		b.setLines(mat)
 		b.setFromPoints(out)
 		return
 	}
+	b.setLines(mat)
 	b.setFromPoints(pts)
 }
 
@@ -488,7 +480,7 @@ func (b *Buffer) MoveAllLeft() {
 			c.Col--
 		} else if c.Line > 0 {
 			c.Line--
-			c.Col = len(b.lines[c.Line])
+			c.Col = b.lineLen(c.Line)
 		}
 		c.From, c.To = c.Col, c.Col
 		return c
@@ -503,9 +495,9 @@ func (b *Buffer) MoveAllRight() {
 		return
 	}
 	b.moveExtras(func(c Cursor) Cursor {
-		if c.Col < len(b.lines[c.Line]) {
+		if c.Col < b.lineLen(c.Line) {
 			c.Col++
-		} else if c.Line < len(b.lines)-1 {
+		} else if c.Line < b.d.count()-1 {
 			c.Line++
 			c.Col = 0
 		}
@@ -524,8 +516,8 @@ func (b *Buffer) MoveAllUp() {
 	b.moveExtras(func(c Cursor) Cursor {
 		if c.Line > 0 {
 			c.Line--
-			if c.Col > len(b.lines[c.Line]) {
-				c.Col = len(b.lines[c.Line])
+			if c.Col > b.lineLen(c.Line) {
+				c.Col = b.lineLen(c.Line)
 			}
 		}
 		c.From, c.To = c.Col, c.Col
@@ -541,10 +533,10 @@ func (b *Buffer) MoveAllDown() {
 		return
 	}
 	b.moveExtras(func(c Cursor) Cursor {
-		if c.Line < len(b.lines)-1 {
+		if c.Line < b.d.count()-1 {
 			c.Line++
-			if c.Col > len(b.lines[c.Line]) {
-				c.Col = len(b.lines[c.Line])
+			if c.Col > b.lineLen(c.Line) {
+				c.Col = b.lineLen(c.Line)
 			}
 		}
 		c.From, c.To = c.Col, c.Col
