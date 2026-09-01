@@ -166,6 +166,16 @@ var enCatalog = map[string]string{
 	"ai.streaming":    " streaming ",
 	"finder.prompt":   " find file: ",
 
+	// Agent panel
+	"msg.agent_queued":      "agent task queued",
+	"msg.agent_cancelled":   "cancelled %s",
+	"agent.task_label":      " Agent task: ",
+	"msg.agent_nothing":     "nothing to review for this task",
+	"msg.agent_apply_fail":  "apply failed: %s",
+	"msg.agent_commit_fail": "changes applied but commit failed: %s",
+	"msg.agent_applied":     "agent changes applied and committed",
+	"msg.agent_discarded":   "agent changes discarded",
+
 	// Help panel
 	"help.title":             "dmed — keys",
 	"help.close_hint":        "(F1/Esc closes)",
@@ -309,6 +319,16 @@ var ruCatalog = map[string]string{
 	"ai.no_model":     "нет модели",
 	"ai.streaming":    " стриминг ",
 	"finder.prompt":   " найти файл: ",
+
+	// Agent panel
+	"msg.agent_queued":      "задача агента поставлена в очередь",
+	"msg.agent_cancelled":   "отменено %s",
+	"agent.task_label":      " Задача агента: ",
+	"msg.agent_nothing":     "нечего просматривать для этой задачи",
+	"msg.agent_apply_fail":  "ошибка применения: %s",
+	"msg.agent_commit_fail": "изменения применены, но коммит не удался: %s",
+	"msg.agent_applied":     "изменения агента применены и закоммичены",
+	"msg.agent_discarded":   "изменения агента отклонены",
 
 	// Help panel
 	"help.title":             "dmed — клавиши",
