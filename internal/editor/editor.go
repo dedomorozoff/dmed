@@ -245,6 +245,10 @@ type Model struct {
 	paletteOffset int
 	clipboard     string
 
+	// Language chooser
+	langChooserOpen bool
+	langChooserSel  int
+
 	// Right-side AI chat panel (local Ollama)
 	chatOpen   bool
 	chatFocus  bool
@@ -1093,6 +1097,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.helpOpen {
 		return m.handleHelp(msg)
 	}
+	if m.langChooserOpen {
+		return m.handleLangChooser(msg)
+	}
 	if m.promptOpen {
 		return m.handlePrompt(msg)
 	}
@@ -1668,13 +1675,34 @@ func (m *Model) setLang(lang string) {
 	m.msg = m.t("msg.lang_set", lang)
 }
 
-// toggleLang flips the interface language between English and Russian.
-func (m *Model) toggleLang() {
-	if i18n.Resolve(m.cfg.UI.Lang) == i18n.Ru {
-		m.setLang(string(i18n.En))
-	} else {
-		m.setLang(string(i18n.Ru))
+// openLangChooser opens the language selection list.
+func (m *Model) openLangChooser() {
+	m.langChooserOpen = true
+	m.langChooserSel = 0
+	m.paletteOpen = false
+}
+
+// handleLangChooser handles keys while the language chooser is open.
+func (m *Model) handleLangChooser(msg tea.KeyPressMsg) tea.Cmd {
+	langs := i18n.Supported()
+	switch msg.String() {
+	case "esc":
+		m.langChooserOpen = false
+	case "enter":
+		if m.langChooserSel >= 0 && m.langChooserSel < len(langs) {
+			m.setLang(langs[m.langChooserSel].Code)
+		}
+		m.langChooserOpen = false
+	case "up", "k":
+		if len(langs) > 0 {
+			m.langChooserSel = (m.langChooserSel - 1 + len(langs)) % len(langs)
+		}
+	case "down", "j":
+		if len(langs) > 0 {
+			m.langChooserSel = (m.langChooserSel + 1) % len(langs)
+		}
 	}
+	return nil
 }
 
 // restoreCursors applies saved per-file cursor positions to the just-opened

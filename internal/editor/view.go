@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"dmed/internal/i18n"
 	"dmed/internal/syntax"
 	"dmed/internal/vcs"
 )
@@ -212,6 +213,9 @@ func (m Model) View() tea.View {
 	if m.paletteOpen {
 		rows = append(rows, m.palettePanel()...)
 	}
+	if m.langChooserOpen {
+		rows = append(rows, m.langChooserPanel()...)
+	}
 	if m.termOpen {
 		rows = append(rows, m.terminalPanel()...)
 	}
@@ -222,7 +226,7 @@ func (m Model) View() tea.View {
 	v.MouseMode = tea.MouseModeCellMotion
 
 	// Terminal cursor: positioned at the editor cursor location.
-	if !m.gitOpen && !m.agentOpen && !m.agentReviewMode && !m.paletteOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
+	if !m.gitOpen && !m.agentOpen && !m.agentReviewMode && !m.paletteOpen && !m.langChooserOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
 		cx, cy := m.cursorScreenPos()
 		v.Cursor = tea.NewCursor(cx, cy)
 	}
@@ -1285,6 +1289,30 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 	}
 
 	return out.String()
+}
+
+func (m Model) langChooserPanel() []string {
+	langs := i18n.Supported()
+	rows := make([]string, 0, len(langs)+1)
+	rows = append(rows, statusHiStyle.Render(m.t("lang.choose")))
+	for i, l := range langs {
+		label := " " + l.Native
+		if l.Code == m.cfg.UI.Lang {
+			label += m.t("lang.current")
+		}
+		label += "  "
+		pad := m.width - lipgloss.Width(label)
+		if pad < 0 {
+			pad = 0
+		}
+		label += strings.Repeat(" ", pad)
+		if i == m.langChooserSel {
+			rows = append(rows, statusHiStyle.Render(label))
+		} else {
+			rows = append(rows, statusStyle.Render(label))
+		}
+	}
+	return rows
 }
 
 func (m Model) palettePanel() []string {

@@ -213,6 +213,12 @@ func TestPaletteSwitchLanguage(t *testing.T) {
 		t.Fatalf("expected 'lang_select' hit, got: %+v", hits)
 	}
 	m.paletteSel = 0
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // opens the language chooser
+	if !m.langChooserOpen {
+		t.Fatal("language chooser must open")
+	}
+	// Navigate down to Русский and select it.
+	m = press(m, tea.KeyPressMsg{Text: "j"})
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if got := m.tr.Lang(); got != i18n.Ru {

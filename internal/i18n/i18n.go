@@ -18,6 +18,22 @@ const (
 	Ru Lang = "ru"
 )
 
+// LangInfo describes one selectable interface language.
+type LangInfo struct {
+	Code   string // value stored in config ([ui] lang)
+	Native string // display name in its own language
+}
+
+// Supported returns every interface language dmed offers, in display order.
+// Adding a new language means appending one entry here and providing a catalog
+// (see ruCatalog) plus its keys in Resolve.
+func Supported() []LangInfo {
+	return []LangInfo{
+		{Code: "en", Native: "English"},
+		{Code: "ru", Native: "Русский"},
+	}
+}
+
 // Resolve maps a config value to a supported language, defaulting to English.
 func Resolve(name string) Lang {
 	switch strings.ToLower(strings.TrimSpace(name)) {
@@ -196,7 +212,11 @@ var enCatalog = map[string]string{
 	"cmd.settings_t": "Settings: Open Config", "cmd.settings_d": "Open .dmed.conf for editing",
 	"cmd.help_t": "Help: Show Keybindings", "cmd.help_d": "F1 / Ctrl+E — Help panel",
 	"cmd.quit_t": "App: Quit Editor", "cmd.quit_d": "Ctrl+Q — Exit",
-	"cmd.lang_select_t": "Language: Select...", "cmd.lang_select_d": "Toggle interface language (EN/RU)",
+	"cmd.lang_select_t": "Language: Select...", "cmd.lang_select_d": "Choose interface language",
+
+	// Language chooser
+	"lang.choose":  " Select language: ",
+	"lang.current": " (current)",
 
 	// Misc
 	"msg.lang_set": "language set to %s",
@@ -392,7 +412,11 @@ var ruCatalog = map[string]string{
 	"cmd.settings_t": "Настройки: Открыть конфиг", "cmd.settings_d": "Открыть .dmed.conf для редактирования",
 	"cmd.help_t": "Справка: Клавиши", "cmd.help_d": "F1 / Ctrl+E — панель справки",
 	"cmd.quit_t": "Приложение: Выйти", "cmd.quit_d": "Ctrl+Q — выход",
-	"cmd.lang_select_t": "Язык: Выбрать...", "cmd.lang_select_d": "Переключить язык интерфейса (EN/RU)",
+	"cmd.lang_select_t": "Язык: Выбрать...", "cmd.lang_select_d": "Выбрать язык интерфейса",
+
+	// Language chooser
+	"lang.choose":  " Выберите язык: ",
+	"lang.current": " (текущий)",
 
 	// Misc
 	"msg.lang_set": "язык установлен: %s",
