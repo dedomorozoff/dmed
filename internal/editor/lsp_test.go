@@ -30,6 +30,33 @@ func TestLSPServerFor(t *testing.T) {
 	}
 }
 
+func TestLSPInstallFor(t *testing.T) {
+	for bin, want := range map[string]string{
+		"gopls":                      "go install golang.org/x/tools/gopls@latest",
+		"pyright-langserver":         "npm i -g pyright",
+		"typescript-language-server": "npm i -g typescript-language-server typescript",
+		"solargraph":                 "gem install solargraph",
+		"yaml-language-server":       "npm i -g yaml-language-server",
+	} {
+		if got := lspInstallFor(bin); got != want {
+			t.Errorf("lspInstallFor(%q)=%q want %q", bin, got, want)
+		}
+	}
+	if got := lspInstallFor("no-such-server"); got != "" {
+		t.Errorf("lspInstallFor(unknown)=%q want empty", got)
+	}
+}
+
+func TestLSPMissingHintUnsupported(t *testing.T) {
+	// Extensions without an LSP server never produce a hint.
+	if got := lspMissingHint("readme.txt"); got != "" {
+		t.Fatalf("lspMissingHint(.txt)=%q want empty", got)
+	}
+	if got := lspMissingHint("noext"); got != "" {
+		t.Fatalf("lspMissingHint(noext)=%q want empty", got)
+	}
+}
+
 func TestMergeLSPCompletion(t *testing.T) {
 	dir := t.TempDir()
 	f := writeTemp(t, dir, "c.txt", "alpha beta\n")

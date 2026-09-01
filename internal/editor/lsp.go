@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -71,6 +72,47 @@ func lspServerFor(ext string) (cmd string, args []string, langID string) {
 		return "vscode-html-languageserver", []string{"--stdio"}, "html"
 	}
 	return "", nil, ""
+}
+
+// lspInstallFor returns the command that installs the given LSP server binary,
+// or "" if there's no known way to install it.
+func lspInstallFor(bin string) string {
+	switch bin {
+	case "gopls":
+		return "go install golang.org/x/tools/gopls@latest"
+	case "pyright-langserver":
+		return "npm i -g pyright"
+	case "typescript-language-server":
+		return "npm i -g typescript-language-server typescript"
+	case "rust-analyzer":
+		return "rustup component add rust-analyzer"
+	case "solargraph":
+		return "gem install solargraph"
+	case "intelephense":
+		return "npm i -g intelephense"
+	case "vscode-json-languageserver", "vscode-css-languageserver", "vscode-html-languageserver":
+		return "npm i -g vscode-langservers-extracted"
+	case "yaml-language-server":
+		return "npm i -g yaml-language-server"
+	}
+	return ""
+}
+
+// lspMissingHint returns an install hint for path if its language uses an LSP
+// server that isn't on PATH, or "" otherwise. When a known install command
+// exists it is included so the user can run it (e.g. in the built-in terminal).
+func lspMissingHint(path string) string {
+	cmd, _, _ := lspServerFor(strings.ToLower(filepath.Ext(path)))
+	if cmd == "" {
+		return ""
+	}
+	if _, err := exec.LookPath(cmd); err == nil {
+		return ""
+	}
+	if inst := lspInstallFor(cmd); inst != "" {
+		return fmt.Sprintf("%s — %s", cmd, inst)
+	}
+	return cmd
 }
 
 // ensureLSP starts a language server for the current file if supported and the

@@ -476,6 +476,12 @@ func (m *Model) openPath(rawPath string) {
 	if m.plugins != nil {
 		m.plugins.Emit(m, "file_open")
 	}
+	// Hint when this file's language needs an LSP server that isn't installed.
+	if err == nil {
+		if hint := lspMissingHint(t.path); hint != "" {
+			m.msg = m.t("msg.lsp_missing", hint)
+		}
+	}
 }
 
 func (m *Model) switchTab(d int) {
