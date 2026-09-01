@@ -124,13 +124,15 @@
 - [x] LSP клиент (`internal/lsp`): JSON-RPC 2.0 over stdin/stdout, диагностика,
       `Definition`, `DidOpen`/`DidChange` (интеграция с `gopls`/`pyright`)
 - [x] Автодополнение: попап (`Ctrl+Space`, авто-триггер), источники — слова из
-      буфера + LSP (`gopls`/`pyright`), асинхронно, с fallback на слова.
-      Осталось: доки и больше языков/событий.
-- [ ] Плагины/скрипты
+      буфера + LSP (gopls/pyright/typescript/rust-analyzer/clangd/lua/ruby/php/
+      zls/json/yaml/css/html), асинхронно, с fallback на слова. Доки в
+      `docs/AUTOCOMPLETION.md`. Диагностика LSP выводится в gutter.
+- [x] Плагины/скрипты
       — Lua-фреймворк (`internal/plugin`, gopher-lua): `.lua` в
       `~/.dmed/plugins` и `<проект>/.dmed/plugins`, API `dmed.*`
       (on_key/command/on + text/set_text/cursor/insert/status/save).
-      Осталось: доки, авто-перезагрузка плагинов, больше событий/API.
+      Авто-перезагрузка при изменении `.lua` на диске. Доки в
+      `docs/PLUGINS.md`. Осталось: больше событий/API.
 - [x] Конфигурация (`.dmed.conf` INI): tab_width, syntax_theme, line_numbers,
       skipped_dirs, model, ollama_url, system_prompt, context_max,
       tree_width, chat_width_pct. `Settings: Open Config` в палитре,
