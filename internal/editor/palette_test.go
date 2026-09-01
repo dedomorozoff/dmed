@@ -207,10 +207,10 @@ func TestPaletteSwitchLanguage(t *testing.T) {
 	m.startPalette()
 	// Palette input normalizes Cyrillic to QWERTY, so filter by the Latin
 	// description word.
-	m = typeStr(m, "Russian")
+	m = typeStr(m, "language")
 	hits := m.filterPalette()
-	if len(hits) != 1 || hits[0].id != "lang_ru" {
-		t.Fatalf("expected single 'lang_ru' hit, got: %+v", hits)
+	if len(hits) == 0 || hits[0].id != "lang_select" {
+		t.Fatalf("expected 'lang_select' hit, got: %+v", hits)
 	}
 	m.paletteSel = 0
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})

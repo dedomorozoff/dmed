@@ -196,8 +196,7 @@ var enCatalog = map[string]string{
 	"cmd.settings_t": "Settings: Open Config", "cmd.settings_d": "Open .dmed.conf for editing",
 	"cmd.help_t": "Help: Show Keybindings", "cmd.help_d": "F1 / Ctrl+E — Help panel",
 	"cmd.quit_t": "App: Quit Editor", "cmd.quit_d": "Ctrl+Q — Exit",
-	"cmd.lang_en_t": "Language: English", "cmd.lang_en_d": "Switch UI language to English",
-	"cmd.lang_ru_t": "Language: Русский", "cmd.lang_ru_d": "Switch UI language to Russian",
+	"cmd.lang_select_t": "Language: Select...", "cmd.lang_select_d": "Toggle interface language (EN/RU)",
 
 	// Misc
 	"msg.lang_set": "language set to %s",
@@ -393,8 +392,7 @@ var ruCatalog = map[string]string{
 	"cmd.settings_t": "Настройки: Открыть конфиг", "cmd.settings_d": "Открыть .dmed.conf для редактирования",
 	"cmd.help_t": "Справка: Клавиши", "cmd.help_d": "F1 / Ctrl+E — панель справки",
 	"cmd.quit_t": "Приложение: Выйти", "cmd.quit_d": "Ctrl+Q — выход",
-	"cmd.lang_en_t": "Язык: Английский", "cmd.lang_en_d": "Переключить интерфейс на английский",
-	"cmd.lang_ru_t": "Язык: Русский", "cmd.lang_ru_d": "Переключить интерфейс на русский",
+	"cmd.lang_select_t": "Язык: Выбрать...", "cmd.lang_select_d": "Переключить язык интерфейса (EN/RU)",
 
 	// Misc
 	"msg.lang_set": "язык установлен: %s",

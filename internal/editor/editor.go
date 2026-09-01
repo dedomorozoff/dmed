@@ -1668,6 +1668,15 @@ func (m *Model) setLang(lang string) {
 	m.msg = m.t("msg.lang_set", lang)
 }
 
+// toggleLang flips the interface language between English and Russian.
+func (m *Model) toggleLang() {
+	if i18n.Resolve(m.cfg.UI.Lang) == i18n.Ru {
+		m.setLang(string(i18n.En))
+	} else {
+		m.setLang(string(i18n.Ru))
+	}
+}
+
 // restoreCursors applies saved per-file cursor positions to the just-opened
 // tabs. Positions are clamped by SetCursor, so stale values are harmless.
 func (m *Model) restoreCursors(cursors map[string]session.CursorPos) {
