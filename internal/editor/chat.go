@@ -118,6 +118,12 @@ func (m *Model) pickChatModel() {
 		m.msg = "no models available"
 	default:
 		m.chatModel = models[0]
+		m.ai = ai.NewProvider(ai.Config{
+			Type:   ai.ProviderType(m.cfg.AI.Provider),
+			URL:    m.cfg.AI.OllamaURL,
+			Model:  m.chatModel,
+			APIKey: m.cfg.AI.APIKey,
+		})
 	}
 }
 
@@ -129,6 +135,7 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 		m.msg = ""
 	case "enter":
 		m.chatSubmit()
+		return waitForChatOutput(m.chatCh)
 	case "backspace":
 		if n := len(m.chatIn); n > 0 {
 			m.chatIn = m.chatIn[:n-1]

@@ -1014,6 +1014,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	// Normalize Russian ЙЦУКЕН → English QWERTY for layout-independent keys.
 	// Use []rune so multi-byte UTF-8 (Cyrillic) inputs don't leave trailing NULs.
+	origText := msg.Text
 	if src := []rune(msg.Text); len(src) > 0 {
 		nr := make([]rune, len(src))
 		for i, r := range src {
@@ -1022,6 +1023,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		msg = tea.KeyPressMsg{Code: nr[0], Text: string(nr), Mod: msg.Mod}
 	}
 	s := msg.String()
+	// Restore original text so text-input handlers (chat, search, prompt,
+	// etc.) receive the actual typed characters instead of the normalized
+	// English equivalents used only for keybinding matching.
+	msg.Text = origText
 
 	// While the completion popup is open, navigation keys control it.
 	if m.complOpen && m.handleCompletionKey(s) {
