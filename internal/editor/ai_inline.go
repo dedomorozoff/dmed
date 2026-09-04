@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"dmed/internal/ai"
+	"dmed/internal/buffer"
 	"dmed/internal/vcs"
 )
 
@@ -108,7 +109,21 @@ func (m *Model) submitInlineRequest() {
 		"Return ONLY the modified code that follows the instruction. " +
 		"No explanations, no markdown fences, no extra text — just the raw modified code."
 
+	// Add surrounding context lines so the AI understands the local code.
+	tb := m.cur().buf
+	ctxBefore, ctxAfter := surroundingContext(tb, m.aiInlineSelStart[0], m.aiInlineSelEnd[0])
+
 	userMsg := "Text:\n```\n" + m.aiInlineOriginal + "\n```\n\nInstruction: " + instruction
+	if ctxBefore != "" || ctxAfter != "" {
+		userMsg += "\n\nSurrounding context:\n"
+		if ctxBefore != "" {
+			userMsg += "...\n" + ctxBefore + "\n"
+		}
+		userMsg += "[BEGIN selected/replaced region]"
+		if ctxAfter != "" {
+			userMsg += "\n" + ctxAfter + "\n..."
+		}
+	}
 
 	msgs := []ai.Message{
 		{Role: "system", Content: systemPrompt},
@@ -263,4 +278,23 @@ func (m *Model) applyInlineProposal() {
 	m.aiReviewRows = nil
 	m.aiReviewLeft = nil
 	m.aiReviewRight = nil
+}
+
+// surroundingContext returns up to 3 lines before startLine and up to 3 lines
+// after endLine for inline AI context. Empty strings mean no context available.
+func surroundingContext(b *buffer.Buffer, startLine, endLine int) (before, after string) {
+	const ctx = 3
+	var pre []string
+	for i := startLine - ctx; i < startLine; i++ {
+		if i >= 0 && i < b.LineCount() {
+			pre = append(pre, string(b.LineAt(i)))
+		}
+	}
+	var post []string
+	for i := endLine + 1; i <= endLine+ctx; i++ {
+		if i < b.LineCount() {
+			post = append(post, string(b.LineAt(i)))
+		}
+	}
+	return strings.Join(pre, "\n"), strings.Join(post, "\n")
 }

@@ -286,6 +286,7 @@ type Model struct {
 	ai         ai.Provider
 	chatCh     <-chan chatEvent
 	chatCancel context.CancelFunc
+	chatToolRound int // remaining tool loop iterations for the current turn
 
 	// Inline AI request (Ctrl+I)
 	aiInlineOpen     bool
@@ -303,6 +304,14 @@ type Model struct {
 	aiReviewRight    []string
 	aiReviewOffY     int
 	aiReviewOffX     int
+
+	// Ghost text (Copilot-style inline suggestions)
+	ghostLines   []string // lines of ghost suggestion
+	ghostCol     int      // column where ghost starts
+	ghostRow     int      // line where ghost starts
+	ghostVisible bool     // whether ghost overlay is active
+	ghostCh      <-chan chatEvent
+	ghostText    string // accumulated text during streaming
 
 	quitConfirm bool
 	quitTab     bool // true if confirming close of a single tab (not quit)
@@ -914,6 +923,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "assistant", Content: m.chatReply})
 				m.chatReply = ""
 			}
+			m.rebuildChatRows()
+			if m.chatCancel != nil {
+				m.chatCancel()
+				m.chatCancel = nil
+			}
+			if target, cmd := m.maybeRunChatTools(); cmd != nil {
+				m.chatBusy = true
+				m.msg = "tool: " + target
+				m.rebuildChatRows()
+				return m, cmd
+			}
+			return m, nil
 		default:
 			m.chatReply += msg.Delta
 		}
@@ -928,6 +949,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case InlineOutputMsg:
 		cmd := m.handleInlineOutput(msg)
+		return m, cmd
+	case GhostOutputMsg:
+		cmd := m.handleGhostOutput(msg)
 		return m, cmd
 	case AgentRefreshMsg:
 		return m, waitForAgentRefresh(m.agentCh)
@@ -1074,6 +1098,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "alt+i":
 		m.startInlineRequest()
 		return nil
+	case "alt+g":
+		m.dismissGhost()
+		return m.ghostTrigger()
 	case "ctrl+o":
 		m.startFinder()
 		return nil
@@ -1237,6 +1264,20 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 	}
+	// Ghost text overlay: Tab accepts, Esc dismisses; any other key dismisses
+	// and falls through to normal editing.
+	if m.ghostVisible && !m.chatOpen && !m.complOpen {
+		switch s {
+		case "tab":
+			m.applyGhost()
+			return nil
+		case "esc", "ctrl+c":
+			m.dismissGhost()
+			return nil
+		default:
+			m.dismissGhost()
+		}
+	}
 	switch s {
 	case "ctrl+space":
 		return m.triggerCompletion(true)
@@ -1366,6 +1407,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.cur().buf.InsertNewline()
 		}
 		m.msg = ""
+		if m.ai != nil {
+			return m.ghostTrigger()
+		}
 	case "backspace":
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MultiBackspace()

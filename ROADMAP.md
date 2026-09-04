@@ -97,6 +97,13 @@
 - [x] Провайдеры: Ollama (local) + OpenAI-compatible (SSE streaming).
       Конфиг: `provider`, `model`, `api_key`, `ollama_url`.
       Совместимо с OpenAI, DeepSeek, Groq, Together, vLLM, LM Studio.
+- [x] Inline ghost-подсказка (Copilot-style): `Alt+G` или автоматически после
+      Enter — LLM предлагает продолжение кода, которое рендерится тусклым
+      текстом в буфере; `Tab` принимает, `Esc`/любая клавиша сбрасывает.
+- [x] Чат с инструментами (tool calling): AI может вызывать READ/SEARCH/RUN/EDIT
+      блоками `=== TOOL: ... ===`, результаты выполняются и возвращаются в
+      диалог (loop до 6 итераций). READ/SEARCH — чтение/поиск по проекту,
+      RUN — шелл-команда, EDIT — перезапись файла с перезагрузкой буферов.
 
 ### M4 — агенты
 > План реализации: [docs/M4-AGENTS.md](docs/M4-AGENTS.md) (выполнен)

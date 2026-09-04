@@ -2,6 +2,8 @@ package editor
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"dmed/internal/ai"
+	"dmed/internal/buffer"
 )
 
 // Right-side AI chat panel backed by a local Ollama server (Alt+A).
@@ -20,10 +23,12 @@ var (
 	chatAILabelStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("176")).Bold(true)
 	chatUserTextStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("255"))
 	chatAITextStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
+	chatToolLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	chatToolTextStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))
 )
 
 type chatRow struct {
-	kind string // "label-you" | "user" | "label-ai" | "ai" | "hint" | "err"
+	kind string // "label-you" | "user" | "label-ai" | "ai" | "tool" | "hint" | "err"
 	text string
 }
 
@@ -181,6 +186,7 @@ func (m *Model) chatSubmit() {
 	m.chatErr = ""
 	m.chatBusy = true
 	m.chatScroll = 0
+	m.chatToolRound = 0
 	m.rebuildChatRows()
 
 	msgs := m.chatRequestMessages()
@@ -215,6 +221,7 @@ func (m *Model) chatSubmit() {
 func (m *Model) chatRequestMessages() []ai.Message {
 	var b strings.Builder
 	b.WriteString(m.cfg.AI.SystemPrompt)
+	b.WriteString(toolSystemPrompt)
 	if t := m.cur(); t != nil && t.path != "" {
 		b.WriteString("\n\nCurrent file: " + t.path + "\n```")
 		content := t.buf.Text()
@@ -241,6 +248,100 @@ func (m *Model) chatRequestMessages() []ai.Message {
 	return msgs
 }
 
+const maxChatToolRounds = 6
+
+// maybeRunChatTools inspects the last assistant message for tool blocks. If
+// any are present, it executes them, appends the results to the conversation,
+// and returns a tea.Cmd that continues the stream. target is a short label of
+// what was executed (for the status bar). If there are no tools, it returns
+// ("" , nil).
+func (m *Model) maybeRunChatTools() (target string, cmd tea.Cmd) {
+	if len(m.chatMsgs) == 0 {
+		return "", nil
+	}
+	last := m.chatMsgs[len(m.chatMsgs)-1]
+	if last.Role != "assistant" {
+		return "", nil
+	}
+	tools := parseToolCalls(last.Content)
+	if len(tools) == 0 {
+		return "", nil
+	}
+	if m.chatToolRound >= maxChatToolRounds {
+		m.chatErr = "tool loop exceeded max iterations"
+		m.rebuildChatRows()
+		return "", nil
+	}
+	m.chatToolRound++
+
+	// Append results as a user turn summarizing tool outcomes.
+	var res strings.Builder
+	for _, tc := range tools {
+		target = tc.name
+		out := executeTool(m, tc)
+		res.WriteString("\n=== TOOL RESULT: " + tc.name)
+		if tc.arg != "" {
+			res.WriteString(": " + tc.arg)
+		}
+		res.WriteString(" ===\n" + out + "\n")
+	}
+
+	// Edit results also refresh matching open buffers.
+	for _, tc := range tools {
+		if tc.name != "EDIT" {
+			continue
+		}
+		full := resolvePath(m.root, tc.arg)
+		for i := range m.tabs {
+			if m.tabs[i].path == "" {
+				continue
+			}
+			abs, _ := filepath.Abs(m.tabs[i].path)
+			if abs == full && !m.tabs[i].buf.Dirty() {
+				if data, err := os.ReadFile(full); err == nil {
+					m.tabs[i].buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
+					m.tabs[i].syntaxCached = nil
+					m.tabs[i].diffText = ""
+				}
+			}
+		}
+	}
+
+	m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "user", Content: res.String()})
+
+	if m.chatCancel != nil {
+		m.chatCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.chatCancel = cancel
+
+	ch := make(chan chatEvent, 64)
+	m.chatCh = ch
+	go func() {
+		defer close(ch)
+		err := m.ai.ChatStream(ctx, m.chatRequestMessages(), func(d string) {
+			select {
+			case ch <- chatEvent{delta: d}:
+			case <-ctx.Done():
+			}
+		})
+		if err != nil {
+			select {
+			case ch <- chatEvent{err: err}:
+			case <-ctx.Done():
+			}
+		}
+	}()
+
+	return target, func() tea.Msg {
+		ev, ok := <-ch
+		if !ok {
+			return ChatOutputMsg{Done: true}
+		}
+		return ChatOutputMsg{Delta: ev.delta, Err: ev.err, Done: ev.done}
+	}
+}
+
 func (m *Model) rebuildChatRows() {
 	inner := m.chatInnerWidth()
 	rows := make([]chatRow, 0, 64)
@@ -256,7 +357,11 @@ func (m *Model) rebuildChatRows() {
 
 	for _, msg := range m.chatMsgs {
 		if msg.Role == "user" {
-			addTurn(" you", "label-you", "user", msg.Content)
+			if strings.HasPrefix(msg.Content, "=== TOOL RESULT:") {
+				addTurn(" tool", "label-tool", "tool", msg.Content)
+			} else {
+				addTurn(" you", "label-you", "user", msg.Content)
+			}
 		} else {
 			addTurn(" ai", "label-ai", "ai", msg.Content)
 		}

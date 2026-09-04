@@ -35,6 +35,7 @@ var (
 	diffDelBg       = lipgloss.NewStyle().Background(lipgloss.Color("52"))
 	diffModBg       = lipgloss.NewStyle().Background(lipgloss.Color("58"))
 	selectionStyle  = lipgloss.NewStyle().Background(lipgloss.Color("60")).Foreground(lipgloss.Color("255"))
+	ghostStyle      = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("243"))
 )
 
 type helpEntry struct {
@@ -59,6 +60,7 @@ var helpEntries = []helpEntry{
 	{"Alt+T", "help.terminal"},
 	{"Alt+A", "help.chat"},
 	{"Alt+I", "help.inline"},
+	{"Alt+G", "help.ghost"},
 	{"Alt+L", "help.agent"},
 	{"Ctrl+B / F9", "help.tree"},
 	{"↑↓/Enter/←→ in tree", "help.tree_nav"},
@@ -417,6 +419,23 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 		}
 		gutStr += diagMarkStyle.Render(diagMark)
 		gutStr += gitMarkStyle.Render(gitMark)
+
+		if active && m.ghostVisible && len(m.ghostLines) > 1 && ln > m.ghostRow {
+			// Multi-line ghost: subsequent ghost lines appear on their own rows.
+			gidx := ln - m.ghostRow
+			if gidx < len(m.ghostLines) {
+				ghost := m.ghostLines[gidx]
+				if ghost == "" {
+					rows[row] = gutStr + ghostStyle.Render(strings.Repeat(" ", contentW))
+				} else if ln >= t.buf.LineCount() || strings.TrimSpace(string(t.buf.LineAt(ln))) == "" {
+					// Only overlay ghost on blank/gap rows to avoid obscuring real code.
+					rows[row] = gutStr + ghostStyle.Render(ghost)
+				} else {
+					rows[row] = gutStr + m.renderLine(p, t, ln, contentW, active, syntaxLines)
+				}
+				continue
+			}
+		}
 
 		if ln < t.buf.LineCount() {
 			rows[row] = gutStr + m.renderLine(p, t, ln, contentW, active, syntaxLines)
@@ -1039,6 +1058,10 @@ func (m Model) chatPanel(h int) []string {
 				st = chatAILabelStyle
 			case "ai":
 				st = chatAITextStyle
+			case "label-tool":
+				st = chatToolLabelStyle
+			case "tool":
+				st = chatToolTextStyle
 			case "err":
 				st = gitDelStyle
 			default:
@@ -1354,6 +1377,22 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 	for _, cc := range carets {
 		if cc == len(exp) && cc >= start && cc < start+w {
 			out.WriteString(cursorStyle.Render(" "))
+		}
+	}
+
+	// Ghost text that continues the *current* line: the first ghost line is a
+	// continuation of the ghost start line and renders right after its content.
+	if m.ghostVisible && activePane && ln == m.ghostRow && len(m.ghostLines) > 0 {
+		g0 := m.ghostLines[0]
+		// Strip the part of the ghost that duplicates the already-typed prefix.
+		prefixLen := len(raw)
+		rem := g0
+		if m.ghostCol <= prefixLen && m.ghostCol <= len(g0) {
+			rem = g0[m.ghostCol:]
+		}
+		// Show ghost only when the cursor is at the end of the ghost start line.
+		if t.buf.CurLine() == ln && t.buf.Col() == prefixLen && rem != "" {
+			out.WriteString(ghostStyle.Render(rem))
 		}
 	}
 
