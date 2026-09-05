@@ -345,7 +345,7 @@ var ruCatalog = map[string]string{
 	"prompt.new_folder":   " новая папка: ",
 	"prompt.save_as":      " сохранить как: ",
 	"prompt.save_changes": " сохранить изменения? ",
-	"prompt.yes_no":       "(Д)а / (Н)ет / (Esc) отмена",
+	"prompt.yes_no":       "(Y/\u043d) \u0434\u0430 / (N/\u0442) \u043d\u0435\u0442 / (Esc) \u043e\u0442\u043c\u0435\u043d\u0430",
 	"git.commit_line":     " git коммит: ",
 	"git.commit_hint":     "(Enter: коммит, Esc: закрыть)",
 
@@ -405,7 +405,7 @@ var ruCatalog = map[string]string{
 	"ai.instr_hint":   "  (Enter: отправить, Esc: отмена)",
 	"ai.thinking":     " AI думает... ",
 	"ai.diff":         " AI diff ",
-	"ai.review_hint":  "  (y: принять, n: отклонить, \u2191\u2193 скролл)",
+	"ai.review_hint":  "  (Y/\u043d: \u043f\u0440\u0438\u043d\u044f\u0442\u044c, N/\u0442: \u043e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c, \u2191\u2193 \u0441\u043a\u0440\u043e\u043b\u043b)",
 	"ai.no_model":     "нет модели",
 	"ai.streaming":    " стриминг ",
 	"finder.prompt":   " найти файл: ",
@@ -466,7 +466,7 @@ var ruCatalog = map[string]string{
 	"msg.agent_discarded":     "изменения агента отклонены",
 
 	// Agent review + AI settings
-	"agent.review_hint": "  (y: применить всё, n: отклонить, Tab: след.файл, \u2191\u2193 скролл)",
+	"agent.review_hint": "  (Y/\u043d: \u043f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c \u0432\u0441\u0451, N/\u0442: \u043e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c, Tab: \u0441\u043b\u0435\u0434.\u0444\u0430\u0439\u043b, \u2191\u2193 \u0441\u043a\u0440\u043e\u043b\u043b)",
 	"ai.settings":       " AI - настройки ",
 	"ai.settings_hint":  "(\u2191/\u2193 движение, Enter правка, \u2190/\u2192 выбор, Ctrl+S сохранить, Esc закрыть)",
 	"ai.choice":         "(\u2190/\u2192 выбрать)",

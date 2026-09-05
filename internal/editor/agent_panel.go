@@ -428,7 +428,7 @@ func (m *Model) handleAgentReview(msg tea.KeyPressMsg) tea.Cmd {
 	if task != nil {
 		n = len(task.Changes)
 	}
-	switch msg.String() {
+	switch gitKeyName(msg) {
 	case "y", "enter", "a":
 		m.acceptAgentReview()
 	case "n", "esc", "r":

@@ -216,6 +216,52 @@ func TestQuitDirtyCancel(t *testing.T) {
 	}
 }
 
+func TestQuitDirtyConfirmCyrillic(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "a.txt", "alpha\n")
+	m := New(f1)
+	m.width, m.height = 80, 24
+	typeStr(m, "X")
+	m = press(m, tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl})
+	if !m.quitConfirm {
+		t.Fatal("dirty ctrl+q must open quit confirm")
+	}
+
+	// Physical Y key in the Russian layout types «н» — it must confirm (yes).
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "н"})
+	nm := next.(Model)
+	if cmd == nil || nm.quitConfirm {
+		t.Fatalf("«н» (physical Y) must confirm save+quit, got cmd=%v quitConfirm=%v", cmd, nm.quitConfirm)
+	}
+
+	// «т» (physical N key in Russian layout) must be "no": quit without saving.
+	m = New(f1)
+	m.width, m.height = 80, 24
+	typeStr(m, "X")
+	m = press(m, tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "т"})
+	nm = next.(Model)
+	if nm.quitConfirm || cmd == nil {
+		t.Fatalf("«т» (physical N) must say no, got quitConfirm=%v cmd=%v", nm.quitConfirm, cmd)
+	}
+	if !nm.cur().buf.Dirty() {
+		t.Fatal("denying must leave the buffer unsaved")
+	}
+
+	// BaseCode is the layout-independent physical key (Windows Console API).
+	// The real console delivers all three fields together; a bare BaseCode
+	// message would be mangled by handleKey's control-byte normalization.
+	m = New(f1)
+	m.width, m.height = 80, 24
+	typeStr(m, "X")
+	m = press(m, tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl})
+	next, cmd = m.Update(tea.KeyPressMsg{BaseCode: 'y', Code: 'н', Text: "н"})
+	nm = next.(Model)
+	if cmd == nil || nm.quitConfirm {
+		t.Fatalf("BaseCode 'y' must confirm save+quit, got cmd=%v quitConfirm=%v", cmd, nm.quitConfirm)
+	}
+}
+
 func TestQuitCopySkipsConfirm(t *testing.T) {
 	dir := t.TempDir()
 	f1 := writeTemp(t, dir, "a.txt", "alpha\n")

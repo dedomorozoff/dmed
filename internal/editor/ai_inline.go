@@ -199,7 +199,9 @@ func (m *Model) startInlineReview() {
 
 // handleInlineReview handles keys while the AI diff preview is shown.
 func (m *Model) handleInlineReview(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+	// gitKeyName keeps the y/n prompts layout-independent (н or т in Cyrillic
+	// stand for the physical Y and N keys).
+	switch gitKeyName(msg) {
 	case "y", "enter":
 		m.applyInlineProposal()
 		m.aiReviewMode = false

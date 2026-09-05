@@ -5,9 +5,46 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"dmed/internal/ai"
 	"dmed/internal/buffer"
 )
+
+// TestInlineReviewCyrillicKeys verifies the y/n inline review keys work in the
+// Russian layout: «н» (physical Y) accepts, «т» (physical N) discards.
+func TestInlineReviewCyrillicKeys(t *testing.T) {
+	m := New()
+	b := buffer.Load("hello world\n")
+	m.cur().buf = b
+	m.cur().buf.SetCursor(0, 0)
+	m.startInlineRequest()
+	m.aiInlineProposal = "hello brave world"
+	m.startInlineReview()
+	if !m.aiReviewMode {
+		t.Fatal("review mode not entered")
+	}
+
+	// «т» (physical N) must discard.
+	m.handleInlineReview(tea.KeyPressMsg{Text: "т"})
+	if m.aiReviewMode {
+		t.Fatal("«т» must close the review")
+	}
+	if m.cur().buf.Text() != "hello world\n" {
+		t.Fatalf("«т» must leave the buffer untouched, got %q", m.cur().buf.Text())
+	}
+
+	// «н» (physical Y) must accept and apply.
+	m.aiInlineProposal = "hello brave world"
+	m.startInlineReview()
+	m.handleInlineReview(tea.KeyPressMsg{Text: "н"})
+	if m.aiReviewMode {
+		t.Fatal("«н» must close the review")
+	}
+	if !strings.Contains(m.cur().buf.Text(), "hello brave world") {
+		t.Fatalf("«н» must apply the proposal, got %q", m.cur().buf.Text())
+	}
+}
 
 func TestSurroundingContextSingleLine(t *testing.T) {
 	b := buffer.Load("l0\nl1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n")

@@ -159,6 +159,57 @@ func TestAgentReviewReject(t *testing.T) {
 	}
 }
 
+// TestAgentReviewCyrillicKeys verifies the y/n review keys work in the Russian
+// layout too: «н» (physical Y) accepts, «т» (physical N) rejects.
+func TestAgentReviewCyrillicKeys(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "a.go"), "package old\n")
+	m := New()
+	m.root = dir
+	m.agentQueue = agent.NewQueue(nil)
+	ap := agent.NewApplier()
+	ap.Read = func(p string) (string, error) {
+		b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(p)))
+		return string(b), err
+	}
+	ap.Write = func(p, c string) error {
+		return os.WriteFile(filepath.Join(dir, filepath.FromSlash(p)), []byte(c), 0o644)
+	}
+	m.agentApplier = ap
+	fg := &agentFakeGit{}
+	fb := &agentFakeBus{}
+	m.agentCommit = &agent.Committer{Repo: fg, Bus: fb}
+	task := m.agentQueue.Enqueue("refactor")
+	m.agentQueue.Next()
+	m.agentQueue.SetChanges(task.ID, []agent.Change{
+		{Path: "a.go", Orig: "package old\n", New: "package new\n"},
+	})
+	m.startAgentReview(task.ID)
+
+	m.handleAgentReview(tea.KeyPressMsg{Text: "н"}) // physical Y
+	if m.agentReviewMode {
+		t.Fatal("«н» must accept the agent review")
+	}
+	if got := m.agentQueue.Find(task.ID); got.Status != agent.StatusApplied {
+		t.Fatalf("status after accept = %s, want applied", got.Status)
+	}
+
+	// Reject path with «т» (physical N).
+	task2 := m.agentQueue.Enqueue("task2")
+	m.agentQueue.Next()
+	m.agentQueue.SetChanges(task2.ID, []agent.Change{
+		{Path: "a.go", Orig: "package new\n", New: "package x\n"},
+	})
+	m.startAgentReview(task2.ID)
+	m.handleAgentReview(tea.KeyPressMsg{Text: "т"})
+	if m.agentReviewMode {
+		t.Fatal("«т» must reject the agent review")
+	}
+	if got := m.agentQueue.Find(task2.ID); got.Status != agent.StatusDone {
+		t.Fatalf("status after reject = %s, want done", got.Status)
+	}
+}
+
 // TestAgentAcceptOpensFilesInTabs verifies that accepting a reviewed agent
 // task opens the touched files in tabs (focusing already-open ones without
 // duplicating) and reports created/modified counts.
