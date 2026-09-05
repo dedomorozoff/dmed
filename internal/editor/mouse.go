@@ -66,6 +66,7 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 	// Right AI chat rail.
 	if m.chatOpen && x >= m.width-m.rightRailWidth() && y >= 1 && y <= h {
 		m.chatFocus = true
+		m.gitFocus = false
 		return nil
 	}
 
@@ -206,7 +207,11 @@ func (m *Model) clickLeftRail(x, y int) tea.Cmd {
 			m.agentSel = idx
 		}
 		m.agentFocus = true
+		m.gitFocus = false
+		m.chatFocus = false
 	case m.gitOpen:
+		m.gitFocus = true
+		m.chatFocus = false
 		switch m.gitMode {
 		case gitModeStatus:
 			idx := m.gitOffset + (y - 1)
@@ -236,6 +241,8 @@ func (m *Model) clickLeftRail(x, y int) tea.Cmd {
 		if idx >= 0 && idx < len(m.treeRows) {
 			m.treeSel = idx
 			m.treeFocus = true
+			m.gitFocus = false
+			m.chatFocus = false
 			m.clampTreeScroll(h)
 		}
 	}
@@ -296,6 +303,9 @@ func (m *Model) clickBuffer(x, y int, mod tea.KeyMod) tea.Cmd {
 	t.buf.Deselect()
 	m.treeFocus = false
 	m.agentFocus = false
+	m.gitFocus = false
+	m.gitDiffFocused = false
+	m.chatFocus = false
 	m.mouseDown = true
 	return nil
 }
@@ -464,6 +474,8 @@ func (m *Model) wheelLeftRail(dir int) tea.Cmd {
 			}
 		}
 	case m.gitOpen:
+		m.gitFocus = true
+		m.chatFocus = false
 		switch m.gitMode {
 		case gitModeStatus:
 			if len(m.gitFiles) > 0 {
@@ -511,6 +523,8 @@ func (m *Model) wheelLeftRail(dir int) tea.Cmd {
 				m.treeSel = len(m.treeRows) - 1
 			}
 			m.treeFocus = true
+			m.gitFocus = false
+			m.chatFocus = false
 			m.clampTreeScroll(m.viewHeight())
 		}
 	}

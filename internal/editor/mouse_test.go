@@ -165,8 +165,30 @@ func TestGitRailClickSelects(t *testing.T) {
 	if m.gitSel != 1 {
 		t.Fatalf("click on second status row: gitSel = %d, want 1", m.gitSel)
 	}
+	if !m.gitFocus {
+		t.Fatal("clicking the git rail must focus the git panel")
+	}
 	if m.gitDiffFocused {
 		t.Fatal("clicking the rail must unfocus the diff")
+	}
+
+	// Clicking the AI chat rail while git is open transfers focus to the chat
+	// and releases git focus.
+	m.chatOpen = true
+	_ = m.handleMouseClick(tea.MouseClickMsg{X: 60, Y: 5})
+	if !m.chatFocus {
+		t.Fatal("chat rail click must focus the chat panel")
+	}
+	if m.gitFocus {
+		t.Fatal("chat rail click must release git focus")
+	}
+
+	// Re-click the rail to refocus the git panel.
+	m.chatOpen = false
+	m.chatFocus = false
+	_ = m.handleMouseClick(tea.MouseClickMsg{X: 5, Y: 1})
+	if !m.gitFocus {
+		t.Fatal("rail click must refocus the git panel")
 	}
 
 	// Select the long file (code.go) whose diff is tall enough to scroll.

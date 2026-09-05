@@ -125,10 +125,12 @@ func (m Model) t(key string, args ...any) string { return m.tr.T(key, args...) }
 
 func (m *Model) openGitPanel() {
 	m.gitOpen = true
+	m.gitFocus = true
 	m.gitMode = gitModeStatus
 	m.gitCommitIn = nil
 	m.gitDiffFocused = false
 	m.treeFocus = false
+	m.chatFocus = false
 	m.refreshGitFiles()
 	m.refreshGitDiffPreview()
 }
@@ -560,6 +562,7 @@ func (m *Model) handleGit(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "ctrl+b", "f9":
 		m.gitOpen = false
+		m.gitFocus = false
 		m.msg = ""
 		m.showTree()
 		return nil
@@ -590,6 +593,7 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 	switch keyL {
 	case "esc", "ctrl+g":
 		m.gitOpen = false
+		m.gitFocus = false
 		m.gitDiffFocused = false
 		m.msg = ""
 		return nil
@@ -599,6 +603,7 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		m.gitOpen = false
+		m.gitFocus = false
 		m.gitDiffFocused = false
 		m.msg = ""
 		return nil
@@ -772,6 +777,7 @@ func (m *Model) handleGitCommit(msg tea.KeyPressMsg) tea.Cmd {
 			m.gitCommitIn = nil
 			m.gitMode = gitModeStatus
 			m.gitOpen = false
+			m.gitFocus = false
 			for i := range m.tabs {
 				m.tabs[i].diffText = ""
 			}

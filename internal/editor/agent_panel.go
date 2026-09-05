@@ -143,6 +143,8 @@ func (m *Model) openAgentPanel() tea.Cmd {
 	cmd := m.ensureAgent()
 	m.agentOpen = true
 	m.agentFocus = true
+	m.gitFocus = false
+	m.chatFocus = false
 	m.msg = ""
 	return cmd
 }
@@ -155,12 +157,16 @@ func (m *Model) toggleAgentPanel() tea.Cmd {
 	if m.agentOpen {
 		m.agentFocus = !m.agentFocus
 		if m.agentFocus {
+			m.gitFocus = false
+			m.chatFocus = false
 			m.msg = ""
 		}
 		return cmd
 	}
 	m.agentOpen = true
 	m.agentFocus = true
+	m.gitFocus = false
+	m.chatFocus = false
 	m.msg = ""
 	return cmd
 }
@@ -169,6 +175,8 @@ func (m *Model) startAgentTaskPrompt() tea.Cmd {
 	m.ensureAgent()
 	m.agentOpen = true
 	m.agentFocus = true
+	m.gitFocus = false
+	m.chatFocus = false
 	m.agentPrompt = true
 	m.agentPromptIn = nil
 	m.msg = ""

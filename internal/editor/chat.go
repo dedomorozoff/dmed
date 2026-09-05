@@ -88,6 +88,7 @@ func (m Model) rightRailWidth() int {
 func (m *Model) toggleChat() tea.Cmd {
 	m.chatOpen = !m.chatOpen
 	m.chatFocus = m.chatOpen
+	m.gitFocus = false
 	m.msg = ""
 	if m.ai == nil {
 		m.ai = ai.NewProvider(ai.Config{

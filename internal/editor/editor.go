@@ -204,6 +204,7 @@ type Model struct {
 	conflictOffY       int
 	conflictOffX       int
 	gitOpen            bool
+	gitFocus           bool // keys route to the git panel; open+unfocused shows it in the sidebar
 	gitMode            gitPanelMode
 	gitFiles           []vcs.FileStatus
 	gitSel             int
@@ -1152,6 +1153,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+g":
 		if m.gitOpen {
 			m.gitOpen = false
+			m.gitFocus = false
 			m.msg = ""
 		} else {
 			m.openGitPanel()
@@ -1239,10 +1241,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.agentOpen && m.agentFocus {
 		return m.handleAgent(msg)
 	}
-	if m.chatOpen {
+	if m.chatOpen && m.chatFocus {
 		return m.handleChat(msg)
 	}
-	if m.gitOpen {
+	if m.gitOpen && m.gitFocus {
 		return m.handleGit(msg)
 	}
 	if m.paletteOpen {

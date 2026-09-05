@@ -28,20 +28,27 @@ func (m Model) sidebarOn() bool {
 func (m *Model) toggleTree() {
 	if m.gitOpen {
 		m.gitOpen = false
+		m.gitFocus = false
 		m.msg = ""
 	}
 	if !m.treeVisible {
 		m.treeVisible = true
 		m.treeFocus = true
+		m.gitFocus = false
+		m.chatFocus = false
 		m.rebuildTree()
 		return
 	}
 	if m.treeFocus {
 		m.treeVisible = false
 		m.treeFocus = false
+		m.gitFocus = false
+		m.chatFocus = false
 		return
 	}
 	m.treeFocus = true
+	m.gitFocus = false
+	m.chatFocus = false
 }
 
 func (m *Model) rebuildTree() {
