@@ -1,6 +1,9 @@
 package editor
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -153,5 +156,108 @@ func TestAgentReviewReject(t *testing.T) {
 	}
 	if got := m.agentQueue.Find(task.ID).Status; got != agent.StatusDone {
 		t.Fatalf("status = %s, want done", got)
+	}
+}
+
+// TestAgentAcceptOpensFilesInTabs verifies that accepting a reviewed agent
+// task opens the touched files in tabs (focusing already-open ones without
+// duplicating) and reports created/modified counts.
+func TestAgentAcceptOpensFilesInTabs(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "a.go"), "package old\n")
+	writeTestFile(t, filepath.Join(dir, "b.go"), "package b\n")
+
+	// a.go is already open in a tab; b.go is not.
+	m := New()
+	m.root = dir
+	m.openPath(filepath.Join(dir, "a.go"))
+	before := len(m.tabs)
+
+	m.agentQueue = agent.NewQueue(nil)
+	m.agentApplier = agent.NewApplier()
+	ap := agent.NewApplier()
+	ap.Read = func(p string) (string, error) {
+		b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(p)))
+		return string(b), err
+	}
+	ap.Write = func(p, c string) error {
+		return os.WriteFile(filepath.Join(dir, filepath.FromSlash(p)), []byte(c), 0o644)
+	}
+	m.agentApplier = ap
+	fg := &agentFakeGit{}
+	fb := &agentFakeBus{}
+	m.agentCommit = &agent.Committer{Repo: fg, Bus: fb}
+
+	task := m.agentQueue.Enqueue("refactor")
+	m.agentQueue.Next()
+	m.agentQueue.SetChanges(task.ID, []agent.Change{
+		{Path: "a.go", Orig: "package old\n", New: "package new\n"},
+		{Path: "b.go", Orig: "package b\n", New: "package b2\n"},
+	})
+
+	m.startAgentReview(task.ID)
+	m.acceptAgentReview()
+
+	if got := m.agentQueue.Find(task.ID).Status; got != agent.StatusApplied {
+		t.Fatalf("status = %s, want applied", got)
+	}
+	if len(m.tabs) != before+1 {
+		t.Fatalf("expected exactly one new tab (b.go), tabs before=%d now=%d", before, len(m.tabs))
+	}
+	// a.go was already open: its content should now reflect the applied change.
+	for _, tb := range m.tabs {
+		if filepath.Base(tb.path) == "a.go" && tb.buf.Text() != "package new\n" {
+			t.Fatalf("a.go tab content = %q, want updated content", tb.buf.Text())
+		}
+		if filepath.Base(tb.path) == "b.go" && tb.buf.Text() != "package b2\n" {
+			t.Fatalf("b.go tab content = %q, want updated content", tb.buf.Text())
+		}
+	}
+}
+
+// TestAgentPanelFocusToggle verifies Alt+L moves focus between the editor and
+// the agent panel without collapsing it, and that Tab/Esc behave sanely.
+func TestAgentPanelFocusToggle(t *testing.T) {
+	m := New()
+	m.agentQueue = agent.NewQueue(nil)
+
+	// Alt+L opens and focuses the panel.
+	m = press(m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModAlt})
+	if !m.agentOpen || !m.agentFocus {
+		t.Fatalf("alt+l must open+focus panel: open=%v focus=%v", m.agentOpen, m.agentFocus)
+	}
+
+	// Alt+L again returns focus to the editor while the panel stays open.
+	m = press(m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModAlt})
+	if !m.agentOpen {
+		t.Fatal("toggling focus must keep the panel open")
+	}
+	if m.agentFocus {
+		t.Fatal("alt+l while open must release focus back to the editor")
+	}
+
+	// While unfocused, typing reaches the buffer.
+	m = press(m, tea.KeyPressMsg{Text: "x"})
+	if got := m.cur().buf.Text(); !strings.Contains(got, "x") {
+		t.Fatalf("buffer after typing while panel open = %q", got)
+	}
+
+	// Alt+L moves focus back into the panel.
+	m = press(m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModAlt})
+	if !m.agentFocus {
+		t.Fatal("alt+l must refocus the panel")
+	}
+
+	// Tab returns to the editor without closing the panel.
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	if !m.agentOpen || m.agentFocus {
+		t.Fatalf("tab must keep the panel open but release focus: open=%v focus=%v", m.agentOpen, m.agentFocus)
+	}
+
+	// Refocus, then Esc closes the panel entirely.
+	m = press(m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModAlt})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.agentOpen || m.agentFocus {
+		t.Fatalf("esc must close the panel: open=%v focus=%v", m.agentOpen, m.agentFocus)
 	}
 }

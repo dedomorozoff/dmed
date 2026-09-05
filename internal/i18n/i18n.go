@@ -237,14 +237,15 @@ var enCatalog = map[string]string{
 	"msg.lang_set": "language set to %s",
 
 	// Agent panel
-	"msg.agent_queued":      "agent task queued",
-	"msg.agent_cancelled":   "cancelled %s",
-	"agent.task_label":      " Agent task: ",
-	"msg.agent_nothing":     "nothing to review for this task",
-	"msg.agent_apply_fail":  "apply failed: %s",
-	"msg.agent_commit_fail": "changes applied but commit failed: %s",
-	"msg.agent_applied":     "agent changes applied and committed",
-	"msg.agent_discarded":   "agent changes discarded",
+	"msg.agent_queued":        "agent task queued",
+	"msg.agent_cancelled":     "cancelled %s",
+	"agent.task_label":        " Agent task: ",
+	"msg.agent_nothing":       "nothing to review for this task",
+	"msg.agent_apply_fail":    "apply failed: %s",
+	"msg.agent_commit_fail":   "changes applied but commit failed: %s",
+	"msg.agent_applied":       "agent changes applied and committed",
+	"msg.agent_applied_files": "%d created, %d modified — opened in tabs",
+	"msg.agent_discarded":     "agent changes discarded",
 
 	// Agent review + AI settings
 	"agent.review_hint": "  (y: apply all, n: reject, Tab: next file, \u2191\u2193 scroll)",
@@ -454,14 +455,15 @@ var ruCatalog = map[string]string{
 	"msg.lang_set": "язык установлен: %s",
 
 	// Agent panel
-	"msg.agent_queued":      "задача агента поставлена в очередь",
-	"msg.agent_cancelled":   "отменено %s",
-	"agent.task_label":      " Задача агента: ",
-	"msg.agent_nothing":     "нечего просматривать для этой задачи",
-	"msg.agent_apply_fail":  "ошибка применения: %s",
-	"msg.agent_commit_fail": "изменения применены, но коммит не удался: %s",
-	"msg.agent_applied":     "изменения агента применены и закоммичены",
-	"msg.agent_discarded":   "изменения агента отклонены",
+	"msg.agent_queued":        "задача агента поставлена в очередь",
+	"msg.agent_cancelled":     "отменено %s",
+	"agent.task_label":        " Задача агента: ",
+	"msg.agent_nothing":       "нечего просматривать для этой задачи",
+	"msg.agent_apply_fail":    "ошибка применения: %s",
+	"msg.agent_commit_fail":   "изменения применены, но коммит не удался: %s",
+	"msg.agent_applied":       "изменения агента применены и закоммичены",
+	"msg.agent_applied_files": "создано %d, изменено %d — открыто во вкладках",
+	"msg.agent_discarded":     "изменения агента отклонены",
 
 	// Agent review + AI settings
 	"agent.review_hint": "  (y: применить всё, n: отклонить, Tab: след.файл, \u2191\u2193 скролл)",

@@ -2,8 +2,6 @@ package editor
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -11,7 +9,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"dmed/internal/ai"
-	"dmed/internal/buffer"
 )
 
 // Right-side AI chat panel backed by a local Ollama server (Alt+A).
@@ -250,6 +247,55 @@ func (m *Model) chatRequestMessages() []ai.Message {
 
 const maxChatToolRounds = 6
 
+// runChatTools executes tool calls, opens files that EDIT touched in tabs,
+// and returns the tool-result text plus labels of created and modified files.
+// The result text includes an "AI FILES" summary so the chat shows exactly
+// which files the agent created or modified. This is split out of
+// maybeRunChatTools so the interaction can be unit-tested without a stream.
+func (m *Model) runChatTools(tools []toolCall) (res string, created, modified []string) {
+	var b strings.Builder
+	for _, tc := range tools {
+		// Existence must be captured before the tool runs: EDIT writes the
+		// file, so after execution every edit target would exist.
+		var full, label string
+		existed := true
+		if tc.name == "EDIT" {
+			full = resolvePath(m.root, tc.arg)
+			existed = fileExists(full)
+		}
+		b.WriteString("\n=== TOOL RESULT: " + tc.name)
+		if tc.arg != "" {
+			b.WriteString(": " + tc.arg)
+		}
+		b.WriteString(" ===\n" + executeTool(m, tc) + "\n")
+
+		if tc.name != "EDIT" {
+			continue
+		}
+		// Track created vs modified and open the file in a new tab (or focus
+		// the existing one) so the user sees AI's changes immediately.
+		label = shortenPath(m.baseDir(), full)
+		if existed {
+			modified = append(modified, label)
+		} else {
+			created = append(created, label)
+		}
+		m.openAiFile(label, true)
+	}
+
+	// Summarize which files were created/modified so they are visible in chat.
+	if len(created) > 0 || len(modified) > 0 {
+		b.WriteString("\n=== AI FILES ===\n")
+		for _, p := range created {
+			b.WriteString("created: " + p + "\n")
+		}
+		for _, p := range modified {
+			b.WriteString("modified: " + p + "\n")
+		}
+	}
+	return b.String(), created, modified
+}
+
 // maybeRunChatTools inspects the last assistant message for tool blocks. If
 // any are present, it executes them, appends the results to the conversation,
 // and returns a tea.Cmd that continues the stream. target is a short label of
@@ -274,40 +320,14 @@ func (m *Model) maybeRunChatTools() (target string, cmd tea.Cmd) {
 	}
 	m.chatToolRound++
 
-	// Append results as a user turn summarizing tool outcomes.
-	var res strings.Builder
+	// Execute the tools, collect the raw result text plus created/modified
+	// file labels, and open edited files in tabs. The result text becomes a
+	// user turn so the chat shows what the AI changed.
+	res, _, _ := m.runChatTools(tools)
 	for _, tc := range tools {
 		target = tc.name
-		out := executeTool(m, tc)
-		res.WriteString("\n=== TOOL RESULT: " + tc.name)
-		if tc.arg != "" {
-			res.WriteString(": " + tc.arg)
-		}
-		res.WriteString(" ===\n" + out + "\n")
 	}
-
-	// Edit results also refresh matching open buffers.
-	for _, tc := range tools {
-		if tc.name != "EDIT" {
-			continue
-		}
-		full := resolvePath(m.root, tc.arg)
-		for i := range m.tabs {
-			if m.tabs[i].path == "" {
-				continue
-			}
-			abs, _ := filepath.Abs(m.tabs[i].path)
-			if abs == full && !m.tabs[i].buf.Dirty() {
-				if data, err := os.ReadFile(full); err == nil {
-					m.tabs[i].buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
-					m.tabs[i].syntaxCached = nil
-					m.tabs[i].diffText = ""
-				}
-			}
-		}
-	}
-
-	m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "user", Content: res.String()})
+	m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "user", Content: res})
 
 	if m.chatCancel != nil {
 		m.chatCancel()

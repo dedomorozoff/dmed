@@ -141,7 +141,7 @@ func (m Model) pluginStoreExtraRows() int {
 }
 
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.complExtraRows() - m.termExtraRows() - m.pluginStoreExtraRows()
+	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.pluginStoreExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -244,12 +244,12 @@ func (m Model) View() tea.View {
 	if m.pluginStoreOpen {
 		rows = append(rows, m.pluginStorePanel()...)
 	}
-	if m.complOpen && len(m.complItems) > 0 {
-		rows = append(rows, m.complPanel()...)
-	}
 	if m.termOpen {
 		rows = append(rows, m.terminalPanel()...)
 	}
+	// The completion popup floats under the edit line instead of being pinned
+	// to the bottom of the screen.
+	rows = m.overlayCompletion(rows)
 	var v tea.View
 	v.SetContent(lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n")))
 	v.AltScreen = true
@@ -257,7 +257,7 @@ func (m Model) View() tea.View {
 	v.MouseMode = tea.MouseModeCellMotion
 
 	// Terminal cursor: positioned at the editor cursor location.
-	if !m.gitOpen && !m.agentOpen && !m.agentReviewMode && !m.paletteOpen && !m.langChooserOpen && !m.pluginStoreOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
+	if !m.gitOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode && !m.paletteOpen && !m.langChooserOpen && !m.pluginStoreOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
 		cx, cy := m.cursorScreenPos()
 		v.Cursor = tea.NewCursor(cx, cy)
 	}
@@ -486,16 +486,22 @@ func (m Model) leftRailWidth() int {
 	return m.sidebarWidth()
 }
 
+// tabLabel is the text of one tab in the tab bar, shared by the renderer and
+// the mouse hit-test so that clicks line up with painted tabs.
+func (m Model) tabLabel(i int) string {
+	t := &m.tabs[i]
+	name := fmt.Sprintf(" %d:%s ", i+1, t.name(m.baseDir()))
+	if t.buf.Dirty() {
+		name += "* "
+	}
+	return name
+}
+
 func (m Model) tabBar() string {
 	var parts []string
 	activeTab := m.activeTabIndex()
-	base := m.baseDir()
 	for i := range m.tabs {
-		t := &m.tabs[i]
-		name := fmt.Sprintf(" %d:%s ", i+1, t.name(base))
-		if t.buf.Dirty() {
-			name += "* "
-		}
+		name := m.tabLabel(i)
 		if i == activeTab {
 			parts = append(parts, statusHiStyle.Render(name))
 		} else {
@@ -1518,7 +1524,7 @@ func (m Model) statusBar() string {
 		fileInfo = fmt.Sprintf("%s %s ", endings[t.lineEnding], enc)
 	}
 	hint := ""
-	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiCfgOpen && !m.helpOpen && !m.agentOpen && !m.agentReviewMode {
+	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiCfgOpen && !m.helpOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
 		hint = m.t("status.f1_help")
 		if m.layout != splitNone {
 			hint += m.t("status.f8_pane")

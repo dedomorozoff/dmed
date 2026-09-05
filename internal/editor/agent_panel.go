@@ -138,10 +138,29 @@ func (m *Model) agentTargets() []agent.TargetFile {
 	return targets
 }
 
-// openAgentPanel opens the agent task panel.
+// openAgentPanel opens the agent task panel and focuses it.
 func (m *Model) openAgentPanel() tea.Cmd {
 	cmd := m.ensureAgent()
 	m.agentOpen = true
+	m.agentFocus = true
+	m.msg = ""
+	return cmd
+}
+
+// toggleAgentPanel shows the panel if it is closed, and if it is already open
+// moves the keyboard focus between the panel and the editor without collapsing
+// it (Alt+L).
+func (m *Model) toggleAgentPanel() tea.Cmd {
+	cmd := m.ensureAgent()
+	if m.agentOpen {
+		m.agentFocus = !m.agentFocus
+		if m.agentFocus {
+			m.msg = ""
+		}
+		return cmd
+	}
+	m.agentOpen = true
+	m.agentFocus = true
 	m.msg = ""
 	return cmd
 }
@@ -149,6 +168,7 @@ func (m *Model) openAgentPanel() tea.Cmd {
 func (m *Model) startAgentTaskPrompt() tea.Cmd {
 	m.ensureAgent()
 	m.agentOpen = true
+	m.agentFocus = true
 	m.agentPrompt = true
 	m.agentPromptIn = nil
 	m.msg = ""
@@ -188,6 +208,11 @@ func (m *Model) handleAgent(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		m.agentOpen = false
+		m.agentFocus = false
+		m.msg = ""
+	case "tab":
+		// Move focus back to the editor; the panel stays open in the sidebar.
+		m.agentFocus = false
 		m.msg = ""
 	case "j", "down":
 		m.agentSel++
@@ -362,6 +387,7 @@ func (m *Model) startAgentReview(id string) {
 	m.agentReviewChange = 0
 	m.loadAgentChange(0)
 	m.agentOpen = false
+	m.agentFocus = false
 }
 
 // loadAgentChange loads the diff of the given change index into the review
@@ -457,35 +483,65 @@ func (m *Model) acceptAgentReview() {
 		return
 	}
 
+	paths := make([]string, len(task.Changes))
+	created, modified := 0, 0
+	for i := range task.Changes {
+		p := task.Changes[i].Path
+		paths[i] = p
+		// Existence must be captured before apply (the applier writes files,
+		// so after apply every target exists).
+		if fileExists(agentFullPath(m.baseDir(), p)) {
+			modified++
+		} else {
+			created++
+		}
+	}
+
 	if err := m.agentApplier.Apply(task.Changes); err != nil {
 		m.msg = m.t("msg.agent_apply_fail", err.Error())
 		m.agentReviewMode = false
 		return
 	}
 
-	paths := make([]string, len(task.Changes))
-	for i := range task.Changes {
-		paths[i] = task.Changes[i].Path
-	}
 	if err := m.agentCommit.Commit(paths, task.Prompt); err != nil {
 		m.msg = m.t("msg.agent_commit_fail", err.Error())
 	} else {
-		m.msg = m.t("msg.agent_applied")
+		// Open every created/modified file in a new tab (or focus an existing
+		// tab) and reload clean buffers so the changes are immediately visible.
+		for _, p := range paths {
+			m.openAiFile(filepath.ToSlash(p), true)
+		}
+		m.msg = m.t("msg.agent_applied_files", created, modified)
 	}
 
 	m.agentQueue.SetStatus(task.ID, agent.StatusApplied)
 	m.agentReviewMode = false
+	m.restoreAgentPanel()
+}
 
-	// Reload any open clean buffers whose files changed.
-	for _, p := range paths {
-		m.reloadChangedBuffer(p)
+// restoreAgentPanel brings the task list back on screen after a diff review
+// ended, so the panel does not silently collapse.
+func (m *Model) restoreAgentPanel() {
+	m.agentOpen = true
+	m.agentFocus = true
+	m.msg = ""
+}
+
+// agentFullPath resolves a change path (relative to the project root) to an
+// absolute filesystem path.
+func agentFullPath(base, rel string) string {
+	full := rel
+	if !filepath.IsAbs(full) {
+		full = filepath.Join(base, filepath.FromSlash(rel))
 	}
+	return full
 }
 
 // rejectAgentReview discards a task's proposed changes (returns it to the list).
 func (m *Model) rejectAgentReview() {
 	m.agentQueue.SetStatus(m.agentReviewTaskID, agent.StatusDone)
 	m.agentReviewMode = false
+	m.restoreAgentPanel()
 	m.msg = m.t("msg.agent_discarded")
 }
 
@@ -521,21 +577,39 @@ func (m Model) agentReviewBottom() string {
 	return line
 }
 
+// openAiFile opens a file that AI created or modified in a new tab (or focuses
+// the already-open tab, never duplicating) and reloads any clean open buffer so
+// the on-disk content shows immediately. dirty buffers are left untouched.
+func (m *Model) openAiFile(path string, reloadClean bool) {
+	m.focusOrOpen(path)
+	if reloadClean {
+		m.reloadChangedBuffer(path)
+	}
+}
+
+// fileExists reports whether a path exists on disk.
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
 // reloadChangedBuffer reloads a clean open buffer whose path matches, so an
-// applied agent edit is reflected immediately.
+// applied agent edit is reflected immediately. Both the given path and the
+// open tab paths are compared in absolute form.
 func (m *Model) reloadChangedBuffer(path string) {
+	full := path
+	if !filepath.IsAbs(full) {
+		full = filepath.Join(m.baseDir(), filepath.FromSlash(path))
+	}
+	absFull, _ := filepath.Abs(full)
 	for i := range m.tabs {
 		t := &m.tabs[i]
 		if t.path == "" || t.buf.Dirty() {
 			continue
 		}
 		absT, _ := filepath.Abs(t.path)
-		if absT != path && t.path != path {
+		if absT != absFull {
 			continue
-		}
-		full := path
-		if !filepath.IsAbs(full) {
-			full = filepath.Join(m.baseDir(), filepath.FromSlash(path))
 		}
 		if data, err := os.ReadFile(full); err == nil {
 			t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))

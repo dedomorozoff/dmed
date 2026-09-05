@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
@@ -273,19 +274,19 @@ type Model struct {
 	complStart  int
 
 	// Right-side AI chat panel (local Ollama)
-	chatOpen   bool
-	chatFocus  bool
-	chatIn     []rune
-	chatMsgs   []ai.Message
-	chatReply  string // assistant reply being streamed
-	chatErr    string
-	chatBusy   bool
-	chatRows   []chatRow
-	chatScroll int    // lines of scrollback from the bottom (0 = follow)
-	chatModel  string // resolved Ollama model tag
-	ai         ai.Provider
-	chatCh     <-chan chatEvent
-	chatCancel context.CancelFunc
+	chatOpen      bool
+	chatFocus     bool
+	chatIn        []rune
+	chatMsgs      []ai.Message
+	chatReply     string // assistant reply being streamed
+	chatErr       string
+	chatBusy      bool
+	chatRows      []chatRow
+	chatScroll    int    // lines of scrollback from the bottom (0 = follow)
+	chatModel     string // resolved Ollama model tag
+	ai            ai.Provider
+	chatCh        <-chan chatEvent
+	chatCancel    context.CancelFunc
 	chatToolRound int // remaining tool loop iterations for the current turn
 
 	// Inline AI request (Ctrl+I)
@@ -326,6 +327,7 @@ type Model struct {
 	agentCancel   context.CancelFunc
 	agentCh       chan struct{} // repaint signal from the agent worker
 	agentOpen     bool
+	agentFocus    bool // keys route to the agent panel; open+unfocused shows it in the sidebar
 	agentPrompt   bool // entering a new task prompt
 	agentPromptIn []rune
 	agentSel      int
@@ -360,9 +362,30 @@ var ruToEn = map[rune]rune{
 
 func normalizeKey(r rune) rune {
 	if en, ok := ruToEn[r]; ok {
-		return en
+		return unicode.ToLower(en)
+	}
+	if en, ok := ruToEn[unicode.ToLower(r)]; ok {
+		return unicode.ToLower(en)
 	}
 	return r
+}
+
+// c0Special reports whether a C0 control code is really one of the control
+// keys that ultraviolet delivers as a special key code (Tab, Enter, Escape)
+// rather than a Ctrl+letter chord that needs re-encoding.
+func c0Special(r rune) bool {
+	return r == '\t' || r == tea.KeyEnter || r == tea.KeyEsc
+}
+
+// controlByteKey converts a raw control byte (0x01–0x1f, NUL = Ctrl+Space)
+// into the matching ctrl+key message, preserving any other modifiers reported
+// by the terminal (notably Alt for Ctrl+Alt combos sent as ESC + a control
+// byte on some terminals).
+func controlByteKey(r rune, mod tea.KeyMod) tea.KeyPressMsg {
+	if r == 0 {
+		return tea.KeyPressMsg{Code: tea.KeySpace, Mod: mod | tea.ModCtrl}
+	}
+	return tea.KeyPressMsg{Code: r + 96, Mod: mod | tea.ModCtrl}
 }
 
 func New(paths ...string) Model {
@@ -1029,12 +1052,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// Some terminal stacks send bare control bytes (Ctrl+O as 0x0f, Ctrl+C as
-	// 0x03, bare Ctrl as NUL). Normalize them into proper ctrl+key messages so
-	// keybindings work and stray control bytes never reach the buffer.
+	// 0x03, Ctrl+Space as NUL, bare Ctrl as NUL). Normalize them into proper
+	// ctrl+key messages so keybindings work and stray control bytes never reach
+	// the buffer. Keep any modifiers already reported (e.g. Ctrl+Alt+letter
+	// arrives as ESC + a control byte on some terminals) instead of dropping
+	// them as before.
 	if len(msg.Text) == 1 {
-		if r := rune(msg.Text[0]); r < 32 && r != '\t' {
-			msg = tea.KeyPressMsg{Code: r + 96, Mod: tea.ModCtrl}
+		if r := rune(msg.Text[0]); r < 32 && !c0Special(r) {
+			msg = controlByteKey(r, msg.Mod)
 		}
+	} else if msg.Text == "" && msg.Code < 32 && !c0Special(msg.Code) {
+		msg = controlByteKey(msg.Code, msg.Mod)
 	}
 	// Normalize Russian ЙЦУКЕН → English QWERTY for layout-independent keys.
 	// Use []rune so multi-byte UTF-8 (Cyrillic) inputs don't leave trailing NULs.
@@ -1045,6 +1073,11 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			nr[i] = normalizeKey(r)
 		}
 		msg = tea.KeyPressMsg{Code: nr[0], Text: string(nr), Mod: msg.Mod}
+	} else if msg.Code != 0 {
+		// Key combos (Ctrl/Alt+letter) arrive with empty Text on many
+		// terminals; map their Cyrillic code to the physical QWERTY key too so
+		// "ctrl+в" (Russian layout) still matches "ctrl+d".
+		msg.Code = normalizeKey(msg.Code)
 	}
 	s := msg.String()
 	// Restore original text so text-input handlers (chat, search, prompt,
@@ -1094,7 +1127,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.toggleChat()
 		return nil
 	case "alt+l":
-		return m.openAgentPanel()
+		return m.toggleAgentPanel()
 	case "alt+i":
 		m.startInlineRequest()
 		return nil
@@ -1203,7 +1236,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.agentPrompt {
 		return m.handleAgentPrompt(msg)
 	}
-	if m.agentOpen {
+	if m.agentOpen && m.agentFocus {
 		return m.handleAgent(msg)
 	}
 	if m.chatOpen {
@@ -1899,107 +1932,6 @@ func (m *Model) saveSession() {
 		Cursors:    cursors,
 	}
 	_ = session.Save(session.DefaultPath(m.root), sess)
-}
-
-func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
-	y := msg.Y
-	x := msg.X
-
-	// Ignore clicks on the tab bar (row 0), status bar (row viewHeight+1),
-	// finder/palette/terminal panels.  Only handle the editor area.
-	h := m.viewHeight()
-	if y < 1 || y > h {
-		return nil
-	}
-
-	// When git panel is open with inline diff, clicks in the diff area
-	// toggle focus to the diff panel.
-	if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0 {
-		leftW := m.leftRailWidth()
-		if x >= leftW {
-			m.gitDiffFocused = true
-			return nil
-		}
-		// Click on the file list — unfocus diff, don't try to set buffer cursor
-		m.gitDiffFocused = false
-		return nil
-	}
-
-	// Map y to a buffer line via the active pane's scroll offset.
-	editorRow := y - 1
-	p := m.curPane()
-	t := &m.tabs[p.tabIdx]
-	ln := editorRow + p.offsetY
-
-	// Clamp line before accessing buffer.
-	if ln >= t.buf.LineCount() {
-		ln = t.buf.LineCount() - 1
-	}
-	if ln < 0 {
-		ln = 0
-	}
-
-	// Map x to a column, accounting for the left rail, gutter, and scroll.
-	leftW := m.leftRailWidth()
-	gw := m.gutterWidthForTab(t)
-
-	clickX := x - leftW - gw + p.offsetX
-	if clickX < 0 {
-		clickX = 0
-	}
-
-	// Convert expanded column back to raw column (accounting for tabs).
-	rawCol := expandedToRawCol(t.buf.LineAt(ln), clickX, m.cfg.Editor.TabWidth)
-
-	lineLen := t.buf.LineLen(ln)
-	if rawCol > lineLen {
-		rawCol = lineLen
-	}
-
-	// Alt+Click adds a secondary cursor instead of moving the main one.
-	if msg.Mod&tea.ModAlt != 0 {
-		if t.buf.AddCursor(ln, rawCol, rawCol, rawCol) {
-			m.msg = m.t("msg.added_cursor")
-		}
-		return nil
-	}
-
-	t.buf.SetCursor(ln, rawCol)
-	t.buf.Deselect()
-
-	// Start mouse drag for potential selection.
-	m.mouseDown = true
-
-	return nil
-}
-
-func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
-	// When git diff is focused, scroll the diff instead of the editor.
-	if m.gitDiffFocused {
-		if msg.Button == tea.MouseWheelUp {
-			m.diffOffsetY--
-		} else if msg.Button == tea.MouseWheelDown {
-			m.diffOffsetY++
-		}
-		m.clampDiffScroll(m.viewHeight())
-		return nil
-	}
-	p := m.curPane()
-	if msg.Button == tea.MouseWheelUp {
-		if p.offsetY > 0 {
-			p.offsetY--
-		}
-	} else if msg.Button == tea.MouseWheelDown {
-		t := &m.tabs[p.tabIdx]
-		maxOff := t.buf.LineCount() - m.paneViewHeight(m.activePane)
-		if maxOff < 0 {
-			maxOff = 0
-		}
-		if p.offsetY < maxOff {
-			p.offsetY++
-		}
-	}
-	return nil
 }
 
 func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {

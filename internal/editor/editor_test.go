@@ -418,14 +418,14 @@ func TestMouseScroll(t *testing.T) {
 		t.Fatalf("initial scroll offset must be 0, got %d", p.offsetY)
 	}
 
-	// Simulate mouse wheel down.
-	_ = m.handleMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	// Simulate mouse wheel down over the buffer area.
+	_ = m.handleMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 40, Y: 10})
 	if p.offsetY != 1 {
 		t.Fatalf("after wheel down: offset=%d, want 1", p.offsetY)
 	}
 
 	// Simulate mouse wheel up.
-	_ = m.handleMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	_ = m.handleMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelUp, X: 40, Y: 10})
 	if p.offsetY != 0 {
 		t.Fatalf("after wheel up: offset=%d, want 0", p.offsetY)
 	}

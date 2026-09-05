@@ -19,76 +19,80 @@ type GhostOutputMsg struct {
 // ghostEvent is the internal channel type for ghost streaming.
 type ghostEvent = chatEvent
 
-// ghostTrigger returns a tea.Cmd that starts a ghost text request.
+// ghostTrigger starts a ghost text request. Like the chat panel, it launches
+// the streaming goroutine immediately and returns a tea.Cmd that reads the
+// streamed output; returning the wait command (a tea.Cmd) here is what lets
+// bubbletea deliver GhostOutputMsg messages into Update.
 func (m *Model) ghostTrigger() tea.Cmd {
-	return func() tea.Msg {
-		if m.ai == nil {
-			return GhostOutputMsg{Err: context.Canceled}
-		}
-
-		t := m.activeTab()
-		curLine := t.buf.CurLine()
-		col := t.buf.Col()
-
-		// Build context: up to 5 lines before cursor + cursor line up to cursor position
-		startLine := curLine - 5
-		if startLine < 0 {
-			startLine = 0
-		}
-
-		var ctxLines []string
-		for i := startLine; i <= curLine && i < t.buf.LineCount(); i++ {
-			line := string(t.buf.LineAt(i))
-			if i == curLine {
-				// Truncate cursor line at cursor position
-				if col < len(line) {
-					line = line[:col]
-				}
-			}
-			ctxLines = append(ctxLines, line)
-		}
-		ctxText := strings.Join(ctxLines, "\n")
-
-		msgs := []ai.Message{
-			{
-				Role: "system",
-				Content: "You are a code completion assistant. " +
-					"Continue the code from where it left off. " +
-					"Return ONLY the raw code continuation. No explanations, " +
-					"no markdown fences, no comments — just the next lines of code. " +
-					"Stop at a natural boundary (end of block, blank line, etc).",
-			},
-			{
-				Role:    "user",
-				Content: "Continue this code:\n\n" + ctxText,
-			},
-		}
-
-		ch := make(chan chatEvent, 32)
-		m.ghostCh = ch
-		m.ghostText = ""
-		m.ghostLines = nil
-		m.ghostRow = curLine
-		m.ghostCol = col
-
-		go func() {
-			defer close(ch)
-			err := m.ai.ChatStream(context.Background(), msgs, func(delta string) {
-				ch <- chatEvent{delta: delta}
-			})
-			if err != nil {
-				ch <- chatEvent{err: err}
-			} else {
-				ch <- chatEvent{done: true}
-			}
-		}()
-
-		return waitForGhostOutput(ch)
+	if m.ai == nil {
+		return nil
 	}
+
+	t := m.activeTab()
+	curLine := t.buf.CurLine()
+	col := t.buf.Col()
+
+	// Build context: up to 5 lines before cursor + cursor line up to cursor position
+	startLine := curLine - 5
+	if startLine < 0 {
+		startLine = 0
+	}
+
+	var ctxLines []string
+	for i := startLine; i <= curLine && i < t.buf.LineCount(); i++ {
+		line := string(t.buf.LineAt(i))
+		if i == curLine {
+			// Truncate cursor line at cursor position
+			if col < len(line) {
+				line = line[:col]
+			}
+		}
+		ctxLines = append(ctxLines, line)
+	}
+	ctxText := strings.Join(ctxLines, "\n")
+
+	msgs := []ai.Message{
+		{
+			Role: "system",
+			Content: "You are a code completion assistant. " +
+				"Continue the code from where it left off. " +
+				"Return ONLY the raw code continuation. No explanations, " +
+				"no markdown fences, no comments — just the next lines of code. " +
+				"Stop at a natural boundary (end of block, blank line, etc).",
+		},
+		{
+			Role:    "user",
+			Content: "Continue this code:\n\n" + ctxText,
+		},
+	}
+
+	ch := make(chan chatEvent, 32)
+	m.ghostCh = ch
+	m.ghostText = ""
+	m.ghostLines = nil
+	m.ghostRow = curLine
+	m.ghostCol = col
+
+	go func() {
+		defer close(ch)
+		err := m.ai.ChatStream(context.Background(), msgs, func(delta string) {
+			ch <- chatEvent{delta: delta}
+		})
+		if err != nil {
+			ch <- chatEvent{err: err}
+		} else {
+			ch <- chatEvent{done: true}
+		}
+	}()
+
+	return waitForGhostOutput(ch)
 }
 
 // waitForGhostOutput returns a tea.Cmd that reads the next ghost streaming event.
 func waitForGhostOutput(ch <-chan chatEvent) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
 	return func() tea.Msg {
 		ev, ok := <-ch
 		if !ok {

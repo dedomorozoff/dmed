@@ -117,17 +117,7 @@ func (m *Model) handlePluginStore(msg tea.KeyPressMsg) tea.Cmd {
 		if m.pluginStoreSel >= 0 && m.pluginStoreSel < len(items) {
 			it := items[m.pluginStoreSel]
 			m.pluginStoreOpen = false
-			if m.pluginInstalled(it.File) {
-				m.uninstallStoreItem(it.File)
-			} else if it.Remote {
-				m.pendingStoreInstall = it.File
-				m.msg = m.t("plugin.downloading", it.File)
-				repo, dir, branch := m.pluginRepoConfig()
-				return m.fetchStoreSourceCmd(repo, dir, branch, it.File)
-			} else {
-				m.installFromSource(it.File, bundled.Source(it.File))
-			}
-			return nil
+			return m.activateStoreItem(it)
 		}
 		m.pluginStoreOpen = false
 	case "up", "k":
@@ -139,6 +129,23 @@ func (m *Model) handlePluginStore(msg tea.KeyPressMsg) tea.Cmd {
 			m.pluginStoreSel = (m.pluginStoreSel + 1) % len(items)
 		}
 	}
+	return nil
+}
+
+// activateStoreItem installs, uninstalls, or downloads a store item. Shared
+// by the keyboard Enter handler and mouse clicks.
+func (m *Model) activateStoreItem(it storeItem) tea.Cmd {
+	if m.pluginInstalled(it.File) {
+		m.uninstallStoreItem(it.File)
+		return nil
+	}
+	if it.Remote {
+		m.pendingStoreInstall = it.File
+		m.msg = m.t("plugin.downloading", it.File)
+		repo, dir, branch := m.pluginRepoConfig()
+		return m.fetchStoreSourceCmd(repo, dir, branch, it.File)
+	}
+	m.installFromSource(it.File, bundled.Source(it.File))
 	return nil
 }
 
