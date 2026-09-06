@@ -262,6 +262,35 @@ func TestQuitDirtyConfirmCyrillic(t *testing.T) {
 	}
 }
 
+func TestPasteIntoBuffer(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "a.txt", "alpha\n")
+	m := New(f1)
+	m.width, m.height = 80, 24
+
+	next, _ := m.Update(tea.PasteMsg{Content: "INSERTED"})
+	m = next.(Model)
+	if m.cur().buf.Text() != "INSERTEDalpha\n" {
+		t.Fatalf("buffer = %q, want pasted text before existing content", m.cur().buf.Text())
+	}
+}
+
+func TestPasteIntoChatInput(t *testing.T) {
+	m := New()
+	before := m.cur().buf.Text()
+	m.chatOpen = true
+	m.chatFocus = true
+
+	next, _ := m.Update(tea.PasteMsg{Content: "explain this"})
+	m = next.(Model)
+	if string(m.chatIn) != "explain this" {
+		t.Fatalf("chat input = %q, want pasted text", string(m.chatIn))
+	}
+	if m.cur().buf.Text() != before {
+		t.Fatalf("paste must not leak into the buffer, changed %q -> %q", before, m.cur().buf.Text())
+	}
+}
+
 func TestQuitCopySkipsConfirm(t *testing.T) {
 	dir := t.TempDir()
 	f1 := writeTemp(t, dir, "a.txt", "alpha\n")

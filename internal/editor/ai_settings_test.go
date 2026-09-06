@@ -60,6 +60,32 @@ func TestAISettingsEditAndCommit(t *testing.T) {
 	}
 }
 
+// TestAISettingsPaste verifies pasted text (bracketed-paste PasteMsg) lands in
+// the field being edited instead of the editor buffer.
+func TestAISettingsPaste(t *testing.T) {
+	m := New()
+	m.startAISettings()
+
+	for i := 0; i < 1; i++ {
+		m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.aiCfgEdit {
+		t.Fatal("should be in edit mode after Enter")
+	}
+
+	next, _ := m.Update(tea.PasteMsg{Content: "deepseek-r1"})
+	m = next.(Model)
+	got := string(m.aiCfgIn)
+	if !strings.HasSuffix(got, "deepseek-r1") {
+		t.Fatalf("field = %q, want pasted text appended", got)
+	}
+	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !strings.HasSuffix(m.cfg.AI.Model, "deepseek-r1") {
+		t.Fatalf("model = %q, want pasted text committed", m.cfg.AI.Model)
+	}
+}
+
 // TestAISettingsEscCloses verifies Esc exits, and Esc inside edit reverts.
 func TestAISettingsEscCloses(t *testing.T) {
 	m := New()

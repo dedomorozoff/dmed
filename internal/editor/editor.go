@@ -635,6 +635,52 @@ func (m *Model) refind() {
 	}
 }
 
+// pasteInput inserts pasted text into the active field, mirroring where typed
+// keys land (see handleKey routing), and falls back to the editor buffer.
+func (m *Model) pasteInput(text string) {
+	switch {
+	case m.aiCfgEdit:
+		m.aiCfgIn = append(m.aiCfgIn, []rune(text)...)
+		return
+	case m.aiInlineOpen:
+		m.aiInlineInput = append(m.aiInlineInput, []rune(text)...)
+		return
+	case m.agentPrompt:
+		m.agentPromptIn = append(m.agentPromptIn, []rune(text)...)
+		return
+	case m.chatOpen && m.chatFocus:
+		m.chatIn = append(m.chatIn, []rune(text)...)
+		return
+	case m.promptSave:
+		m.promptSaveIn = append(m.promptSaveIn, []rune(text)...)
+		return
+	case m.promptOpen:
+		m.promptIn = append(m.promptIn, []rune(text)...)
+		return
+	case m.searchOpen:
+		if m.replaceOpen && !m.replaceFocusFind {
+			m.replaceWith = append(m.replaceWith, []rune(text)...)
+		} else {
+			m.searchQuery = append(m.searchQuery, []rune(text)...)
+			m.updateSearchMatches(false)
+		}
+		return
+	case m.finderOpen:
+		m.finderQ = append(m.finderQ, []rune(text)...)
+		m.refind()
+		return
+	case m.paletteOpen:
+		m.paletteQ = append(m.paletteQ, []rune(text)...)
+		return
+	}
+	if m.cur().buf.HasMultipleCursors() {
+		m.cur().buf.MultiInsertText(text)
+	} else {
+		m.cur().buf.InsertText(text)
+	}
+	m.msg = m.t("msg.pasted")
+}
+
 func (m *Model) handleFinder(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
@@ -995,14 +1041,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case tea.PasteMsg:
-		text := msg.String()
-		if text != "" {
-			if m.cur().buf.HasMultipleCursors() {
-				m.cur().buf.MultiInsertText(text)
-			} else {
-				m.cur().buf.InsertText(text)
-			}
-			m.msg = m.t("msg.pasted")
+		if text := msg.String(); text != "" {
+			m.pasteInput(text)
 		}
 	case tea.KeyPressMsg:
 		if debugKeys {
