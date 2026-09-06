@@ -66,7 +66,7 @@ func (m *Model) handleInlineRequest(msg tea.KeyPressMsg) tea.Cmd {
 		m.aiInlineBusy = false
 		m.msg = ""
 	case "enter":
-		m.submitInlineRequest()
+		return m.submitInlineRequest()
 	case "backspace":
 		if n := len(m.aiInlineInput); n > 0 {
 			m.aiInlineInput = m.aiInlineInput[:n-1]
@@ -79,11 +79,13 @@ func (m *Model) handleInlineRequest(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-// submitInlineRequest sends the selected text + instruction to the AI.
-func (m *Model) submitInlineRequest() {
+// submitInlineRequest sends the selected text + instruction to the AI. It
+// returns a tea.Cmd that reads the stream; without it no InlineOutputMsg would
+// ever be delivered and the rewrite would appear to hang at "AI: rewriting...".
+func (m *Model) submitInlineRequest() tea.Cmd {
 	instruction := strings.TrimSpace(string(m.aiInlineInput))
 	if instruction == "" || m.aiInlineBusy {
-		return
+		return nil
 	}
 	if m.ai == nil {
 		m.ai = ai.NewProvider(ai.Config{
@@ -97,7 +99,7 @@ func (m *Model) submitInlineRequest() {
 		m.pickChatModel()
 		if m.chatModel == "" {
 			m.msg = "no model available; check provider config"
-			return
+			return nil
 		}
 	}
 
@@ -153,6 +155,7 @@ func (m *Model) submitInlineRequest() {
 			}
 		}
 	}()
+	return waitForInlineOutput(ch)
 }
 
 // cancelInlineRequest aborts a streaming inline AI request. The channel is

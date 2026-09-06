@@ -9,8 +9,20 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// isolateHomeConfig points the user home dir at a temp dir so the tests run
+// against default configuration instead of whatever ~/.dmed.conf exists on
+// the machine (config.Load reads os.UserHomeDir, which on Windows is
+// USERPROFILE and on Unix is HOME — set both for cross-platform coverage).
+func isolateHomeConfig(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("USERPROFILE", dir)
+	t.Setenv("HOME", dir)
+}
+
 // TestAISettingsProviderCycle verifies ←/→ flips the provider on the choice row.
 func TestAISettingsProviderCycle(t *testing.T) {
+	isolateHomeConfig(t)
 	m := New()
 	m.startAISettings()
 	if !m.aiCfgOpen {
@@ -31,6 +43,7 @@ func TestAISettingsProviderCycle(t *testing.T) {
 
 // TestAISettingsEditAndCommit edits the Model field and commits it via Enter.
 func TestAISettingsEditAndCommit(t *testing.T) {
+	isolateHomeConfig(t)
 	m := New()
 	m.startAISettings()
 
@@ -63,6 +76,7 @@ func TestAISettingsEditAndCommit(t *testing.T) {
 // TestAISettingsPaste verifies pasted text (bracketed-paste PasteMsg) lands in
 // the field being edited instead of the editor buffer.
 func TestAISettingsPaste(t *testing.T) {
+	isolateHomeConfig(t)
 	m := New()
 	m.startAISettings()
 
@@ -88,6 +102,7 @@ func TestAISettingsPaste(t *testing.T) {
 
 // TestAISettingsEscCloses verifies Esc exits, and Esc inside edit reverts.
 func TestAISettingsEscCloses(t *testing.T) {
+	isolateHomeConfig(t)
 	m := New()
 	m.startAISettings()
 	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEsc})
@@ -99,6 +114,7 @@ func TestAISettingsEscCloses(t *testing.T) {
 // TestAISettingsSaveWritesConfig verifies Ctrl+S persists the [ai] section to
 // the project config and reloads values.
 func TestAISettingsSaveWritesConfig(t *testing.T) {
+	isolateHomeConfig(t)
 	dir := t.TempDir()
 	m := New(dir)
 	m.startAISettings()

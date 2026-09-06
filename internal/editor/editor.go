@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
@@ -314,6 +315,7 @@ type Model struct {
 	ghostVisible bool     // whether ghost overlay is active
 	ghostCh      <-chan chatEvent
 	ghostText    string // accumulated text during streaming
+	ghostCancel  context.CancelFunc
 
 	quitConfirm bool
 	quitTab     bool // true if confirming close of a single tab (not quit)
@@ -346,6 +348,13 @@ type Model struct {
 
 	// Mouse state
 	mouseDown bool
+
+	// Double-click detection: last click position/time plus a validity flag so
+	// a third quick click starts a fresh pair instead of chaining.
+	lastClickX     int
+	lastClickY     int
+	lastClickTime  time.Time
+	lastClickValid bool
 }
 
 var debugKeys = os.Getenv("DMED_DEBUG_KEYS") != ""
@@ -443,6 +452,15 @@ func New(paths ...string) Model {
 		m.tabs = append(m.tabs, tab{buf: buffer.New()})
 	}
 	m.cfg = config.Load(m.root)
+	// Create the AI provider up front so chat, inline, and ghost all work even
+	// before the chat panel is first opened (previously ghost silently no-opped
+	// until toggleChat ran).
+	m.ai = ai.NewProvider(ai.Config{
+		Type:   ai.ProviderType(m.cfg.AI.Provider),
+		URL:    m.cfg.AI.OllamaURL,
+		Model:  m.cfg.AI.Model,
+		APIKey: m.cfg.AI.APIKey,
+	})
 	m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
 	syntax.SetDefault(m.cfg.Editor.SyntaxTheme)
 	m.initPanes()
@@ -541,9 +559,17 @@ func (m *Model) jumpTab(n int) {
 }
 
 func (m *Model) closeTab() tea.Cmd {
-	idx := m.activeTabIndex()
+	return m.closeTabAt(m.activeTabIndex())
+}
+
+// closeTabAt closes the tab at the given index (used by middle-click on the
+// tab bar, which targets a specific tab rather than the active one).
+func (m *Model) closeTabAt(idx int) tea.Cmd {
 	if len(m.tabs) == 1 {
 		return tea.Quit
+	}
+	if idx < 0 || idx >= len(m.tabs) {
+		return nil
 	}
 	if m.layout != splitNone {
 		// Closing a tab in a split also collapses the split.

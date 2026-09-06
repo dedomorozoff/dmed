@@ -28,6 +28,13 @@ func (m *Model) ghostTrigger() tea.Cmd {
 		return nil
 	}
 
+	// Cancel any in-flight ghost stream (e.g. from the auto-trigger after a
+	// previous Enter) so concurrent requests can't leak goroutines or mix
+	// stale deltas into the current suggestion.
+	if m.ghostCancel != nil {
+		m.ghostCancel()
+	}
+
 	t := m.activeTab()
 	curLine := t.buf.CurLine()
 	col := t.buf.Col()
@@ -66,6 +73,9 @@ func (m *Model) ghostTrigger() tea.Cmd {
 		},
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	m.ghostCancel = cancel
+
 	ch := make(chan chatEvent, 32)
 	m.ghostCh = ch
 	m.ghostText = ""
@@ -75,13 +85,22 @@ func (m *Model) ghostTrigger() tea.Cmd {
 
 	go func() {
 		defer close(ch)
-		err := m.ai.ChatStream(context.Background(), msgs, func(delta string) {
-			ch <- chatEvent{delta: delta}
+		err := m.ai.ChatStream(ctx, msgs, func(delta string) {
+			select {
+			case ch <- chatEvent{delta: delta}:
+			case <-ctx.Done():
+			}
 		})
 		if err != nil {
-			ch <- chatEvent{err: err}
+			select {
+			case ch <- chatEvent{err: err}:
+			case <-ctx.Done():
+			}
 		} else {
-			ch <- chatEvent{done: true}
+			select {
+			case ch <- chatEvent{done: true}:
+			case <-ctx.Done():
+			}
 		}
 	}()
 
@@ -124,6 +143,10 @@ func (m *Model) handleGhostOutput(msg GhostOutputMsg) tea.Cmd {
 
 // dismissGhost clears the ghost text state.
 func (m *Model) dismissGhost() {
+	if m.ghostCancel != nil {
+		m.ghostCancel()
+		m.ghostCancel = nil
+	}
 	m.ghostLines = nil
 	m.ghostVisible = false
 	m.ghostText = ""

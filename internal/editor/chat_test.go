@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"dmed/internal/buffer"
 )
 
 func TestWrapRunes(t *testing.T) {
@@ -157,4 +159,46 @@ func TestEditorAreaWidthShrinksForChat(t *testing.T) {
 func TestCancelChatNilSafe(t *testing.T) {
 	m := newChatModel()
 	m.cancelChat() // must not panic
+}
+
+// TestChatSubmitReturnsStreamCmd verifies chatSubmit only starts a stream (and
+// returns a cmd to read it) when there is input and no stream is running.
+// Returning a cmd for the running stream's channel on a busy submit used to
+// spawn a second consumer that garbled deltas and lost the terminal event.
+func TestChatSubmitReturnsStreamCmdOnlyWhenStarting(t *testing.T) {
+	m := newChatModel()
+	m.toggleChat()
+	m.chatModel = "test-model"
+	m.ai = &fakeProvider{}
+
+	if cmd := m.chatSubmit(); cmd != nil {
+		t.Fatal("empty submit should not start a stream")
+	}
+	m.chatIn = []rune("hello")
+	m.chatBusy = true
+	if cmd := m.chatSubmit(); cmd != nil {
+		t.Fatal("busy submit should not start a stream")
+	}
+	m.chatBusy = false
+	if cmd := m.chatSubmit(); cmd == nil {
+		t.Fatal("ready submit should return a stream cmd")
+	}
+}
+
+// TestInlineSubmitReturnsStreamCmd verifies inline rewrite submits return the
+// wait command. Previously the cmd was dropped, so the stream goroutine filled
+// its channel unread and the rewrite hung at "AI: rewriting...".
+func TestInlineSubmitReturnsStreamCmd(t *testing.T) {
+	m := New()
+	m.width = 100
+	m.height = 30
+	m.tabs = []tab{{buf: buffer.Load("func foo() {\n}\n")}}
+	m.initPanes()
+	m.ai = &fakeProvider{}
+	m.chatModel = "test-model"
+	m.startInlineRequest()
+	m.aiInlineInput = []rune("rename")
+	if cmd := m.submitInlineRequest(); cmd == nil {
+		t.Fatal("inline submit should return a stream cmd")
+	}
 }

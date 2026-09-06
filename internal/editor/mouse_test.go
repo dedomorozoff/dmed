@@ -34,6 +34,45 @@ func TestTabBarClickSwitchesTab(t *testing.T) {
 	}
 }
 
+func TestMiddleClickClosesTab(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, t.TempDir())
+	a := writeTemp(t, dir, "a.txt", "alpha\n")
+	b := writeTemp(t, dir, "b.txt", "bravo\n")
+
+	m := New(a)
+	m.width, m.height = 80, 24
+	m.openPath(b)
+	m.setActiveTab(0)
+
+	// Middle-click the second tab's label closes it.
+	w0 := lipgloss.Width(m.tabLabel(0))
+	_ = m.handleMouseClick(tea.MouseClickMsg{X: w0 + 1, Y: 0, Button: tea.MouseMiddle})
+
+	if len(m.tabs) != 1 || m.activeTab().path != a {
+		t.Fatalf("middle-click should close the clicked tab; tabs=%d active=%q", len(m.tabs), m.activeTab().path)
+	}
+}
+
+func TestDoubleClickActivatesTreeItem(t *testing.T) {
+	root := mkProj(t)
+	chdir(t, t.TempDir())
+
+	m := New(root)
+	m.width, m.height = 100, 24
+
+	// Double-click the file row (b.txt is index 1 in the tree: dirs first).
+	_ = m.handleMouseClick(tea.MouseClickMsg{X: 1, Y: 2})
+	_ = m.handleMouseClick(tea.MouseClickMsg{X: 1, Y: 2})
+
+	if m.activeTab().path != filepath.Join(root, "b.txt") {
+		t.Fatalf("double-click on file must open it, got %q", m.activeTab().path)
+	}
+	if m.treeFocus {
+		t.Fatal("double-click on file must return focus to editor")
+	}
+}
+
 func TestFinderItemClickOpensFile(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)

@@ -137,8 +137,7 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 		m.chatFocus = false
 		m.msg = ""
 	case "enter":
-		m.chatSubmit()
-		return waitForChatOutput(m.chatCh)
+		return m.chatSubmit()
 	case "backspace":
 		if n := len(m.chatIn); n > 0 {
 			m.chatIn = m.chatIn[:n-1]
@@ -164,10 +163,15 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-func (m *Model) chatSubmit() {
+// chatSubmit sends the current input to the AI. It returns a tea.Cmd that
+// reads the stream only if a request actually went out; when the input is
+// empty or a stream is already running it returns nil and leaves the input
+// intact. A nil return also avoids starting a second consumer on the running
+// stream's channel (which would garble deltas and lose the terminal event).
+func (m *Model) chatSubmit() tea.Cmd {
 	text := strings.TrimSpace(string(m.chatIn))
 	if text == "" || m.chatBusy {
-		return // keep the input when the request cannot go out
+		return nil // keep the input when the request cannot go out
 	}
 	m.chatIn = nil
 	if m.chatModel == "" {
@@ -175,7 +179,7 @@ func (m *Model) chatSubmit() {
 		if m.chatModel == "" {
 			m.chatErr = "no model available; start ollama or run: ollama pull llama3.2"
 			m.rebuildChatRows()
-			return
+			return nil
 		}
 	}
 
@@ -212,6 +216,7 @@ func (m *Model) chatSubmit() {
 			}
 		}
 	}()
+	return waitForChatOutput(ch)
 }
 
 // chatRequestMessages snapshots the conversation with a system prompt that

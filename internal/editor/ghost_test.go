@@ -71,8 +71,18 @@ func TestGhostTriggerNilProvider(t *testing.T) {
 	m.height = 30
 	m.tabs = []tab{{buf: buffer.Load("x\n")}}
 	m.initPanes()
+	m.ai = nil // simulate a model without a provider
 	if cmd := m.ghostTrigger(); cmd != nil {
 		t.Fatal("ghostTrigger with nil provider should return nil command")
+	}
+}
+
+// TestNewCreatesAIProvider verifies a fresh model has a provider configured so
+// chat, inline, and ghost all work before the chat panel is ever opened.
+func TestNewCreatesAIProvider(t *testing.T) {
+	m := New()
+	if m.ai == nil {
+		t.Fatal("New() should create an AI provider")
 	}
 }
 

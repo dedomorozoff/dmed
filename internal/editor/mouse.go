@@ -1,6 +1,8 @@
 package editor
 
 import (
+	"time"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -46,13 +48,38 @@ func (m Model) complStartRow() int {
 }
 func (m Model) termStartRow() int { return m.storeStartRow() + m.pluginStoreExtraRows() }
 
+// doubleClickInterval is the window within which two clicks on the same spot
+// count as a double click.
+const doubleClickInterval = 400 * time.Millisecond
+
 func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 	x, y := msg.X, msg.Y
+
+	// A double click is a second press on the same cell within the interval.
+	// bubbletea v2 does not synthesize it; we detect it from consecutive
+	// clicks. Only the left button participates so middle-click (tab close)
+	// and right-click never collide with word/pane activation.
+	left := msg.Button != tea.MouseRight && msg.Button != tea.MouseMiddle && msg.Button != tea.MouseBackward && msg.Button != tea.MouseForward
+	dbl := false
+	if left {
+		dbl = m.lastClickValid && m.lastClickX == x && m.lastClickY == y &&
+			time.Since(m.lastClickTime) < doubleClickInterval
+		if dbl {
+			m.lastClickValid = false // reset so a third quick click starts a new pair
+		} else {
+			m.lastClickX, m.lastClickY, m.lastClickTime = x, y, time.Now()
+			m.lastClickValid = true
+		}
+	}
+
 	h := m.viewHeight()
 
 	// The tab bar is always row 0.
 	if y == 0 {
 		if idx := m.tabAtX(x); idx >= 0 {
+			if msg.Button == tea.MouseMiddle {
+				return m.closeTabAt(idx)
+			}
 			m.setActiveTab(idx)
 		}
 		return nil
@@ -77,7 +104,11 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 
 	// Left sidebar rail: agent tasks, git panel, project tree.
 	if x < m.leftRailWidth() {
-		return m.clickLeftRail(x, y)
+		cmd := m.clickLeftRail(x, y)
+		if dbl {
+			m.activatePanelItem()
+		}
+		return cmd
 	}
 
 	// Git inline diff preview fills the rest of the editor area.
@@ -247,6 +278,32 @@ func (m *Model) clickLeftRail(x, y int) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// activatePanelItem runs the same action as pressing Enter in the currently
+// focused left-rail panel, so a double click selects and activates an item.
+func (m *Model) activatePanelItem() {
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	switch {
+	case m.agentOpen:
+		m.handleAgent(enter)
+	case m.gitOpen:
+		switch m.gitMode {
+		case gitModeStatus:
+			m.handleGitStatus(enter)
+		case gitModeLog:
+			// There is no Enter binding here; a double click focuses the commit
+			// diff so the wheel can scroll it.
+			if len(m.diffRows) > 0 {
+				m.gitDiffFocused = true
+				m.clampDiffScroll(m.viewHeight())
+			}
+		case gitModeBranch:
+			m.handleGitBranch(enter)
+		}
+	case m.sidebarOn():
+		m.handleTree(enter)
+	}
 }
 
 // clickBuffer places the cursor (or a secondary cursor with Alt+Click) in the
