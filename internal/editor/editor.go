@@ -1288,6 +1288,14 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.aiInlineOpen {
 		return m.handleInlineRequest(msg)
 	}
+	// While the inline AI streams a rewrite, swallow all keys; Esc/Ctrl+C
+	// abort the request.
+	if m.aiInlineBusy {
+		if s == "esc" || s == "ctrl+c" {
+			m.cancelInlineRequest()
+		}
+		return nil
+	}
 	if m.quitConfirm {
 		return m.handleQuitConfirm(msg)
 	}

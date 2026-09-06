@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -43,6 +44,43 @@ func TestInlineReviewCyrillicKeys(t *testing.T) {
 	}
 	if !strings.Contains(m.cur().buf.Text(), "hello brave world") {
 		t.Fatalf("«н» must apply the proposal, got %q", m.cur().buf.Text())
+	}
+}
+
+// TestInlineCancelWhileBusy verifies Esc aborts a streaming inline request and
+// that the stale streamed output arriving afterwards is ignored, not shown as
+// an error.
+func TestInlineCancelWhileBusy(t *testing.T) {
+	m := New()
+	m.aiInlineBusy = true
+	canceled := false
+	m.aiInlineCancel = func() { canceled = true }
+	ch := make(chan chatEvent, 1)
+	m.aiInlineCh = ch
+	m.aiInlineProposal = "partial"
+	m.msg = "AI: rewriting..."
+
+	next := press(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if !canceled {
+		t.Fatal("Esc must cancel the running request")
+	}
+	if next.aiInlineBusy {
+		t.Fatal("busy flag cleared on cancel")
+	}
+	if next.aiInlineCh != nil {
+		t.Fatal("channel must be cleared on cancel")
+	}
+	if next.aiInlineProposal != "" {
+		t.Fatalf("proposal must be cleared on cancel, got %q", next.aiInlineProposal)
+	}
+
+	// A stale event buffered before the cancel must be swallowed.
+	cmd := next.handleInlineOutput(InlineOutputMsg{Err: errors.New("context canceled")})
+	if cmd != nil {
+		t.Fatalf("stale output must be ignored after cancel, got cmd %v", cmd)
+	}
+	if next.msg != "" {
+		t.Fatalf("stale error must not surface in the status line, got %q", next.msg)
 	}
 }
 

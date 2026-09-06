@@ -155,9 +155,26 @@ func (m *Model) submitInlineRequest() {
 	}()
 }
 
+// cancelInlineRequest aborts a streaming inline AI request. The channel is
+// cleared so any stale output event still in flight is ignored by
+// handleInlineOutput instead of surfacing as an error.
+func (m *Model) cancelInlineRequest() {
+	if m.aiInlineCancel != nil {
+		m.aiInlineCancel()
+		m.aiInlineCancel = nil
+	}
+	m.aiInlineBusy = false
+	m.aiInlineCh = nil
+	m.aiInlineProposal = ""
+	m.msg = ""
+}
+
 // handleInlineOutput processes a streaming delta or completion from the inline
 // AI goroutine. Called from the main Update() loop.
 func (m *Model) handleInlineOutput(msg InlineOutputMsg) tea.Cmd {
+	if m.aiInlineCh == nil {
+		return nil
+	}
 	if msg.Err != nil {
 		m.msg = "AI error: " + msg.Err.Error()
 		m.aiInlineBusy = false
