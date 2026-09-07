@@ -25,7 +25,7 @@ func waitForInlineOutput(ch <-chan chatEvent) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-ch
 		if !ok {
-			return nil
+			return InlineOutputMsg{Done: true}
 		}
 		return InlineOutputMsg{Delta: ev.delta, Err: ev.err, Done: ev.done}
 	}

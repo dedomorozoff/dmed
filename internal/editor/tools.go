@@ -136,7 +136,7 @@ func executeTool(m *Model, tc toolCall) string {
 		q := tc.arg
 		return searchFilesForContent(base, q)
 	case "RUN":
-		return runCommand(tc.arg)
+		return runCommand(m.root, tc.arg)
 	case "EDIT":
 		return applyToolEdit(base, tc.arg, tc.body)
 	default:
@@ -186,8 +186,9 @@ func searchFilesForContent(base, q string) string {
 	return "[SEARCH " + q + "] " + strings.Join(hits, ", ")
 }
 
-// runCommand executes a shell command with a timeout and captures output.
-func runCommand(cmdline string) string {
+// runCommand executes a shell command in dir (the project root) with a timeout
+// and captures output.
+func runCommand(dir, cmdline string) string {
 	if cmdline == "" {
 		return "[RUN] empty command"
 	}
@@ -199,6 +200,9 @@ func runCommand(cmdline string) string {
 	} else {
 		cmd = exec.CommandContext(ctx, "sh", "-c", cmdline)
 	}
+	if dir != "" {
+		cmd.Dir = dir
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "[RUN error] " + err.Error() + "\n" + string(out)
@@ -208,6 +212,23 @@ func runCommand(cmdline string) string {
 		res = "(no output)"
 	}
 	return "[RUN " + cmdline + "]\n" + res
+}
+
+// snapshotFiles returns the set of regular file paths under root so that
+// newly created files can be detected after a RUN command.
+func snapshotFiles(root string) map[string]struct{} {
+	snap := make(map[string]struct{})
+	if root == "" {
+		return snap
+	}
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		snap[path] = struct{}{}
+		return nil
+	})
+	return snap
 }
 
 // applyToolEdit writes the given content to a file (respecting diff review is

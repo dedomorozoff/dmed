@@ -84,6 +84,52 @@ func TestInlineCancelWhileBusy(t *testing.T) {
 	}
 }
 
+// TestInlineCompletesIntoReview verifies that when the stream goroutine closes
+// its channel (ChatStream returned nil) the inline request transitions out of
+// the busy state and into diff review instead of hanging at "AI: rewriting...".
+func TestInlineCompletesIntoReview(t *testing.T) {
+	m := New()
+	m.width = 100
+	m.height = 30
+	m.cur().buf = buffer.Load("hello world\n")
+	m.aiInlineOriginal = "hello world"
+	m.aiInlineSelStart = [2]int{0, 0}
+	m.aiInlineSelEnd = [2]int{0, len("hello world")}
+	m.aiInlineBusy = true
+	m.msg = "AI: rewriting..."
+
+	// waitForInlineOutput must turn a closed channel into a Done event (this
+	// was the bug: it returned nil, so the request hung forever). Feed one and
+	// then close to mirror the goroutine's defer-close on success.
+	ch := make(chan chatEvent, 1)
+	m.aiInlineCh = ch
+	cmd := waitForInlineOutput(ch)
+	if cmd == nil {
+		t.Fatal("waitForInlineOutput should return a cmd for a live channel")
+	}
+	ch <- chatEvent{delta: "hello cruel world"}
+	close(ch)
+	msg1 := cmd().(InlineOutputMsg)
+	if msg1.Delta != "hello cruel world" || msg1.Done {
+		t.Fatalf("first event = %+v", msg1)
+	}
+	cmd2 := m.handleInlineOutput(msg1)
+	if !m.aiInlineBusy {
+		t.Fatal("busy must stay set after a partial delta")
+	}
+	msg2 := cmd2().(InlineOutputMsg)
+	if !msg2.Done {
+		t.Fatalf("closed channel must yield Done, got %+v", msg2)
+	}
+	m.handleInlineOutput(msg2)
+	if m.aiInlineBusy {
+		t.Fatal("busy must clear after stream completes")
+	}
+	if !m.aiReviewMode {
+		t.Fatal("completed stream must enter review mode")
+	}
+}
+
 func TestSurroundingContextSingleLine(t *testing.T) {
 	b := buffer.Load("l0\nl1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n")
 	before, after := surroundingContext(b, 4, 4)
@@ -213,5 +259,38 @@ func TestRunChatToolsFocusOpenTabNoDuplicate(t *testing.T) {
 
 	if len(m.tabs) != before {
 		t.Fatalf("editing an open file must not duplicate its tab: %d -> %d", before, len(m.tabs))
+	}
+}
+
+func TestRunChatToolsOpensRunCreatedFile(t *testing.T) {
+	dir := t.TempDir()
+
+	m := New()
+	m.root = dir
+	m.tabs = []tab{{buf: buffer.New()}}
+	m.initPanes()
+
+	newPath := filepath.Join(dir, "made.txt")
+	rel := "made.txt"
+	newCmd := "cmd /c type nul > " + filepath.ToSlash(rel)
+	res, created, modified := m.runChatTools([]toolCall{{name: "RUN", arg: newCmd}})
+
+	if len(created) != 1 || created[0] != "made.txt" {
+		t.Fatalf("created = %v", created)
+	}
+	if len(modified) != 0 {
+		t.Fatalf("modified = %v", modified)
+	}
+	if !strings.Contains(res, "created: made.txt") {
+		t.Fatalf("results missing created summary:\n%s", res)
+	}
+	var found bool
+	for _, tb := range m.tabs {
+		if tb.path == newPath {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no tab for RUN-created file; tabs=%+v", m.tabs)
 	}
 }

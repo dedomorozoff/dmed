@@ -269,24 +269,37 @@ func (m *Model) runChatTools(tools []toolCall) (res string, created, modified []
 			full = resolvePath(m.root, tc.arg)
 			existed = fileExists(full)
 		}
+		// Snapshot files before RUN so we can detect newly created files.
+		var beforeRun map[string]struct{}
+		if tc.name == "RUN" {
+			beforeRun = snapshotFiles(m.root)
+		}
 		b.WriteString("\n=== TOOL RESULT: " + tc.name)
 		if tc.arg != "" {
 			b.WriteString(": " + tc.arg)
 		}
 		b.WriteString(" ===\n" + executeTool(m, tc) + "\n")
 
-		if tc.name != "EDIT" {
-			continue
+		if tc.name == "EDIT" {
+			// Track created vs modified and open the file in a new tab (or
+			// focus the existing one) so the user sees AI's changes immediately.
+			label = shortenPath(m.baseDir(), full)
+			if existed {
+				modified = append(modified, label)
+			} else {
+				created = append(created, label)
+			}
+			m.openAiFile(label, true)
+		} else if tc.name == "RUN" && beforeRun != nil {
+			// Detect files created by the shell command and open them.
+			for p := range snapshotFiles(m.root) {
+				if _, ok := beforeRun[p]; !ok {
+					label = shortenPath(m.baseDir(), p)
+					created = append(created, label)
+					m.openAiFile(label, true)
+				}
+			}
 		}
-		// Track created vs modified and open the file in a new tab (or focus
-		// the existing one) so the user sees AI's changes immediately.
-		label = shortenPath(m.baseDir(), full)
-		if existed {
-			modified = append(modified, label)
-		} else {
-			created = append(created, label)
-		}
-		m.openAiFile(label, true)
 	}
 
 	// Summarize which files were created/modified so they are visible in chat.
