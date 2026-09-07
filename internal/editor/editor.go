@@ -178,12 +178,12 @@ type Model struct {
 	aiCfgEdit  bool
 	aiCfgIn    []rune
 
-	treeVisible bool
-	treeFocus   bool
-	treeRows    []treeEntry
-	treeSel     int
-	treeOffset  int
-	expanded    map[string]bool
+	treeVisible    bool
+	treeFocus      bool
+	treeRows       []treeEntry
+	treeSel        int
+	treeOffset     int
+	expanded       map[string]bool
 	treeConfirm    string // "" | "delete" | "trash" — pending file action confirmation
 	treeConfirmRel string // path (relative to baseDir) the confirmation applies to
 
@@ -294,6 +294,23 @@ type Model struct {
 	chatCh        <-chan chatEvent
 	chatCancel    context.CancelFunc
 	chatToolRound int // remaining tool loop iterations for the current turn
+
+	// Pending native-tool round awaiting finalisation (assistant message with
+	// its tool calls plus the tool result messages that follow).
+	chatPendingAssistant ai.Message
+	chatPendingResults   []ai.Message
+	chatPendingChanges   []agent.Change
+	chatEditTracks       []chatEditTrack
+
+	// Chat EDIT diff review: proposals are applied only after the user picks
+	// y (apply) or n (discard), routed through the agent Applier.
+	chatReviewMode  bool
+	chatReviewIdx   int
+	chatReviewRows  []vcs.DiffRow
+	chatReviewLeft  []string
+	chatReviewRight []string
+	chatReviewOffY  int
+	chatReviewOffX  int
 
 	// Inline AI request (Ctrl+I)
 	aiInlineOpen     bool
@@ -1059,36 +1076,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.Err != nil:
 			m.chatBusy = false
 			m.chatErr = msg.Err.Error()
+			if m.chatCancel != nil {
+				m.chatCancel()
+				m.chatCancel = nil
+			}
+			m.rebuildChatRows()
+			return m, nil
 		case msg.Done:
 			m.chatBusy = false
+			if m.chatCancel != nil {
+				m.chatCancel()
+				m.chatCancel = nil
+			}
+			if len(msg.Tools) > 0 {
+				// The model invoked tools; execute them, review any edits, and
+				// continue the conversation.
+				cmd := m.handleChatToolsDone(m.chatReply, msg.Tools)
+				m.chatReply = ""
+				m.msg = "tool: " + msg.Tools[0].Name
+				m.rebuildChatRows()
+				return m, cmd
+			}
 			if m.chatReply != "" {
 				m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "assistant", Content: m.chatReply})
 				m.chatReply = ""
 			}
 			m.rebuildChatRows()
-			if m.chatCancel != nil {
-				m.chatCancel()
-				m.chatCancel = nil
-			}
-			if target, cmd := m.maybeRunChatTools(); cmd != nil {
-				m.chatBusy = true
-				m.msg = "tool: " + target
-				m.rebuildChatRows()
-				return m, cmd
-			}
 			return m, nil
 		default:
 			m.chatReply += msg.Delta
-		}
-		m.rebuildChatRows()
-		if !msg.Done && msg.Err == nil {
+			m.rebuildChatRows()
 			return m, waitForChatOutput(m.chatCh)
 		}
-		if m.chatCancel != nil {
-			m.chatCancel()
-			m.chatCancel = nil
-		}
-		return m, nil
 	case InlineOutputMsg:
 		cmd := m.handleInlineOutput(msg)
 		return m, cmd
@@ -1352,6 +1371,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.agentOpen && m.agentFocus {
 		return m.handleAgent(msg)
+	}
+	if m.chatReviewMode {
+		return m.handleChatReview(msg)
 	}
 	if m.chatOpen && m.chatFocus {
 		return m.handleChat(msg)

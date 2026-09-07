@@ -67,7 +67,7 @@ type fakeProvider struct {
 }
 
 func (f *fakeProvider) Models(ctx context.Context) ([]string, error) { return nil, nil }
-func (f *fakeProvider) ChatStream(ctx context.Context, msgs []ai.Message, onDelta func(string)) error {
+func (f *fakeProvider) ChatStream(ctx context.Context, _ ai.Request, h ai.Handler) error {
 	if f.started != nil {
 		close(f.started)
 	}
@@ -80,7 +80,9 @@ func (f *fakeProvider) ChatStream(ctx context.Context, msgs []ai.Message, onDelt
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			onDelta(string(d))
+			if h.Delta != nil {
+				h.Delta(string(d))
+			}
 		}
 	}
 	return f.err

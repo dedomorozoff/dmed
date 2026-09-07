@@ -2,146 +2,120 @@ package editor
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"time"
+
+	"dmed/internal/agent"
+	"dmed/internal/ai"
 )
 
-// toolCall is a parsed tool invocation emitted by the LLM in a chat reply.
-type toolCall struct {
-	name string // "READ" | "SEARCH" | "RUN" | "EDIT"
-	arg  string // first line argument for READ/SEARCH/RUN, or file path for EDIT
-	body string // full body for EDIT (the new file content)
+// chatToolDefs returns the native function definitions exposed to the chat
+// model. The model calls these via structured JSON arguments rather than
+// emitting fragile text markers, so small local models reliably invoke them.
+func chatToolDefs() []ai.ToolDef {
+	str := func(name, desc string) ai.ToolDef {
+		return ai.ToolDef{
+			Name:        name,
+			Description: desc,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"arg": map[string]any{"type": "string", "description": "argument"},
+				},
+				"required": []string{"arg"},
+			},
+		}
+	}
+	return []ai.ToolDef{
+		str("READ", "Read the full content of a file. arg is the file path."),
+		str("SEARCH", "Find files whose content contains the given text. arg is the search query."),
+		str("RUN", "Execute a shell command in the project root and return its output. arg is the command."),
+		{
+			Name:        "EDIT",
+			Description: "Replace the ENTIRE content of a file. Call this only after READING the file.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":    map[string]any{"type": "string", "description": "relative or absolute path to the file"},
+					"content": map[string]any{"type": "string", "description": "complete new file content"},
+				},
+				"required": []string{"path", "content"},
+			},
+		},
+	}
 }
 
-// blockMarkerRe matches any === ... === marker line (tool headers, END TOOL).
-var blockMarkerRe = regexp.MustCompile(`(?m)^\s*===`)
-
-// toolHeaderRe matches a tool block header: === TOOL: NAME: arg ===
-var toolHeaderRe = regexp.MustCompile(`(?m)^\s*=== *TOOL: *([A-Z]+):?(.*?)===?\s*$`)
-
-// parseToolCalls scans a reply for tool blocks.
-// A block is: "=== TOOL: NAME: arg ===" followed by content up to the next
-// "=== ... ===" marker (including END TOOL) or end of text.
-// Content inside markdown triple-backtick fences is ignored (code examples
-// are not tool calls).
-func parseToolCalls(reply string) []toolCall {
-	var tools []toolCall
-	lines := strings.Split(reply, "\n")
-	inFence := false
-	i := 0
-	for i < len(lines) {
-		line := strings.TrimRight(lines[i], "\r")
-		trim := strings.TrimSpace(line)
-
-		// Toggle markdown fence state.
-		if strings.HasPrefix(trim, "```") {
-			inFence = !inFence
-			i++
-			continue
-		}
-
-		if inFence {
-			// We're inside a fence and this isn't the triple-backtick line handled
-			// above. But because we toggle on the fence opener, subsequent content
-			// lines are already handled. The only case left here is when the fence
-			// opener did not close yet — skip content.
-			i++
-			continue
-		}
-
-		m := toolHeaderRe.FindStringSubmatch(line)
-		if m == nil {
-			i++
-			continue
-		}
-		name := strings.TrimSpace(m[1])
-		arg := strings.TrimSpace(m[2])
-		name = strings.TrimSuffix(name, ":")
-		arg = strings.TrimSuffix(arg, "===")
-		arg = strings.TrimSpace(arg)
-
-		// Read body until the next === marker line (respecting fences)
-		var body []string
-		j := i + 1
-		fenceOpen := false
-		for j < len(lines) {
-			bline := strings.TrimRight(lines[j], "\r")
-			btrim := strings.TrimSpace(bline)
-			if strings.HasPrefix(btrim, "```") {
-				fenceOpen = !fenceOpen
-				body = append(body, bline)
-				j++
-				continue
-			}
-			if !fenceOpen && blockMarkerRe.MatchString(bline) {
-				break
-			}
-			body = append(body, bline)
-			j++
-		}
-		tc := toolCall{name: name, arg: arg, body: strings.Join(body, "\n")}
-		if name == "EDIT" {
-			tc.body = strings.TrimSuffix(tc.body, "\n")
-		}
-		tools = append(tools, tc)
-		i = j
-	}
-	return tools
-}
-
-// toolSystemPrompt documents the available tools for the LLM.
-const toolSystemPrompt = `
-You have tools available. When you need to interact with the codebase, emit
-exactly one tool per block, then wait for the result. Format:
-
-=== TOOL: READ: <relative-or-absolute path> ===
-=== TOOL: SEARCH: <case-insensitive text> ===
-=== TOOL: RUN: <shell command> ===
-=== TOOL: EDIT: <relative-or-absolute path> ===
-<complete new file content, no other decoration>
-=== END TOOL ===
-
-Rules:
-- READ: read a file to understand it. Nothing after the header.
-- SEARCH: find files whose content contains the text. Nothing after the header.
-- RUN: execute a shell command (e.g. "go test ./..."). Output is returned.
-- EDIT: replace the ENTIRE file with the content between the header and the
-  closing marker. Include the complete file content, not a diff.
-- You can call multiple tools in one turn, but each must be a separate block.
-- After you receive results, continue normally with the next tool or answer.
-You must NOT emit these markers as plain text outside of a tool block; if you
-just want to show code, use markdown fences.
-`
-
-// executeTool runs one tool and returns a result string.
-func executeTool(m *Model, tc toolCall) string {
-	base := m.root
-	if base == "" {
-		base = "."
-	}
-	switch tc.name {
+// execChatTool executes one native tool call. It returns the result text fed
+// back to the model and, for EDIT, a proposed Change that awaits human diff
+// review before it is applied. The returned result for EDIT is a short
+// summary; the full proposed content lives in the Change so the chat stays
+// compact while the model still learns what was proposed.
+func (m *Model) execChatTool(tc ai.ToolCall) (string, *agent.Change) {
+	switch tc.Name {
 	case "READ":
-		path := resolvePath(base, tc.arg)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return "[READ error] " + err.Error()
+		var a struct {
+			Arg string `json:"arg"`
 		}
-		return "[READ " + path + "]\n" + string(data)
+		_ = json.Unmarshal([]byte(tc.Args), &a)
+		return m.chatRead(a.Arg), nil
 	case "SEARCH":
-		q := tc.arg
-		return searchFilesForContent(base, q)
+		var a struct {
+			Arg string `json:"arg"`
+		}
+		_ = json.Unmarshal([]byte(tc.Args), &a)
+		return searchFilesForContent(m.root, a.Arg), nil
 	case "RUN":
-		return runCommand(m.root, tc.arg)
+		var a struct {
+			Arg string `json:"arg"`
+		}
+		_ = json.Unmarshal([]byte(tc.Args), &a)
+		return runCommand(m.root, a.Arg), nil
 	case "EDIT":
-		return applyToolEdit(base, tc.arg, tc.body)
+		var a struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal([]byte(tc.Args), &a); err != nil {
+			return "[EDIT error] " + err.Error(), nil
+		}
+		full := resolvePath(m.root, a.Path)
+		orig, err := os.ReadFile(full)
+		origStr := ""
+		if err == nil {
+			origStr = string(orig)
+		} else if !os.IsNotExist(err) {
+			return "[EDIT error] " + err.Error(), nil
+		}
+		if !strings.HasSuffix(origStr, "\n") && origStr != "" {
+			origStr += "\n"
+		}
+		content := a.Content
+		if !strings.HasSuffix(content, "\n") && content != "" {
+			content += "\n"
+		}
+		if origStr == content {
+			return "[EDIT] no change for " + shortenPath(m.baseDir(), full), nil
+		}
+		chg := &agent.Change{Path: full, Orig: origStr, New: content}
+		return "[EDIT] proposed update to " + shortenPath(m.baseDir(), full), chg
 	default:
-		return "[unknown tool " + tc.name + "]"
+		return "[unknown tool " + tc.Name + "]", nil
 	}
+}
+
+// chatRead reads a file and returns the content for the model.
+func (m *Model) chatRead(path string) string {
+	full := resolvePath(m.root, path)
+	data, err := os.ReadFile(full)
+	if err != nil {
+		return "[READ error] " + err.Error()
+	}
+	return "[READ " + full + "]\n" + string(data)
 }
 
 func resolvePath(base, p string) string {
@@ -212,35 +186,4 @@ func runCommand(dir, cmdline string) string {
 		res = "(no output)"
 	}
 	return "[RUN " + cmdline + "]\n" + res
-}
-
-// snapshotFiles returns the set of regular file paths under root so that
-// newly created files can be detected after a RUN command.
-func snapshotFiles(root string) map[string]struct{} {
-	snap := make(map[string]struct{})
-	if root == "" {
-		return snap
-	}
-	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
-		}
-		snap[path] = struct{}{}
-		return nil
-	})
-	return snap
-}
-
-// applyToolEdit writes the given content to a file (respecting diff review is
-// done by the caller; this performs the write).
-func applyToolEdit(base, path, content string) string {
-	full := resolvePath(base, path)
-	dir := filepath.Dir(full)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "[EDIT error] " + err.Error()
-	}
-	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-		return "[EDIT error] " + err.Error()
-	}
-	return "[EDIT applied] " + full
 }
