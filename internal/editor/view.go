@@ -202,6 +202,8 @@ func (m Model) View() tea.View {
 		bottom = m.aiInlineBusyLine()
 	} else if m.conflictOpen {
 		bottom = m.conflictLine()
+	} else if m.treeConfirm != "" {
+		bottom = m.treeConfirmLine()
 	} else if m.quitConfirm {
 		bottom = m.quitLine()
 	} else if m.aiCfgOpen {
@@ -518,8 +520,13 @@ func (m Model) tabBar() string {
 
 func (m Model) treePanel(h int) []string {
 	inner := m.cfg.UI.TreeWidth - 2
+	hint := m.treeHint(inner)
+	if len(hint) > h {
+		hint = hint[:h]
+	}
+	entryRows := h - len(hint)
 	rows := make([]string, 0, h)
-	for row := 0; row < h; row++ {
+	for row := 0; row < entryRows; row++ {
 		i := m.treeOffset + row
 		var cell string
 		if i < len(m.treeRows) {
@@ -554,7 +561,59 @@ func (m Model) treePanel(h int) []string {
 		}
 		rows = append(rows, cell+" ")
 	}
+	for _, line := range hint {
+		fill := inner - lipgloss.Width(line)
+		if fill < 0 {
+			fill = 0
+		}
+		rows = append(rows, hintStyle.Render(line+strings.Repeat(" ", fill))+" ")
+	}
 	return rows
+}
+
+// treeHint wraps the project-panel key hint to the panel width. It is always
+// rendered (even when the tree is visible but unfocused) so the file
+// operations are discoverable.
+func (m Model) treeHint(inner int) []string {
+	if inner < 8 {
+		return []string{m.t("tree.hint")[:maxInt(1, inner)]}
+	}
+	return wrapHint(m.t("tree.hint"), inner)
+}
+
+// wrapHint wraps words from s to at most w runes per line.
+func wrapHint(s string, w int) []string {
+	var lines []string
+	var cur []rune
+	for _, word := range strings.Fields(s) {
+		ww := []rune(word)
+		add := len(cur) > 0
+		if add {
+			add = len(cur)+1+len(ww) <= w
+		} else if len(ww) > w {
+			ww = ww[:w]
+		}
+		if add {
+			cur = append(cur, ' ')
+			cur = append(cur, ww...)
+		} else {
+			if len(cur) > 0 {
+				lines = append(lines, string(cur))
+			}
+			cur = append([]rune{}, ww...)
+		}
+		if len(cur) == w {
+			lines = append(lines, string(cur))
+			cur = nil
+		}
+	}
+	if len(cur) > 0 {
+		lines = append(lines, string(cur))
+	}
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	return lines
 }
 
 func maxInt(a, b int) int {
@@ -590,7 +649,9 @@ func (m Model) helpPanel(h int) []string {
 
 func (m Model) promptLine() string {
 	label := m.t("prompt.open_file")
-	if m.promptNewFile {
+	if m.promptRename {
+		label = m.t("prompt.rename")
+	} else if m.promptNewFile {
 		label = m.t("prompt.new_file")
 	} else if m.promptNewFolder {
 		label = m.t("prompt.new_folder")
@@ -614,6 +675,21 @@ func (m Model) saveLine() string {
 
 func (m Model) quitLine() string {
 	line := statusHiStyle.Render(m.t("prompt.save_changes")) + statusStyle.Render(m.t("prompt.yes_no"))
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+// treeConfirmLine renders the pending delete/trash confirmation at the bottom
+// of the screen while the tree panel awaits Y/N/Esc.
+func (m Model) treeConfirmLine() string {
+	label := m.t("prompt.delete_q", m.treeConfirmRel)
+	if m.treeConfirm == "trash" {
+		label = m.t("prompt.trash_q", m.treeConfirmRel)
+	}
+	line := statusHiStyle.Render(label)
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))

@@ -162,6 +162,8 @@ type Model struct {
 	promptSaveIn    []rune
 	promptNewFile   bool
 	promptNewFolder bool
+	promptRename    bool
+	promptRenameRel string
 
 	finderOpen  bool
 	finderQ     []rune
@@ -182,6 +184,8 @@ type Model struct {
 	treeSel     int
 	treeOffset  int
 	expanded    map[string]bool
+	treeConfirm    string // "" | "delete" | "trash" — pending file action confirmation
+	treeConfirmRel string // path (relative to baseDir) the confirmation applies to
 
 	// Search/replace
 	searchOpen         bool
@@ -591,13 +595,36 @@ func (m *Model) startPrompt() {
 func (m *Model) startNewFilePrompt() {
 	m.promptOpen = true
 	m.promptNewFile = true
+	m.promptRenameRel = ""
 	m.promptIn = nil
 }
 
 func (m *Model) startNewFolderPrompt() {
 	m.promptOpen = true
 	m.promptNewFolder = true
+	m.promptRenameRel = ""
 	m.promptIn = nil
+}
+
+func (m *Model) startTreeNewFilePrompt() {
+	m.promptOpen = true
+	m.promptNewFile = true
+	m.promptRenameRel = ""
+	m.promptIn = []rune(m.treeTargetDir())
+}
+
+func (m *Model) startTreeNewFolderPrompt() {
+	m.promptOpen = true
+	m.promptNewFolder = true
+	m.promptRenameRel = ""
+	m.promptIn = []rune(m.treeTargetDir())
+}
+
+func (m *Model) startTreeRenamePrompt(rel string) {
+	m.promptOpen = true
+	m.promptRename = true
+	m.promptRenameRel = rel
+	m.promptIn = []rune(relName(rel))
 }
 
 func (m *Model) startSavePrompt() {
@@ -766,19 +793,36 @@ func (m *Model) handlePrompt(msg tea.KeyPressMsg) tea.Cmd {
 		m.promptOpen = false
 		m.promptNewFile = false
 		m.promptNewFolder = false
+		m.promptRename = false
+		m.promptRenameRel = ""
 	case "enter":
 		path := strings.TrimSpace(string(m.promptIn))
 		newFolder := m.promptNewFolder
+		renameRel := m.promptRenameRel
 		m.promptOpen = false
 		m.promptNewFile = false
 		m.promptNewFolder = false
-		if path != "" {
-			if newFolder {
-				_ = os.MkdirAll(path, 0o755)
-				m.msg = m.t("msg.created_folder", path)
+		m.promptRename = false
+		m.promptRenameRel = ""
+		if path == "" {
+			break
+		}
+		switch {
+		case renameRel != "":
+			m.renameTreeEntry(renameRel, path)
+		case newFolder:
+			full := normalizePath(m.baseDir(), path)
+			if err := os.MkdirAll(full, 0o755); err != nil {
+				m.msg = m.t("msg.create_folder_fail", err.Error())
 			} else {
-				m.openPath(path)
+				m.msg = m.t("msg.created_folder", filepath.Base(full))
 			}
+			m.rebuildTree()
+			m.refreshGitFiles()
+		default:
+			m.openPath(path)
+			m.rebuildTree()
+			m.refreshGitFiles()
 		}
 	case "backspace":
 		if n := len(m.promptIn); n > 0 {
