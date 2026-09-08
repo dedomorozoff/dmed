@@ -108,6 +108,9 @@ func (m *Model) toggleChat() tea.Cmd {
 	m.chatFocus = m.chatOpen
 	m.gitFocus = false
 	m.msg = ""
+	if m.chatOpen && !m.chatHistLoaded {
+		m.loadChatPanelHistory()
+	}
 	if m.ai == nil {
 		m.ai = ai.NewProvider(ai.Config{
 			Type:   ai.ProviderType(m.cfg.AI.Provider),
@@ -167,17 +170,18 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 	case "pgdn":
 		m.chatScroll -= m.paneViewHeight(m.activePane) / 2
 		m.clampChatScroll()
+	case "up": // recall a previously sent prompt
+		m.chatHistoryPrev()
+	case "down": // back toward the newest prompt / draft
+		m.chatHistoryNext()
+	case "ctrl+p": // older conversation thread
+		m.switchChatThread(+1)
+	case "ctrl+n": // newer thread (from the newest one: a new thread)
+		m.switchChatThread(-1)
 	case "ctrl+u": // start a new conversation thread
-		m.cancelChat()
-		m.chatMsgs = nil
-		m.chatReply = ""
-		m.chatErr = ""
-		m.chatBusy = false
-		m.chatToolRound = 0
-		m.chatIn = nil
-		m.chatScroll = 0
-		m.rebuildChatRows()
-		m.chatReviewMode = false
+		m.saveChatThread()
+		m.chatThreadPos = -1
+		m.resetChatConversation()
 	default:
 		if len(msg.Text) > 0 {
 			m.chatIn = append(m.chatIn, []rune(msg.Text)...)
@@ -206,6 +210,8 @@ func (m *Model) chatSubmit() tea.Cmd {
 	}
 
 	m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "user", Content: text})
+	m.recordChatPrompt(text)
+	m.saveChatThread()
 	m.chatReply = ""
 	m.chatErr = ""
 	m.chatBusy = true
@@ -386,6 +392,7 @@ func (m *Model) finalizeChatTools() tea.Cmd {
 	m.chatPendingChanges = nil
 	m.chatEditTracks = nil
 	m.chatToolRound++
+	m.saveChatThread()
 	m.rebuildChatRows()
 
 	if m.chatToolRound > maxChatToolRounds {

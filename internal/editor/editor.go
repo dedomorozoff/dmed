@@ -296,6 +296,15 @@ type Model struct {
 	chatToolRound int    // remaining tool loop iterations for the current turn
 	chatGen       uint64 // conversation generation, guards against stale stream events
 
+	// Chat history: persisted threads (newest-first; -1 = new unsaved thread)
+	// and the prompt input history browsed with Up/Down in the input.
+	chatThreads    []chatThread
+	chatThreadPos  int
+	chatPrompts    []string
+	chatPromptIdx  int // -1 = free input, 0 = most recent prompt
+	chatDraft      string
+	chatHistLoaded bool
+
 	// Pending native-tool round awaiting finalisation (assistant message with
 	// its tool calls plus the tool result messages that follow).
 	chatPendingAssistant ai.Message
@@ -431,6 +440,8 @@ func New(paths ...string) Model {
 		diagCh:                make(chan lspDiagMsg, 64),
 		diags:                 map[string][]lsp.Diagnostic{},
 		pendingPluginRemovals: map[string]bool{},
+		chatThreadPos:         -1,
+		chatPromptIdx:         -1,
 	}
 	if w, err := watcher.New(func(p string) {
 		select {
@@ -1105,6 +1116,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "assistant", Content: m.chatReply})
 				m.chatReply = ""
 			}
+			m.saveChatThread()
 			m.rebuildChatRows()
 			return m, nil
 		default:

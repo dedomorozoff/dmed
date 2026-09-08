@@ -206,7 +206,9 @@ var enCatalog = map[string]string{
 	"ai.review_hint":  "  (y: accept, n: reject, \u2191\u2193 scroll)",
 	"ai.no_model":     "no model",
 	"ai.streaming":    " streaming ",
-	"chat.hint":       "Ctrl+U new thread · Esc close",
+	"chat.hint":       "Ctrl+U new thread · Ctrl+P/N · Esc",
+	"chat.thread":     "thread: %s",
+	"chat.thread_new": "new chat thread",
 	"finder.prompt":   " find file: ",
 
 	// Palette command titles & descriptions
@@ -441,7 +443,9 @@ var ruCatalog = map[string]string{
 	"ai.review_hint":  "  (Y/\u043d: \u043f\u0440\u0438\u043d\u044f\u0442\u044c, N/\u0442: \u043e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c, \u2191\u2193 \u0441\u043a\u0440\u043e\u043b\u043b)",
 	"ai.no_model":     "нет модели",
 	"ai.streaming":    " стриминг ",
-	"chat.hint":       "Ctrl+U новый поток · Esc закрыть",
+	"chat.hint":       "Ctrl+U новый поток · Ctrl+P/N · Esc",
+	"chat.thread":     "поток: %s",
+	"chat.thread_new": "новый поток чата",
 	"finder.prompt":   " найти файл: ",
 
 	// Palette command titles & descriptions

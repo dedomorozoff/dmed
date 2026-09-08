@@ -1117,6 +1117,13 @@ func (m Model) chatPanel(h int) []string {
 	if m.chatBusy {
 		header += statusStyle.Render(m.t("ai.streaming"))
 	}
+	if n := len(m.chatThreads); n > 0 {
+		pos := "new"
+		if m.chatThreadPos >= 0 {
+			pos = fmt.Sprintf("%d", m.chatThreadPos+1)
+		}
+		header += statusStyle.Render(fmt.Sprintf(" %s/%d", pos, n))
+	}
 	if fill := w - lipgloss.Width(header); fill > 0 {
 		header += statusStyle.Render(strings.Repeat(" ", fill))
 	}

@@ -1,6 +1,8 @@
 package editor
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -56,10 +58,23 @@ func TestChatPanelWidthBounds(t *testing.T) {
 	}
 }
 
+// chatTestRoot isolates chat-history persistence from the real home dir.
+var chatTestRoot = func() string {
+	dir, err := os.MkdirTemp("", "dmed-chat-test")
+	if err != nil {
+		panic(err)
+	}
+	return dir
+}()
+
 func newChatModel() Model {
+	// Start each test model with a clean history file so toggleChat's
+	// loadChatPanelHistory never leaks state between tests.
+	_ = os.Remove(filepath.Join(chatTestRoot, chatHistoryFileName))
 	m := New()
 	m.width = 100
 	m.height = 30
+	m.root = chatTestRoot
 	return m
 }
 
@@ -105,6 +120,99 @@ func TestHandleChatTypingAndSubmitGuard(t *testing.T) {
 	}
 	if !m.chatBusy || len(m.chatRows) == 0 {
 		t.Fatal("submit should start streaming state")
+	}
+}
+
+// TestChatPromptHistoryNavigation verifies Up/Down recall sent prompts and
+// restore the draft.
+func TestChatPromptHistoryNavigation(t *testing.T) {
+	m := newChatModel()
+	m.chatPrompts = []string{"second prompt", "first prompt"}
+
+	m.chatIn = []rune("draft being ty")
+	m.handleChat(tea.KeyPressMsg{Code: tea.KeyUp})
+	if got := string(m.chatIn); got != "second prompt" {
+		t.Fatalf("Up must recall the most recent prompt, got %q", got)
+	}
+	m.handleChat(tea.KeyPressMsg{Code: tea.KeyUp})
+	if got := string(m.chatIn); got != "first prompt" {
+		t.Fatalf("Up again must recall the older prompt, got %q", got)
+	}
+	m.handleChat(tea.KeyPressMsg{Code: tea.KeyDown})
+	if got := string(m.chatIn); got != "second prompt" {
+		t.Fatalf("Down must return to the newer prompt, got %q", got)
+	}
+	m.handleChat(tea.KeyPressMsg{Code: tea.KeyDown})
+	if got := string(m.chatIn); got != "draft being ty" {
+		t.Fatalf("Down past the newest prompt must restore the draft, got %q", got)
+	}
+}
+
+// TestChatThreadSwitchAndPersist verifies thread navigation and the on-disk
+// history file: Ctrl+P walks to older threads, Ctrl+N returns (and opens a
+// new thread past the newest), and conversations survive a reload.
+func TestChatThreadSwitchAndPersist(t *testing.T) {
+	dir := t.TempDir()
+	m := newChatModel()
+	m.root = dir
+
+	// Thread 1: persisted via saveChatThread.
+	m.chatMsgs = []ai.Message{
+		{Role: "user", Content: "what is rope?\n"},
+		{Role: "assistant", Content: "a rope buffer"},
+	}
+	m.recordChatPrompt("what is rope?")
+	m.saveChatThread()
+
+	// Thread 2: another conversation.
+	m.chatThreadPos = -1
+	m.chatMsgs = []ai.Message{
+		{Role: "user", Content: "hello there"},
+	}
+	m.recordChatPrompt("hello there")
+	m.saveChatThread()
+
+	data, err := os.ReadFile(filepath.Join(dir, chatHistoryFileName))
+	if err != nil {
+		t.Fatalf("history file must be written: %v", err)
+	}
+	if !strings.Contains(string(data), "what is rope") {
+		t.Fatalf("history file missing thread content: %s", data)
+	}
+
+	// Reload like a fresh start and navigate.
+	m2 := newChatModel()
+	m2.root = dir
+	m2.loadChatPanelHistory()
+	if len(m2.chatMsgs) != 1 || m2.chatMsgs[0].Content != "hello there" {
+		t.Fatalf("newest thread must load: %+v", m2.chatMsgs)
+	}
+	m2.handleChat(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	if len(m2.chatMsgs) != 2 || m2.chatMsgs[0].Content != "what is rope?\n" {
+		t.Fatalf("Ctrl+P must switch to the older thread: %+v", m2.chatMsgs)
+	}
+	m2.handleChat(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
+	if len(m2.chatMsgs) != 1 || m2.chatMsgs[0].Content != "hello there" {
+		t.Fatalf("Ctrl+N must switch back to the newer thread: %+v", m2.chatMsgs)
+	}
+	m2.handleChat(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
+	if len(m2.chatMsgs) != 0 || m2.chatThreadPos != -1 {
+		t.Fatalf("Ctrl+N past the newest must open a new thread")
+	}
+	// Prompt history must have been persisted too.
+	m3 := newChatModel()
+	m3.root = dir
+	m3.loadChatPanelHistory()
+	if len(m3.chatPrompts) != 2 || m3.chatPrompts[0] != "hello there" {
+		t.Fatalf("prompts must be persisted: %+v", m3.chatPrompts)
+	}
+}
+
+// TestChatThreadTitle derives readable titles from the first user message.
+func TestChatThreadTitle(t *testing.T) {
+	got := chatThreadTitle([]ai.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "  fix   the bug  please  "}})
+	if got != "fix the bug please" {
+		t.Fatalf("title = %q", got)
 	}
 }
 
