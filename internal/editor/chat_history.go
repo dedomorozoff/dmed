@@ -202,6 +202,40 @@ func (m *Model) chatHistoryPrev() {
 	m.chatIn = []rune(m.chatPrompts[m.chatPromptIdx])
 }
 
+
+// clearChatHistory wipes all persisted threads and prompts (deletes the
+// history file), resets the conversation and disarms any pending clear
+// confirmation. Blocked mid-stream or during diff review.
+func (m *Model) clearChatHistory() {
+	if m.chatBusy || m.chatReviewMode {
+		return
+	}
+	_ = os.Remove(chatHistoryPath(m.root))
+	m.chatThreads = nil
+	m.chatPrompts = nil
+	m.chatThreadPos = -1
+	m.chatPromptIdx = -1
+	m.chatDraft = ""
+	m.chatClearArm = false
+	m.resetChatConversation()
+	m.msg = m.t("chat.cleared")
+}
+
+// armChatClear implements the two-step Ctrl+L confirmation: the first press
+// arms it, the second actually wipes the history. Any other chat key or
+// leaving the panel disarms it.
+func (m *Model) armChatClear() {
+	if m.chatBusy || m.chatReviewMode {
+		return
+	}
+	if m.chatClearArm {
+		m.clearChatHistory()
+		return
+	}
+	m.chatClearArm = true
+	m.msg = m.t("chat.clear_confirm")
+}
+
 // chatHistoryNext moves back toward the newest prompt (Down in the input);
 // past the newest one it restores the draft being typed.
 func (m *Model) chatHistoryNext() {

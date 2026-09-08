@@ -304,6 +304,7 @@ type Model struct {
 	chatPromptIdx  int // -1 = free input, 0 = most recent prompt
 	chatDraft      string
 	chatHistLoaded bool
+	chatClearArm   bool // Ctrl+L pressed once: next Ctrl+L wipes history
 
 	// Pending native-tool round awaiting finalisation (assistant message with
 	// its tool calls plus the tool result messages that follow).

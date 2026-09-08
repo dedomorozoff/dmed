@@ -206,10 +206,12 @@ var enCatalog = map[string]string{
 	"ai.review_hint":  "  (y: accept, n: reject, \u2191\u2193 scroll)",
 	"ai.no_model":     "no model",
 	"ai.streaming":    " streaming ",
-	"chat.hint":       "Ctrl+U new thread · Ctrl+P/N · Esc",
-	"chat.thread":     "thread: %s",
-	"chat.thread_new": "new chat thread",
-	"finder.prompt":   " find file: ",
+	"chat.hint":          "Ctrl+U new thread / Ctrl+P/N / Ctrl+L clear / Esc",
+	"chat.thread":        "thread: %s",
+	"chat.thread_new":    "new chat thread",
+	"chat.cleared":       "AI history cleared",
+	"chat.clear_confirm": "press Ctrl+L again to clear ALL chat history",
+	"finder.prompt":      " find file: ",
 
 	// Palette command titles & descriptions
 	"cmd.save_t": "File: Save", "cmd.save_d": "Ctrl+S — Save active buffer",
@@ -443,10 +445,12 @@ var ruCatalog = map[string]string{
 	"ai.review_hint":  "  (Y/\u043d: \u043f\u0440\u0438\u043d\u044f\u0442\u044c, N/\u0442: \u043e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c, \u2191\u2193 \u0441\u043a\u0440\u043e\u043b\u043b)",
 	"ai.no_model":     "нет модели",
 	"ai.streaming":    " стриминг ",
-	"chat.hint":       "Ctrl+U новый поток · Ctrl+P/N · Esc",
-	"chat.thread":     "поток: %s",
-	"chat.thread_new": "новый поток чата",
-	"finder.prompt":   " найти файл: ",
+	"chat.hint":          "Ctrl+U новый поток / Ctrl+P/N / Ctrl+L очистить / Esc",
+	"chat.thread":        "поток: %s",
+	"chat.thread_new":    "новый поток чата",
+	"chat.cleared":       "история ИИ очищена",
+	"chat.clear_confirm": "нажмите Ctrl+L ещё раз, чтобы очистить ВСЮ историю ИИ",
+	"finder.prompt":      " найти файл: ",
 
 	// Palette command titles & descriptions
 	"cmd.save_t": "Файл: Сохранить", "cmd.save_d": "Ctrl+S — сохранить активный буфер",

@@ -156,6 +156,7 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 		m.chatOpen = false
 		m.chatFocus = false
 		m.chatReviewMode = false
+		m.chatClearArm = false
 		m.msg = ""
 	case "enter":
 		return m.chatSubmit()
@@ -180,8 +181,12 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+u": // start a new conversation thread
 		m.saveChatThread()
 		m.chatThreadPos = -1
+		m.chatClearArm = false
 		m.resetChatConversation()
+	case "ctrl+l": // clear all chat history (press twice to confirm)
+		m.armChatClear()
 	default:
+		m.chatClearArm = false
 		if len(msg.Text) > 0 {
 			m.chatIn = append(m.chatIn, []rune(msg.Text)...)
 		}
@@ -581,6 +586,9 @@ func (m *Model) cancelChat() {
 func (m *Model) clampChatScroll() {
 	h := m.viewHeight()
 	bodyH := h - 2
+	if h >= 5 {
+		bodyH = h - 3 // the panel also renders the hint bar (see chatPanel)
+	}
 	if h >= 5 {
 		bodyH = h - 3
 	}
