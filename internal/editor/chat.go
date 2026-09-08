@@ -16,6 +16,8 @@ import (
 	"dmed/internal/agent"
 	"dmed/internal/ai"
 	"dmed/internal/vcs"
+
+	"github.com/atotto/clipboard"
 )
 
 // Right-side AI chat panel backed by a local Ollama server (Alt+A).
@@ -185,6 +187,8 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 		m.resetChatConversation()
 	case "ctrl+l": // clear all chat history (press twice to confirm)
 		m.armChatClear()
+	case "ctrl+y": // copy the last error / AI reply to the system clipboard
+		m.copyChatLast()
 	default:
 		m.chatClearArm = false
 		if len(msg.Text) > 0 {
@@ -192,6 +196,32 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// copyChatLast puts the most useful chunk of the transcript into the system
+// clipboard: the last error if there is one, otherwise the last assistant
+// reply. It is the way to grab AI output (error text included) since the
+// transcript itself is not mouse-selectable inside the TUI.
+func (m *Model) copyChatLast() {
+	text := m.chatErr
+	if text == "" {
+		for i := len(m.chatMsgs) - 1; i >= 0; i-- {
+			if m.chatMsgs[i].Role == "assistant" && m.chatMsgs[i].Content != "" {
+				text = m.chatMsgs[i].Content
+				break
+			}
+		}
+	}
+	if text == "" {
+		m.msg = m.t("chat.nothing_copy")
+		return
+	}
+	m.clipboard = text
+	if err := clipboard.WriteAll(text); err != nil {
+		m.msg = "clipboard: " + err.Error()
+		return
+	}
+	m.msg = m.t("msg.copied")
 }
 
 // chatSubmit sends the current input to the AI. It returns a tea.Cmd that

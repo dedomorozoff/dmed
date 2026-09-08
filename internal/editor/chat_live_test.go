@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"dmed/internal/agent"
 	"dmed/internal/ai"
 )
 
@@ -113,7 +114,56 @@ func TestClearChatHistoryBlockedWhileBusy(t *testing.T) {
 	}
 }
 
-// TestLiveChatTurn is a manual end-to-end check against a real Ollama server.
+// TestChatReviewCyrillicKeys ensures Y/N work from a Russian layout (н/т).
+func TestChatReviewCyrillicKeys(t *testing.T) {
+	m := newChatModel()
+	m.toggleChat()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "f.txt")
+	os.WriteFile(p, []byte("old\n"), 0o644)
+	m.chatPendingChanges = []agent.Change{{Path: p, Orig: "old\n", New: "new\n"}}
+	m.startChatReview()
+	if !m.chatReviewMode {
+		t.Fatal("review must be active")
+	}
+	// Lowercase Cyrillic Te (т) = physical N -> reject.
+	m.handleChatReview(tea.KeyPressMsg{Code: 'т', Text: "т"})
+	if m.chatReviewMode {
+		t.Fatal("Cyrillic т must reject the diff")
+	}
+	// Cyrillic En (н) = physical Y -> accept.
+	m.chatPendingChanges = []agent.Change{{Path: p, Orig: "old\n", New: "new2\n"}}
+	m.startChatReview()
+	m.handleChatReview(tea.KeyPressMsg{Code: 'н', Text: "н"})
+	if m.chatReviewMode {
+		t.Fatal("Cyrillic н must accept the diff")
+	}
+	if got := m.cur().buf.Text(); got != "new2\n" {
+		t.Fatalf("accepted change must be applied to the buffer, got %q", got)
+	}
+}
+
+// TestChatCopyLastMessage checks Ctrl+Y copies the latest AI reply (or the
+// last error) into the system clipboard.
+func TestChatCopyLastMessage(t *testing.T) {
+	m := newChatModel()
+	m.toggleChat()
+	m.chatMsgs = []ai.Message{
+		{Role: "user", Content: "q"},
+		{Role: "assistant", Content: "the answer"},
+	}
+	m.handleChat(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl, Text: ""})
+	if m.clipboard != "the answer" {
+		t.Fatalf("clipboard = %q, want last assistant message", m.clipboard)
+	}
+	m.chatErr = "boom: connection refused"
+	m.chatMsgs = nil
+	m.handleChat(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl, Text: ""})
+	if m.clipboard != "boom: connection refused" {
+		t.Fatalf("clipboard = %q, want the chat error", m.clipboard)
+	}
+}
+
 // Run with: DMED_LIVE=1 DMED_MODEL=gemma4:31b-cloud go test ./internal/editor/ -run TestLiveChatTurn -v
 func TestLiveChatTurn(t *testing.T) {
 	if os.Getenv("DMED_LIVE") == "" {
