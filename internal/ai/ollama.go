@@ -139,6 +139,32 @@ func ollamaArgsString(raw json.RawMessage) string {
 	return trimmed
 }
 
+// ollamaArgsRaw turns a stored tool-call argument string back into a raw JSON
+// object for the request payload: Ollama rejects requests where "arguments"
+// is a JSON-encoded string instead of an object (HTTP 400).
+func ollamaArgsRaw(args string) json.RawMessage {
+	trimmed := strings.TrimSpace(args)
+	if trimmed == "" {
+		return json.RawMessage("{}")
+	}
+	if trimmed[0] == '"' { // doubly-encoded string
+		var s string
+		if json.Unmarshal([]byte(trimmed), &s) == nil && strings.TrimSpace(s) != "" {
+			trimmed = s
+		}
+	}
+	if trimmed[0] != '{' && trimmed[0] != '[' {
+		// Plain text arguments: wrap into an object so the payload stays valid.
+		b, _ := json.Marshal(map[string]string{"input": trimmed})
+		return b
+	}
+	var v any
+	if json.Unmarshal([]byte(trimmed), &v) != nil {
+		return json.RawMessage("{}")
+	}
+	return json.RawMessage(trimmed)
+}
+
 // ollamaMessages maps ai.Message to the Ollama /api/chat wire format. Assistant
 // tool-call messages carry tool_calls; role "tool" messages use tool_name.
 func ollamaMessages(msgs []Message) []map[string]any {
@@ -159,7 +185,7 @@ func ollamaMessages(msgs []Message) []map[string]any {
 				tcs = append(tcs, map[string]any{
 					"function": map[string]any{
 						"name":      tc.Name,
-						"arguments": tc.Args,
+						"arguments": ollamaArgsRaw(tc.Args),
 					},
 				})
 			}
