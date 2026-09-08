@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"dmed/internal/ai"
 	"dmed/internal/buffer"
 )
 
@@ -159,6 +160,46 @@ func TestEditorAreaWidthShrinksForChat(t *testing.T) {
 func TestCancelChatNilSafe(t *testing.T) {
 	m := newChatModel()
 	m.cancelChat() // must not panic
+}
+
+// TestChatNewThreadClearsConversation verifies Ctrl+U fully resets the
+// conversation state (messages, partial reply, error, busy flag, tool round,
+// input) and cancels a running stream.
+func TestChatNewThreadClearsConversation(t *testing.T) {
+	m := newChatModel()
+	m.toggleChat()
+	m.chatModel = "test-model"
+	m.chatMsgs = []ai.Message{{Role: "user", Content: "old"}}
+	m.chatReply = "partial"
+	m.chatErr = "boom"
+	m.chatBusy = true
+	m.chatToolRound = 3
+	m.chatIn = []rune("pending")
+	canceled := false
+	m.chatCancel = func() { canceled = true }
+
+	m.handleChat(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+
+	if m.chatBusy || len(m.chatMsgs) != 0 || m.chatReply != "" || m.chatErr != "" || m.chatToolRound != 0 || m.chatIn != nil {
+		t.Fatalf("thread must be fully reset: busy=%v msgs=%d reply=%q err=%q round=%d in=%v",
+			m.chatBusy, len(m.chatMsgs), m.chatReply, m.chatErr, m.chatToolRound, m.chatIn)
+	}
+	if !canceled {
+		t.Fatal("a running stream must be cancelled")
+	}
+	if len(m.chatRows) == 0 {
+		t.Fatal("cleared thread must still show the welcome/empty hints")
+	}
+}
+
+// TestChatPanelShowsHintBar verifies the chat panel reserves a bottom line that
+// tells the user how to start a new thread and close the panel.
+func TestChatPanelShowsHintBar(t *testing.T) {
+	m := newChatModel()
+	m.toggleChat()
+	if !strings.Contains(m.View().Content, "Ctrl+U new thread") {
+		t.Fatalf("chat panel must render the key hint, got:\n%s", m.View().Content)
+	}
 }
 
 // TestChatSubmitReturnsStreamCmd verifies chatSubmit only starts a stream (and

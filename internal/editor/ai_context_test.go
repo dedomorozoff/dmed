@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -292,5 +293,71 @@ func TestRunChatToolsOpensRunCreatedFile(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no tab for RUN-created file; tabs=%+v", m.tabs)
+	}
+}
+
+// TestRunChatToolsDetectsModifiedFile verifies that a file rewritten by a tool
+// round is reported as modified and its tab reflects the new content.
+func TestRunChatToolsDetectsModifiedFile(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "a.txt"), "v1\n")
+
+	m := New()
+	m.root = dir
+	m.tabs = []tab{{buf: buffer.New()}}
+	m.initPanes()
+
+	res, created, modified := m.runChatTools([]toolCall{
+		{name: "EDIT", arg: "a.txt", body: "v2\n"},
+	})
+
+	if len(created) != 0 {
+		t.Fatalf("created = %v, want none", created)
+	}
+	if len(modified) != 1 || modified[0] != "a.txt" {
+		t.Fatalf("modified = %v", modified)
+	}
+	if !strings.Contains(res, "modified: a.txt") {
+		t.Fatalf("results missing modified summary:\n%s", res)
+	}
+	var found bool
+	for _, tb := range m.tabs {
+		if tb.path == filepath.Join(dir, "a.txt") && tb.buf.Text() == "v2\n" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no reloaded tab for modified file; tabs=%+v", m.tabs)
+	}
+}
+
+// TestRunChatToolsSkipsBinaryArtifact verifies that files with NUL bytes are
+// not auto-opened as tabs and do not pollute the AI FILES summary.
+func TestRunChatToolsSkipsBinaryArtifact(t *testing.T) {
+	dir := t.TempDir()
+
+	m := New()
+	m.root = dir
+	m.tabs = []tab{{buf: buffer.New()}}
+	m.initPanes()
+
+	res, created, modified := m.runChatTools([]toolCall{
+		{name: "EDIT", arg: "bin.dat", body: "abc\x00def"},
+	})
+
+	if len(created) != 0 || len(modified) != 0 {
+		t.Fatalf("binary artifacts must not be announced: created=%v modified=%v", created, modified)
+	}
+	if strings.Contains(res, "AI FILES") {
+		t.Fatalf("binary artifacts must not appear in the summary:\n%s", res)
+	}
+	for _, tb := range m.tabs {
+		if tb.path == filepath.Join(dir, "bin.dat") {
+			t.Fatalf("binary artifact must not open a tab; tabs=%+v", m.tabs)
+		}
+	}
+	// The file itself must still be written: only the auto-open/summary skips it.
+	if _, err := os.Stat(filepath.Join(dir, "bin.dat")); err != nil {
+		t.Fatalf("binary target must still be written: %v", err)
 	}
 }

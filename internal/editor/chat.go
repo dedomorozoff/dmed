@@ -33,6 +33,7 @@ type chatEvent struct {
 	delta string
 	err   error
 	done  bool
+	gen   uint64
 }
 
 // ChatOutputMsg delivers one event from the streaming chat goroutine.
@@ -40,18 +41,19 @@ type ChatOutputMsg struct {
 	Delta string
 	Err   error
 	Done  bool
+	Gen   uint64 // conversation generation, stale for cleared threads
 }
 
-func waitForChatOutput(ch <-chan chatEvent) tea.Cmd {
+func waitForChatOutput(ch <-chan chatEvent, gen uint64) tea.Cmd {
 	if ch == nil {
 		return nil
 	}
 	return func() tea.Msg {
 		ev, ok := <-ch
 		if !ok {
-			return ChatOutputMsg{Done: true}
+			return ChatOutputMsg{Done: true, Gen: gen}
 		}
-		return ChatOutputMsg{Delta: ev.delta, Err: ev.err, Done: ev.done}
+		return ChatOutputMsg{Delta: ev.delta, Err: ev.err, Done: ev.done, Gen: gen}
 	}
 }
 
@@ -149,12 +151,16 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 		if m.chatScroll < 0 {
 			m.chatScroll = 0
 		}
-	case "ctrl+u": // clear conversation
+	case "ctrl+u": // start a new conversation thread
+		m.cancelChat()
 		m.chatMsgs = nil
 		m.chatReply = ""
 		m.chatErr = ""
 		m.chatBusy = false
+		m.chatToolRound = 0
+		m.chatIn = nil
 		m.chatScroll = 0
+		m.rebuildChatRows()
 	default:
 		if len(msg.Text) > 0 {
 			m.chatIn = append(m.chatIn, []rune(msg.Text)...)
@@ -196,6 +202,8 @@ func (m *Model) chatSubmit() tea.Cmd {
 	if m.chatCancel != nil {
 		m.chatCancel()
 	}
+	m.chatGen++
+	gen := m.chatGen
 	ctx, cancel := context.WithCancel(context.Background())
 	m.chatCancel = cancel
 
@@ -205,18 +213,18 @@ func (m *Model) chatSubmit() tea.Cmd {
 		defer close(ch)
 		err := m.ai.ChatStream(ctx, msgs, func(d string) {
 			select {
-			case ch <- chatEvent{delta: d}:
+			case ch <- chatEvent{delta: d, gen: gen}:
 			case <-ctx.Done():
 			}
 		})
 		if err != nil {
 			select {
-			case ch <- chatEvent{err: err}:
+			case ch <- chatEvent{err: err, gen: gen}:
 			case <-ctx.Done():
 			}
 		}
 	}()
-	return waitForChatOutput(ch)
+	return waitForChatOutput(ch, gen)
 }
 
 // chatRequestMessages snapshots the conversation with a system prompt that
@@ -253,53 +261,47 @@ func (m *Model) chatRequestMessages() []ai.Message {
 
 const maxChatToolRounds = 6
 
-// runChatTools executes tool calls, opens files that EDIT touched in tabs,
-// and returns the tool-result text plus labels of created and modified files.
-// The result text includes an "AI FILES" summary so the chat shows exactly
-// which files the agent created or modified. This is split out of
-// maybeRunChatTools so the interaction can be unit-tested without a stream.
+// runChatTools executes tool calls, opens files that tools created or
+// modified in tabs, and returns the tool-result text plus labels of created
+// and modified files. Detection diffs the on-disk project state before and
+// after the round, so it works for EDIT, RUN and any other tool regardless of
+// how the AI spelled the paths. The result text includes an "AI FILES"
+// summary so the chat shows exactly which files the agent created or
+// modified. This is split out of maybeRunChatTools so the interaction can be
+// unit-tested without a stream.
 func (m *Model) runChatTools(tools []toolCall) (res string, created, modified []string) {
+	before := snapshotFiles(m.root)
 	var b strings.Builder
 	for _, tc := range tools {
-		// Existence must be captured before the tool runs: EDIT writes the
-		// file, so after execution every edit target would exist.
-		var full, label string
-		existed := true
-		if tc.name == "EDIT" {
-			full = resolvePath(m.root, tc.arg)
-			existed = fileExists(full)
-		}
-		// Snapshot files before RUN so we can detect newly created files.
-		var beforeRun map[string]struct{}
-		if tc.name == "RUN" {
-			beforeRun = snapshotFiles(m.root)
-		}
 		b.WriteString("\n=== TOOL RESULT: " + tc.name)
 		if tc.arg != "" {
 			b.WriteString(": " + tc.arg)
 		}
 		b.WriteString(" ===\n" + executeTool(m, tc) + "\n")
-
-		if tc.name == "EDIT" {
-			// Track created vs modified and open the file in a new tab (or
-			// focus the existing one) so the user sees AI's changes immediately.
-			label = shortenPath(m.baseDir(), full)
-			if existed {
-				modified = append(modified, label)
-			} else {
-				created = append(created, label)
-			}
-			m.openAiFile(label, true)
-		} else if tc.name == "RUN" && beforeRun != nil {
-			// Detect files created by the shell command and open them.
-			for p := range snapshotFiles(m.root) {
-				if _, ok := beforeRun[p]; !ok {
-					label = shortenPath(m.baseDir(), p)
-					created = append(created, label)
-					m.openAiFile(label, true)
-				}
-			}
+		// An EDIT may target a path outside the scanned project tree; open it
+		// so the tab appears even then. (Binary targets are skipped.)
+		if tc.name == "EDIT" && tc.arg != "" {
+			m.openAiResultFile(resolvePath(m.root, tc.arg))
 		}
+	}
+
+	// Diff the tree to find every file the tools created or rewrote and open
+	// them in tabs so AI's changes are immediately visible.
+	for p, cur := range snapshotFiles(m.root) {
+		prev, existed := before[p]
+		if existed && prev.size == cur.size && prev.mod == cur.mod {
+			continue
+		}
+		label := shortenPath(m.baseDir(), p)
+		if !isPlausibleText(p) {
+			continue // skip binaries/build artifacts when auto-opening tabs
+		}
+		if existed {
+			modified = append(modified, label)
+		} else {
+			created = append(created, label)
+		}
+		m.openAiFile(label, true)
 	}
 
 	// Summarize which files were created/modified so they are visible in chat.
@@ -351,6 +353,8 @@ func (m *Model) maybeRunChatTools() (target string, cmd tea.Cmd) {
 	if m.chatCancel != nil {
 		m.chatCancel()
 	}
+	m.chatGen++
+	gen := m.chatGen
 	ctx, cancel := context.WithCancel(context.Background())
 	m.chatCancel = cancel
 
@@ -360,13 +364,13 @@ func (m *Model) maybeRunChatTools() (target string, cmd tea.Cmd) {
 		defer close(ch)
 		err := m.ai.ChatStream(ctx, m.chatRequestMessages(), func(d string) {
 			select {
-			case ch <- chatEvent{delta: d}:
+			case ch <- chatEvent{delta: d, gen: gen}:
 			case <-ctx.Done():
 			}
 		})
 		if err != nil {
 			select {
-			case ch <- chatEvent{err: err}:
+			case ch <- chatEvent{err: err, gen: gen}:
 			case <-ctx.Done():
 			}
 		}
@@ -375,9 +379,9 @@ func (m *Model) maybeRunChatTools() (target string, cmd tea.Cmd) {
 	return target, func() tea.Msg {
 		ev, ok := <-ch
 		if !ok {
-			return ChatOutputMsg{Done: true}
+			return ChatOutputMsg{Done: true, Gen: gen}
 		}
-		return ChatOutputMsg{Delta: ev.delta, Err: ev.err, Done: ev.done}
+		return ChatOutputMsg{Delta: ev.delta, Err: ev.err, Done: ev.done, Gen: gen}
 	}
 }
 

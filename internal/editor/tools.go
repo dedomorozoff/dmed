@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -214,21 +215,51 @@ func runCommand(dir, cmdline string) string {
 	return "[RUN " + cmdline + "]\n" + res
 }
 
-// snapshotFiles returns the set of regular file paths under root so that
-// newly created files can be detected after a RUN command.
-func snapshotFiles(root string) map[string]struct{} {
-	snap := make(map[string]struct{})
+// fileState captures the size and modification time of a file, used to detect
+// both newly created and modified files after a tool round.
+type fileState struct {
+	size int64
+	mod  int64
+}
+
+// snapshotFiles walks root and records every regular file (skipping the .git
+// directory) together with its size and modification time, so callers can tell
+// what a tool created or rewrote while it ran.
+func snapshotFiles(root string) map[string]fileState {
+	snap := make(map[string]fileState)
 	if root == "" {
 		return snap
 	}
 	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		if err != nil {
 			return nil
 		}
-		snap[path] = struct{}{}
+		if info.IsDir() {
+			if filepath.Base(path) == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		snap[path] = fileState{size: info.Size(), mod: info.ModTime().UnixNano()}
 		return nil
 	})
 	return snap
+}
+
+// isPlausibleText reports whether a file is likely readable text; binary files
+// (and compiled build artifacts) are skipped when auto-opening tabs.
+func isPlausibleText(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, 1024)
+	n, _ := f.Read(buf)
+	if n == 0 {
+		return true // empty file (e.g. freshly created) is fine to open
+	}
+	return bytes.IndexByte(buf[:n], 0) == -1
 }
 
 // applyToolEdit writes the given content to a file (respecting diff review is

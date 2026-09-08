@@ -1100,7 +1100,7 @@ func (m Model) terminalPanel() []string {
 }
 
 // chatPanel renders the right-side AI chat rail: header with the model
-// name, scrolling transcript, input line at the bottom.
+// name, scrolling transcript, key hint and input line at the bottom.
 func (m Model) chatPanel(h int) []string {
 	w := m.chatPanelWidth()
 	rows := make([]string, 0, h)
@@ -1119,6 +1119,13 @@ func (m Model) chatPanel(h int) []string {
 	rows = append(rows, header)
 
 	bodyH := h - 2 // header + input line
+	showHint := h >= 5
+	if showHint {
+		bodyH = h - 3 // also reserve room for the hint bar
+	}
+	if bodyH < 1 {
+		bodyH = 1
+	}
 	total := len(m.chatRows)
 	start := total - bodyH + m.chatScroll
 	if start > total-bodyH {
@@ -1153,6 +1160,19 @@ func (m Model) chatPanel(h int) []string {
 			cell = line + strings.Repeat(" ", maxInt(0, w-lipgloss.Width(line)))
 		}
 		rows = append(rows, cell)
+	}
+
+	if showHint {
+		hintText := m.t("chat.hint")
+		r := []rune(hintText)
+		if len(r) > w {
+			hintText = string(r[:w])
+		}
+		hint := statusStyle.Render(hintText)
+		if fill := w - lipgloss.Width(hint); fill > 0 {
+			hint += statusStyle.Render(strings.Repeat(" ", fill))
+		}
+		rows = append(rows, hint)
 	}
 
 	input := statusHiStyle.Render(" ❯ ") + statusStyle.Render(string(m.chatIn)) + cursorStyle.Render(" ")

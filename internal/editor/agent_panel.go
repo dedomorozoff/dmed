@@ -595,6 +595,15 @@ func (m *Model) openAiFile(path string, reloadClean bool) {
 	}
 }
 
+// openAiResultFile opens a file produced by a tool run, skipping targets that
+// turn out to be binaries/build artifacts (they print garbage in a text tab).
+func (m *Model) openAiResultFile(full string) {
+	if !isPlausibleText(full) {
+		return
+	}
+	m.openAiFile(shortenPath(m.baseDir(), full), true)
+}
+
 // fileExists reports whether a path exists on disk.
 func fileExists(p string) bool {
 	_, err := os.Stat(p)

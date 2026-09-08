@@ -293,7 +293,8 @@ type Model struct {
 	ai            ai.Provider
 	chatCh        <-chan chatEvent
 	chatCancel    context.CancelFunc
-	chatToolRound int // remaining tool loop iterations for the current turn
+	chatToolRound int    // remaining tool loop iterations for the current turn
+	chatGen       uint64 // conversation generation, guards against stale stream events
 
 	// Inline AI request (Ctrl+I)
 	aiInlineOpen     bool
@@ -966,7 +967,7 @@ func waitForFileEvent(ch <-chan string) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh), waitForInlineOutput(m.aiInlineCh), waitForLSPDiag(m.diagCh))
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForLSPDiag(m.diagCh))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1055,6 +1056,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, waitForTermOutput(m.termCh)
 	case ChatOutputMsg:
+		if msg.Gen != m.chatGen {
+			return m, nil // stale event from a cancelled/cleared conversation
+		}
 		switch {
 		case msg.Err != nil:
 			m.chatBusy = false
@@ -1082,7 +1086,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.rebuildChatRows()
 		if !msg.Done && msg.Err == nil {
-			return m, waitForChatOutput(m.chatCh)
+			return m, waitForChatOutput(m.chatCh, m.chatGen)
 		}
 		if m.chatCancel != nil {
 			m.chatCancel()
