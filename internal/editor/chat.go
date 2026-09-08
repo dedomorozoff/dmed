@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -241,7 +240,6 @@ func (m *Model) startChatTurn() tea.Cmd {
 	go func() {
 		defer close(ch)
 		var tools []ai.ToolCall
-		var once sync.Once
 		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs, Tools: chatToolDefs()}, ai.Handler{
 			Delta: func(d string) {
 				select {
@@ -250,7 +248,7 @@ func (m *Model) startChatTurn() tea.Cmd {
 				}
 			},
 			ToolCalls: func(calls []ai.ToolCall) {
-				once.Do(func() { tools = calls })
+				tools = append(tools, calls...)
 			},
 		})
 		if err != nil {

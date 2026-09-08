@@ -77,14 +77,15 @@ func (p *ollamaProvider) ChatStream(ctx context.Context, req Request, h Handler)
 
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	toolFired := false
 	for sc.Scan() {
 		var chunk struct {
 			Message struct {
 				Content   string `json:"content"`
 				ToolCalls []struct {
 					Function struct {
-						Name      string `json:"name"`
-						Arguments string `json:"arguments"`
+						Name      string          `json:"name"`
+						Arguments json.RawMessage `json:"arguments"`
 					} `json:"function"`
 				} `json:"tool_calls"`
 			} `json:"message"`
@@ -100,22 +101,42 @@ func (p *ollamaProvider) ChatStream(ctx context.Context, req Request, h Handler)
 		if chunk.Message.Content != "" && h.Delta != nil {
 			h.Delta(chunk.Message.Content)
 		}
-		if chunk.Done {
-			if h.ToolCalls != nil && len(chunk.Message.ToolCalls) > 0 {
-				calls := make([]ToolCall, 0, len(chunk.Message.ToolCalls))
-				for i, tc := range chunk.Message.ToolCalls {
-					calls = append(calls, ToolCall{
-						ID:   fmt.Sprintf("call_%d", i),
-						Name: tc.Function.Name,
-						Args: tc.Function.Arguments,
-					})
-				}
-				h.ToolCalls(calls)
+		// Tool calls usually arrive in their own chunk before the done marker,
+		// so collect them on any chunk. Some providers deliver them together
+		// with done instead; fire at most once per response.
+		if len(chunk.Message.ToolCalls) > 0 && h.ToolCalls != nil && !toolFired {
+			toolFired = true
+			calls := make([]ToolCall, 0, len(chunk.Message.ToolCalls))
+			for i, tc := range chunk.Message.ToolCalls {
+				calls = append(calls, ToolCall{
+					ID:   fmt.Sprintf("call_%d", i),
+					Name: tc.Function.Name,
+					Args: ollamaArgsString(tc.Function.Arguments),
+				})
 			}
+			h.ToolCalls(calls)
+		}
+		if chunk.Done {
 			return nil
 		}
 	}
 	return sc.Err()
+}
+
+// ollamaArgsString normalizes tool-call arguments: Ollama sends them as a JSON
+// object, but some models emit a JSON-encoded string.
+func ollamaArgsString(raw json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return "{}"
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			return s
+		}
+	}
+	return trimmed
 }
 
 // ollamaMessages maps ai.Message to the Ollama /api/chat wire format. Assistant

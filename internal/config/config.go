@@ -75,8 +75,11 @@ func Defaults() Config {
 			Model:      "",
 			OllamaURL:  "http://localhost:11434",
 			ContextMax: 6000,
-			SystemPrompt: "You are a helpful coding assistant. " +
-				"Answer concisely. When showing code, use markdown fences.",
+			SystemPrompt: "You are a helpful coding assistant inside the dmed editor. " +
+				"Answer concisely. You have tools: EDIT creates or rewrites a whole file, " +
+				"READ reads a file, SEARCH finds text, RUN executes a shell command. " +
+				"When the user asks to create, change or fix files, you MUST call EDIT " +
+				"(after READ for existing files) instead of printing code in the reply.",
 		},
 		Agent: AgentConfig{
 			SystemPrompt: "",
