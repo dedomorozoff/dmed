@@ -325,3 +325,61 @@ func TestChatNonEditToolsDoNotEnterReview(t *testing.T) {
 		t.Fatal("should continue the loop after non-edit tools")
 	}
 }
+
+// TestToolRoundOpensCreatedAndModifiedFiles verifies that files created or
+// rewritten during a tool round are auto-opened as tabs and summarized as
+// "AI FILES" in the last tool result.
+func TestToolRoundOpensCreatedAndModifiedFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "a.txt"), "v1\n")
+
+	m := chatEditHarness(t, dir)
+	before := snapshotFiles(dir)
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	results := []ai.Message{{Role: "tool", ToolName: "RUN", Content: "[RUN] ok"}}
+	m.openTouchedFiles(before, results)
+
+	var foundA, foundB bool
+	for _, tb := range m.tabs {
+		if tb.path == filepath.Join(dir, "a.txt") && tb.buf.Text() == "v2\n" {
+			foundA = true
+		}
+		if tb.path == filepath.Join(dir, "b.txt") && tb.buf.Text() == "new\n" {
+			foundB = true
+		}
+	}
+	if !foundA || !foundB {
+		t.Fatalf("touched files must open as tabs; tabs=%+v", m.tabs)
+	}
+	if !strings.Contains(results[0].Content, "created: b.txt") ||
+		!strings.Contains(results[0].Content, "modified: a.txt") {
+		t.Fatalf("missing AI FILES summary: %q", results[0].Content)
+	}
+}
+
+// TestToolRoundSkipsBinaryArtifact verifies that files with NUL bytes are not
+// auto-opened as tabs and stay out of the AI FILES summary.
+func TestToolRoundSkipsBinaryArtifact(t *testing.T) {
+	dir := t.TempDir()
+	m := chatEditHarness(t, dir)
+	before := snapshotFiles(dir)
+	if err := os.WriteFile(filepath.Join(dir, "bin.dat"), []byte("abc\x00def"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	results := []ai.Message{{Role: "tool", ToolName: "RUN", Content: "[RUN] ok"}}
+	m.openTouchedFiles(before, results)
+
+	for _, tb := range m.tabs {
+		if tb.path == filepath.Join(dir, "bin.dat") {
+			t.Fatalf("binary artifact must not open a tab; tabs=%+v", m.tabs)
+		}
+	}
+	if strings.Contains(results[0].Content, "AI FILES") {
+		t.Fatalf("binary artifacts must not be summarized: %q", results[0].Content)
+	}
+}

@@ -123,14 +123,14 @@ func TestWheelOverChatScrolls(t *testing.T) {
 		m.chatRows = append(m.chatRows, chatRow{kind: "ai", text: "row"})
 	}
 
-	_ = m.handleMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 60, Y: 5})
+	_ = m.handleMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelUp, X: 60, Y: 5})
 	if m.chatScroll <= 0 {
-		t.Fatalf("wheel down over chat must scroll back, got %d", m.chatScroll)
+		t.Fatalf("wheel up over chat must scroll back into history, got %d", m.chatScroll)
 	}
 	prev := m.chatScroll
-	_ = m.handleMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelUp, X: 60, Y: 5})
+	_ = m.handleMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 60, Y: 5})
 	if m.chatScroll >= prev {
-		t.Fatalf("wheel up over chat must scroll toward bottom, got %d (was %d)", m.chatScroll, prev)
+		t.Fatalf("wheel down over chat must scroll toward bottom, got %d (was %d)", m.chatScroll, prev)
 	}
 }
 

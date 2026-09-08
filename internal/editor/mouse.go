@@ -421,23 +421,25 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 		}
 	}
 
-	// Right AI chat rail.
+	// Right AI chat rail. In diff-review mode the wheel scrolls the review
+	// diff; otherwise it scrolls the transcript (wheel up = into history).
 	if m.chatOpen && x >= m.width-m.rightRailWidth() && y >= 1 && y <= h {
+		if m.chatReviewMode {
+			m.chatReviewOffY += dir
+			if m.chatReviewOffY < 0 {
+				m.chatReviewOffY = 0
+			}
+			if maxOff := len(m.chatReviewRows) - 1; m.chatReviewOffY > maxOff {
+				m.chatReviewOffY = maxInt(0, maxOff)
+			}
+			return nil
+		}
 		step := m.paneViewHeight(m.activePane) / 2
 		if step < 1 {
 			step = 1
 		}
-		bodyH := h - 2
-		if bodyH < 1 {
-			bodyH = 1
-		}
-		m.chatScroll += dir * step
-		if maxBack := len(m.chatRows) - bodyH; m.chatScroll > maxBack {
-			m.chatScroll = maxInt(0, maxBack)
-		}
-		if m.chatScroll < 0 {
-			m.chatScroll = 0
-		}
+		m.chatScroll -= dir * step
+		m.clampChatScroll()
 		return nil
 	}
 

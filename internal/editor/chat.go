@@ -163,11 +163,10 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "pgup":
 		m.chatScroll += m.paneViewHeight(m.activePane) / 2
+		m.clampChatScroll()
 	case "pgdn":
 		m.chatScroll -= m.paneViewHeight(m.activePane) / 2
-		if m.chatScroll < 0 {
-			m.chatScroll = 0
-		}
+		m.clampChatScroll()
 	case "ctrl+u": // start a new conversation thread
 		m.cancelChat()
 		m.chatMsgs = nil
@@ -308,6 +307,7 @@ type chatEditTrack struct {
 // for a side-by-side diff review. It returns a tea.Cmd that continues the
 // conversation, or nil when waiting on human review.
 func (m *Model) handleChatToolsDone(content string, tools []ai.ToolCall) tea.Cmd {
+	before := snapshotFiles(m.root)
 	results := make([]ai.Message, 0, len(tools))
 	var pending []agent.Change
 	var tracks []chatEditTrack
@@ -320,6 +320,11 @@ func (m *Model) handleChatToolsDone(content string, tools []ai.ToolCall) tea.Cmd
 		results = append(results, ai.Message{Role: "tool", ToolCallID: tc.ID, ToolName: tc.Name, Content: res})
 	}
 
+	// Open every file the tools created or rewrote (e.g. by RUN) in tabs and
+	// summarize them in the transcript. EDIT proposals are still pending human
+	// review, so they open when accepted (see acceptChatReview).
+	m.openTouchedFiles(before, results)
+
 	m.chatPendingAssistant = ai.Message{Role: "assistant", Content: content, ToolCalls: tools}
 	m.chatPendingResults = results
 	m.chatPendingChanges = pending
@@ -331,6 +336,44 @@ func (m *Model) handleChatToolsDone(content string, tools []ai.ToolCall) tea.Cmd
 		return nil
 	}
 	return m.finalizeChatTools()
+}
+
+// openTouchedFiles diffs on-disk snapshots taken before and after a tool round
+// and opens every file a tool created or rewrote in a tab (binary/build
+// artifacts are skipped), so AI's work is immediately visible. An "AI FILES"
+// summary is appended to the last tool result so it shows in the transcript.
+func (m *Model) openTouchedFiles(before map[string]fileState, results []ai.Message) {
+	var created, modified []string
+	for p, cur := range snapshotFiles(m.root) {
+		prev, existed := before[p]
+		if existed && prev.size == cur.size && prev.mod == cur.mod {
+			continue
+		}
+		if !isPlausibleText(p) {
+			continue
+		}
+		label := shortenPath(m.baseDir(), p)
+		if existed {
+			modified = append(modified, label)
+		} else {
+			created = append(created, label)
+		}
+		m.openAiFile(label, true)
+	}
+	if len(created) == 0 && len(modified) == 0 {
+		return
+	}
+	var b strings.Builder
+	b.WriteString("\n=== AI FILES ===")
+	for _, p := range created {
+		b.WriteString("\ncreated: " + p)
+	}
+	for _, p := range modified {
+		b.WriteString("\nmodified: " + p)
+	}
+	if n := len(results); n > 0 {
+		results[n-1].Content += b.String()
+	}
 }
 
 // finalizeChatTools commits the pending assistant + tool-result messages into
@@ -526,6 +569,26 @@ func (m *Model) cancelChat() {
 }
 
 // ---- rendering ----
+
+// clampChatScroll keeps chatScroll within [0, len(chatRows)-bodyH] using the
+// same body height the chat panel renders with (header + input, plus the hint
+// bar when there is room for it).
+func (m *Model) clampChatScroll() {
+	h := m.viewHeight()
+	bodyH := h - 2
+	if h >= 5 {
+		bodyH = h - 3
+	}
+	if bodyH < 1 {
+		bodyH = 1
+	}
+	if maxBack := len(m.chatRows) - bodyH; m.chatScroll > maxBack {
+		m.chatScroll = maxInt(0, maxBack)
+	}
+	if m.chatScroll < 0 {
+		m.chatScroll = 0
+	}
+}
 
 func (m *Model) rebuildChatRows() {
 	inner := m.chatInnerWidth()
