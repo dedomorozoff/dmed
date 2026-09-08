@@ -2,18 +2,32 @@ package editor
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"dmed/internal/agent"
 	"dmed/internal/ai"
+	"dmed/internal/vcs"
 )
 
 // Right-side AI chat panel backed by a local Ollama server (Alt+A).
 // While the panel is open it owns keyboard focus; Esc closes it. A running
 // stream keeps appending while the panel is hidden and is cancelled on quit.
+//
+// The chat model can call native tools (READ/SEARCH/RUN/EDIT) via structured
+// function calling. EDIT proposals are shown as a side-by-side diff and only
+// applied after the user accepts (y) or rejected (n), going through the agent
+// Applier so the write is atomic and stale-proof. This mirrors opencode's
+// "propose then review" flow instead of parsing fragile text markers.
 
 var (
 	chatUserLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true)
@@ -34,6 +48,7 @@ type chatEvent struct {
 	err   error
 	done  bool
 	gen   uint64
+	tools []ai.ToolCall
 }
 
 // ChatOutputMsg delivers one event from the streaming chat goroutine.
@@ -42,6 +57,7 @@ type ChatOutputMsg struct {
 	Err   error
 	Done  bool
 	Gen   uint64 // conversation generation, stale for cleared threads
+	Tools []ai.ToolCall
 }
 
 func waitForChatOutput(ch <-chan chatEvent, gen uint64) tea.Cmd {
@@ -53,7 +69,7 @@ func waitForChatOutput(ch <-chan chatEvent, gen uint64) tea.Cmd {
 		if !ok {
 			return ChatOutputMsg{Done: true, Gen: gen}
 		}
-		return ChatOutputMsg{Delta: ev.delta, Err: ev.err, Done: ev.done, Gen: gen}
+		return ChatOutputMsg{Delta: ev.delta, Err: ev.err, Done: ev.done, Gen: gen, Tools: ev.tools}
 	}
 }
 
@@ -137,6 +153,7 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 	case "esc":
 		m.chatOpen = false
 		m.chatFocus = false
+		m.chatReviewMode = false
 		m.msg = ""
 	case "enter":
 		return m.chatSubmit()
@@ -161,6 +178,7 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 		m.chatIn = nil
 		m.chatScroll = 0
 		m.rebuildChatRows()
+		m.chatReviewMode = false
 	default:
 		if len(msg.Text) > 0 {
 			m.chatIn = append(m.chatIn, []rune(msg.Text)...)
@@ -172,12 +190,11 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 // chatSubmit sends the current input to the AI. It returns a tea.Cmd that
 // reads the stream only if a request actually went out; when the input is
 // empty or a stream is already running it returns nil and leaves the input
-// intact. A nil return also avoids starting a second consumer on the running
-// stream's channel (which would garble deltas and lose the terminal event).
+// intact.
 func (m *Model) chatSubmit() tea.Cmd {
 	text := strings.TrimSpace(string(m.chatIn))
 	if text == "" || m.chatBusy {
-		return nil // keep the input when the request cannot go out
+		return nil
 	}
 	m.chatIn = nil
 	if m.chatModel == "" {
@@ -197,13 +214,20 @@ func (m *Model) chatSubmit() tea.Cmd {
 	m.chatToolRound = 0
 	m.rebuildChatRows()
 
-	msgs := m.chatRequestMessages()
+	return m.startChatTurn()
+}
 
+// startChatTurn kicks off a streaming turn with the full conversation plus the
+// native tool definitions. When the stream finishes, tool calls (if any) are
+// delivered together with the Done marker on the channel.
+func (m *Model) startChatTurn() tea.Cmd {
+	msgs := m.chatRequestMessages()
 	if m.chatCancel != nil {
 		m.chatCancel()
 	}
 	m.chatGen++
 	gen := m.chatGen
+	m.chatBusy = true
 	ctx, cancel := context.WithCancel(context.Background())
 	m.chatCancel = cancel
 
@@ -211,17 +235,29 @@ func (m *Model) chatSubmit() tea.Cmd {
 	m.chatCh = ch
 	go func() {
 		defer close(ch)
-		err := m.ai.ChatStream(ctx, msgs, func(d string) {
-			select {
-			case ch <- chatEvent{delta: d, gen: gen}:
-			case <-ctx.Done():
-			}
+		var tools []ai.ToolCall
+		var once sync.Once
+		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs, Tools: chatToolDefs()}, ai.Handler{
+			Delta: func(d string) {
+				select {
+				case ch <- chatEvent{delta: d, gen: gen}:
+				case <-ctx.Done():
+				}
+			},
+			ToolCalls: func(calls []ai.ToolCall) {
+				once.Do(func() { tools = calls })
+			},
 		})
 		if err != nil {
 			select {
 			case ch <- chatEvent{err: err, gen: gen}:
 			case <-ctx.Done():
 			}
+			return
+		}
+		select {
+		case ch <- chatEvent{done: true, tools: tools}:
+		case <-ctx.Done():
 		}
 	}()
 	return waitForChatOutput(ch, gen)
@@ -232,7 +268,6 @@ func (m *Model) chatSubmit() tea.Cmd {
 func (m *Model) chatRequestMessages() []ai.Message {
 	var b strings.Builder
 	b.WriteString(m.cfg.AI.SystemPrompt)
-	b.WriteString(toolSystemPrompt)
 	if t := m.cur(); t != nil && t.path != "" {
 		b.WriteString("\n\nCurrent file: " + t.path + "\n```")
 		content := t.buf.Text()
@@ -261,136 +296,243 @@ func (m *Model) chatRequestMessages() []ai.Message {
 
 const maxChatToolRounds = 6
 
-// runChatTools executes tool calls, opens files that tools created or
-// modified in tabs, and returns the tool-result text plus labels of created
-// and modified files. Detection diffs the on-disk project state before and
-// after the round, so it works for EDIT, RUN and any other tool regardless of
-// how the AI spelled the paths. The result text includes an "AI FILES"
-// summary so the chat shows exactly which files the agent created or
-// modified. This is split out of maybeRunChatTools so the interaction can be
-// unit-tested without a stream.
-func (m *Model) runChatTools(tools []toolCall) (res string, created, modified []string) {
-	before := snapshotFiles(m.root)
-	var b strings.Builder
-	for _, tc := range tools {
-		b.WriteString("\n=== TOOL RESULT: " + tc.name)
-		if tc.arg != "" {
-			b.WriteString(": " + tc.arg)
-		}
-		b.WriteString(" ===\n" + executeTool(m, tc) + "\n")
-		// An EDIT may target a path outside the scanned project tree; open it
-		// so the tab appears even then. (Binary targets are skipped.)
-		if tc.name == "EDIT" && tc.arg != "" {
-			m.openAiResultFile(resolvePath(m.root, tc.arg))
-		}
-	}
-
-	// Diff the tree to find every file the tools created or rewrote and open
-	// them in tabs so AI's changes are immediately visible.
-	for p, cur := range snapshotFiles(m.root) {
-		prev, existed := before[p]
-		if existed && prev.size == cur.size && prev.mod == cur.mod {
-			continue
-		}
-		label := shortenPath(m.baseDir(), p)
-		if !isPlausibleText(p) {
-			continue // skip binaries/build artifacts when auto-opening tabs
-		}
-		if existed {
-			modified = append(modified, label)
-		} else {
-			created = append(created, label)
-		}
-		m.openAiFile(label, true)
-	}
-
-	// Summarize which files were created/modified so they are visible in chat.
-	if len(created) > 0 || len(modified) > 0 {
-		b.WriteString("\n=== AI FILES ===\n")
-		for _, p := range created {
-			b.WriteString("created: " + p + "\n")
-		}
-		for _, p := range modified {
-			b.WriteString("modified: " + p + "\n")
-		}
-	}
-	return b.String(), created, modified
+// chatEditTrack maps one proposed EDIT to its slot in the pending results so
+// the accept/reject decision can amend the message the model sees.
+type chatEditTrack struct {
+	resultIdx int
+	label     string
 }
 
-// maybeRunChatTools inspects the last assistant message for tool blocks. If
-// any are present, it executes them, appends the results to the conversation,
-// and returns a tea.Cmd that continues the stream. target is a short label of
-// what was executed (for the status bar). If there are no tools, it returns
-// ("" , nil).
-func (m *Model) maybeRunChatTools() (target string, cmd tea.Cmd) {
-	if len(m.chatMsgs) == 0 {
-		return "", nil
+// handleChatToolsDone runs a batch of native tool calls after a stream ends.
+// Non-edit results are finalised immediately; EDIT proposals pause the loop
+// for a side-by-side diff review. It returns a tea.Cmd that continues the
+// conversation, or nil when waiting on human review.
+func (m *Model) handleChatToolsDone(content string, tools []ai.ToolCall) tea.Cmd {
+	results := make([]ai.Message, 0, len(tools))
+	var pending []agent.Change
+	var tracks []chatEditTrack
+	for _, tc := range tools {
+		res, chg := m.execChatTool(tc)
+		if chg != nil {
+			pending = append(pending, *chg)
+			tracks = append(tracks, chatEditTrack{resultIdx: len(results), label: shortenPath(m.baseDir(), chg.Path)})
+		}
+		results = append(results, ai.Message{Role: "tool", ToolCallID: tc.ID, ToolName: tc.Name, Content: res})
 	}
-	last := m.chatMsgs[len(m.chatMsgs)-1]
-	if last.Role != "assistant" {
-		return "", nil
+
+	m.chatPendingAssistant = ai.Message{Role: "assistant", Content: content, ToolCalls: tools}
+	m.chatPendingResults = results
+	m.chatPendingChanges = pending
+	m.chatEditTracks = tracks
+	m.rebuildChatRows()
+
+	if len(pending) > 0 {
+		m.startChatReview()
+		return nil
 	}
-	tools := parseToolCalls(last.Content)
-	if len(tools) == 0 {
-		return "", nil
-	}
-	if m.chatToolRound >= maxChatToolRounds {
+	return m.finalizeChatTools()
+}
+
+// finalizeChatTools commits the pending assistant + tool-result messages into
+// the conversation and starts the next turn, capping the tool loop depth.
+func (m *Model) finalizeChatTools() tea.Cmd {
+	m.chatMsgs = append(m.chatMsgs, m.chatPendingAssistant)
+	m.chatMsgs = append(m.chatMsgs, m.chatPendingResults...)
+	m.chatPendingAssistant = ai.Message{}
+	m.chatPendingResults = nil
+	m.chatPendingChanges = nil
+	m.chatEditTracks = nil
+	m.chatToolRound++
+	m.rebuildChatRows()
+
+	if m.chatToolRound > maxChatToolRounds {
 		m.chatErr = "tool loop exceeded max iterations"
 		m.rebuildChatRows()
-		return "", nil
+		return nil
 	}
-	m.chatToolRound++
+	return m.startChatTurn()
+}
 
-	// Execute the tools, collect the raw result text plus created/modified
-	// file labels, and open edited files in tabs. The result text becomes a
-	// user turn so the chat shows what the AI changed.
-	res, _, _ := m.runChatTools(tools)
-	for _, tc := range tools {
-		target = tc.name
+// ---- chat diff review ----
+
+func (m *Model) startChatReview() {
+	m.chatReviewMode = true
+	m.chatReviewIdx = 0
+	m.loadChatChange(0)
+}
+
+func (m *Model) loadChatChange(idx int) {
+	if idx < 0 || idx >= len(m.chatPendingChanges) {
+		return
 	}
-	m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "user", Content: res})
-
-	if m.chatCancel != nil {
-		m.chatCancel()
+	c := m.chatPendingChanges[idx]
+	orig, prop := c.Orig, c.New
+	if !strings.HasSuffix(orig, "\n") && orig != "" {
+		orig += "\n"
 	}
-	m.chatGen++
-	gen := m.chatGen
-	ctx, cancel := context.WithCancel(context.Background())
-	m.chatCancel = cancel
+	if !strings.HasSuffix(prop, "\n") && prop != "" {
+		prop += "\n"
+	}
+	m.chatReviewRows = vcs.SideBySide(orig, prop)
+	m.chatReviewLeft = strings.Split(strings.TrimRight(orig, "\n"), "\n")
+	m.chatReviewRight = strings.Split(strings.TrimRight(prop, "\n"), "\n")
+	m.chatReviewOffY = 0
+	m.chatReviewOffX = 0
+}
 
-	ch := make(chan chatEvent, 64)
-	m.chatCh = ch
-	go func() {
-		defer close(ch)
-		err := m.ai.ChatStream(ctx, m.chatRequestMessages(), func(d string) {
-			select {
-			case ch <- chatEvent{delta: d, gen: gen}:
-			case <-ctx.Done():
-			}
-		})
-		if err != nil {
-			select {
-			case ch <- chatEvent{err: err, gen: gen}:
-			case <-ctx.Done():
-			}
+// handleChatReview handles keys while a chat EDIT diff is shown. y accepts,
+// n rejects; Tab cycles between multiple pending files.
+func (m *Model) handleChatReview(msg tea.KeyPressMsg) tea.Cmd {
+	n := len(m.chatPendingChanges)
+	switch gitKeyName(msg) {
+	case "y", "enter", "a":
+		return m.acceptChatReview()
+	case "n", "esc", "r":
+		return m.rejectChatReview()
+	case "tab":
+		if n > 0 {
+			m.chatReviewIdx = (m.chatReviewIdx + 1) % n
+			m.loadChatChange(m.chatReviewIdx)
 		}
-	}()
-
-	return target, func() tea.Msg {
-		ev, ok := <-ch
-		if !ok {
-			return ChatOutputMsg{Done: true, Gen: gen}
+	case "shift+tab":
+		if n > 0 {
+			m.chatReviewIdx = (m.chatReviewIdx - 1 + n) % n
+			m.loadChatChange(m.chatReviewIdx)
 		}
-		return ChatOutputMsg{Delta: ev.delta, Err: ev.err, Done: ev.done, Gen: gen}
+	case "up", "k":
+		if m.chatReviewOffY > 0 {
+			m.chatReviewOffY--
+		}
+	case "down", "j":
+		if m.chatReviewOffY < len(m.chatReviewRows)-1 {
+			m.chatReviewOffY++
+		}
+	case "pgup":
+		m.chatReviewOffY -= m.paneViewHeight(m.activePane) / 2
+		if m.chatReviewOffY < 0 {
+			m.chatReviewOffY = 0
+		}
+	case "pgdn":
+		m.chatReviewOffY += m.paneViewHeight(m.activePane) / 2
+		if maxOff := len(m.chatReviewRows) - 1; m.chatReviewOffY > maxOff {
+			m.chatReviewOffY = maxOff
+		}
+	case "home", "g":
+		m.chatReviewOffY = 0
+	case "end", "G":
+		m.chatReviewOffY = len(m.chatReviewRows) - 1
+	case "left", "h":
+		m.chatReviewOffX -= 8
+		if m.chatReviewOffX < 0 {
+			m.chatReviewOffX = 0
+		}
+	case "right", "l":
+		m.chatReviewOffX += 8
+	}
+	return nil
+}
+
+// acceptChatReview applies the pending EDIT changes through the agent Applier
+// (atomic, stale-proof) and opens the touched files, then continues the loop.
+func (m *Model) acceptChatReview() tea.Cmd {
+	for _, c := range m.chatPendingChanges {
+		_ = os.MkdirAll(filepath.Dir(c.Path), 0o755)
+	}
+	applier := agent.NewApplier()
+	if err := applier.Apply(m.chatPendingChanges); err != nil {
+		m.chatErr = "edit apply failed: " + err.Error()
+		m.amendChatEditResults(false)
+	} else {
+		for _, c := range m.chatPendingChanges {
+			m.openAiFile(filepath.ToSlash(c.Path), true)
+		}
+		m.amendChatEditResults(true)
+	}
+	return m.endChatReview()
+}
+
+// rejectChatReview discards the pending EDIT changes and continues the loop.
+func (m *Model) rejectChatReview() tea.Cmd {
+	m.amendChatEditResults(false)
+	return m.endChatReview()
+}
+
+func (m *Model) endChatReview() tea.Cmd {
+	m.chatReviewMode = false
+	m.chatReviewRows = nil
+	m.chatReviewLeft = nil
+	m.chatReviewRight = nil
+	return m.finalizeChatTools()
+}
+
+// amendChatEditResults updates the tool messages for accepted/rejected edits
+// so the model learns whether each proposed change landed.
+func (m *Model) amendChatEditResults(applied bool) {
+	for _, tr := range m.chatEditTracks {
+		if tr.resultIdx < 0 || tr.resultIdx >= len(m.chatPendingResults) {
+			continue
+		}
+		if applied {
+			m.chatPendingResults[tr.resultIdx].Content = "[EDIT applied] " + tr.label
+		} else {
+			m.chatPendingResults[tr.resultIdx].Content = "[EDIT rejected] " + tr.label
+		}
 	}
 }
+
+func (m *Model) chatReviewBottom() string {
+	added, modified, deleted := 0, 0, 0
+	for _, dr := range m.chatReviewRows {
+		switch dr.Type {
+		case vcs.DiffAdded:
+			added++
+		case vcs.DiffModified:
+			modified++
+		case vcs.DiffDeleted:
+			deleted++
+		}
+	}
+	var name string
+	if len(m.chatPendingChanges) > 0 {
+		name = m.chatPendingChanges[m.chatReviewIdx].Path
+	}
+	multi := ""
+	if len(m.chatPendingChanges) > 1 {
+		multi = fmt.Sprintf(" %d/%d ", m.chatReviewIdx+1, len(m.chatPendingChanges))
+	}
+	line := statusHiStyle.Render(" AI edit "+multi+fitPath(name, 24)) +
+		hintStyle.Render(fmt.Sprintf(" +%d ~%d -%d", added, modified, deleted)) +
+		hintStyle.Render("   y:apply  n:discard"+tabHint(m.chatPendingChanges))
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+func tabHint(changes []agent.Change) string {
+	if len(changes) > 1 {
+		return "  tab:next"
+	}
+	return ""
+}
+
+// cancelChat stops any running stream (called from shutdown).
+func (m *Model) cancelChat() {
+	if m.chatCancel != nil {
+		m.chatCancel()
+		m.chatCancel = nil
+	}
+}
+
+// ---- rendering ----
 
 func (m *Model) rebuildChatRows() {
 	inner := m.chatInnerWidth()
 	rows := make([]chatRow, 0, 64)
 	add := func(kind, text string) { rows = append(rows, chatRow{kind: kind, text: text}) }
 
-	addTurn := func(label, labelKind, textKind, content string) {
+	addText := func(label, labelKind, textKind, content string) {
 		add(labelKind, label)
 		for _, l := range wrapRunes(content, inner) {
 			add(textKind, l)
@@ -399,21 +541,30 @@ func (m *Model) rebuildChatRows() {
 	}
 
 	for _, msg := range m.chatMsgs {
-		if msg.Role == "user" {
-			if strings.HasPrefix(msg.Content, "=== TOOL RESULT:") {
-				addTurn(" tool", "label-tool", "tool", msg.Content)
+		switch msg.Role {
+		case "user":
+			addText(" you", "label-you", "user", msg.Content)
+		case "tool":
+			m.addToolResultRow(&rows, add, msg, inner)
+		case "assistant":
+			if len(msg.ToolCalls) > 0 {
+				if msg.Content != "" {
+					addText(" ai", "label-ai", "ai", msg.Content)
+				}
+				for _, tc := range msg.ToolCalls {
+					add("label-tool", " ⛏ "+tc.Name+" "+toolArgSummary(tc))
+				}
+				add("hint", "")
 			} else {
-				addTurn(" you", "label-you", "user", msg.Content)
+				addText(" ai", "label-ai", "ai", msg.Content)
 			}
-		} else {
-			addTurn(" ai", "label-ai", "ai", msg.Content)
 		}
 	}
 	if m.chatBusy && m.chatReply == "" {
 		add("hint", " thinking...")
 	}
 	if m.chatReply != "" {
-		addTurn(" ai", "label-ai", "ai", m.chatReply)
+		addText(" ai", "label-ai", "ai", m.chatReply)
 	}
 	if m.chatErr != "" {
 		for _, l := range wrapRunes("[error] "+m.chatErr, inner) {
@@ -427,12 +578,59 @@ func (m *Model) rebuildChatRows() {
 	m.chatRows = rows
 }
 
-// cancelChat stops any running stream (called from shutdown).
-func (m *Model) cancelChat() {
-	if m.chatCancel != nil {
-		m.chatCancel()
-		m.chatCancel = nil
+// addToolResultRow renders a tool result as a compact card instead of dumping
+// the raw output (which is still sent to the model as context).
+func (m Model) addToolResultRow(rows *[]chatRow, add func(string, string), msg ai.Message, inner int) {
+	add("label-tool", " ⛏ "+msg.ToolName)
+	for _, l := range compactLines(msg.Content, inner, 6) {
+		add("tool", l)
 	}
+	add("hint", "")
+}
+
+// compactLines keeps the first few lines of a tool result and caps line
+// length so a READ or RUN dump never floods the chat panel.
+func compactLines(s string, w, maxLines int) []string {
+	if w < 1 {
+		w = 1
+	}
+	if maxLines < 1 {
+		maxLines = 1
+	}
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	out := make([]string, 0, maxLines+1)
+	for i, ln := range lines {
+		if i >= maxLines {
+			out = append(out, " … ("+strconv.Itoa(len(lines)-maxLines)+" more lines)")
+			break
+		}
+		if r := []rune(ln); len(r) > w {
+			ln = string(r[:w]) + "…"
+		}
+		out = append(out, ln)
+	}
+	return out
+}
+
+// toolArgSummary renders the relevant argument of a tool call for the card.
+func toolArgSummary(tc ai.ToolCall) string {
+	if tc.Name == "EDIT" {
+		var a struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal([]byte(tc.Args), &a)
+		if a.Path != "" {
+			return a.Path
+		}
+	}
+	var a struct {
+		Arg string `json:"arg"`
+	}
+	_ = json.Unmarshal([]byte(tc.Args), &a)
+	if a.Arg != "" {
+		return a.Arg
+	}
+	return tc.Args
 }
 
 // wrapRunes greedily wraps text to width w, hard-breaking words longer

@@ -47,28 +47,32 @@ func (p *ollamaProvider) Models(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
-func (p *ollamaProvider) ChatStream(ctx context.Context, msgs []Message, onDelta func(string)) error {
-	payload, err := json.Marshal(map[string]any{
+func (p *ollamaProvider) ChatStream(ctx context.Context, req Request, h Handler) error {
+	body := map[string]any{
 		"model":    p.model,
-		"messages": msgs,
+		"messages": ollamaMessages(req.Messages),
 		"stream":   true,
-	})
+	}
+	if len(req.Tools) > 0 {
+		body["tools"] = ollamaTools(req.Tools)
+	}
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url+"/api/chat", bytes.NewReader(payload))
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url+"/api/chat", bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := p.http.Do(req)
+	r.Header.Set("Content-Type", "application/json")
+	resp, err := p.http.Do(r)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("ollama %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("ollama %s: %s", resp.Status, strings.TrimSpace(string(b)))
 	}
 
 	sc := bufio.NewScanner(resp.Body)
@@ -76,7 +80,13 @@ func (p *ollamaProvider) ChatStream(ctx context.Context, msgs []Message, onDelta
 	for sc.Scan() {
 		var chunk struct {
 			Message struct {
-				Content string `json:"content"`
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
 			} `json:"message"`
 			Error string `json:"error"`
 			Done  bool   `json:"done"`
@@ -87,12 +97,70 @@ func (p *ollamaProvider) ChatStream(ctx context.Context, msgs []Message, onDelta
 		if chunk.Error != "" {
 			return fmt.Errorf("ollama: %s", chunk.Error)
 		}
-		if chunk.Message.Content != "" && onDelta != nil {
-			onDelta(chunk.Message.Content)
+		if chunk.Message.Content != "" && h.Delta != nil {
+			h.Delta(chunk.Message.Content)
 		}
 		if chunk.Done {
+			if h.ToolCalls != nil && len(chunk.Message.ToolCalls) > 0 {
+				calls := make([]ToolCall, 0, len(chunk.Message.ToolCalls))
+				for i, tc := range chunk.Message.ToolCalls {
+					calls = append(calls, ToolCall{
+						ID:   fmt.Sprintf("call_%d", i),
+						Name: tc.Function.Name,
+						Args: tc.Function.Arguments,
+					})
+				}
+				h.ToolCalls(calls)
+			}
 			return nil
 		}
 	}
 	return sc.Err()
+}
+
+// ollamaMessages maps ai.Message to the Ollama /api/chat wire format. Assistant
+// tool-call messages carry tool_calls; role "tool" messages use tool_name.
+func ollamaMessages(msgs []Message) []map[string]any {
+	out := make([]map[string]any, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Role == "tool" {
+			out = append(out, map[string]any{
+				"role":      "tool",
+				"content":   m.Content,
+				"tool_name": m.ToolName,
+			})
+			continue
+		}
+		mm := map[string]any{"role": m.Role, "content": m.Content}
+		if len(m.ToolCalls) > 0 {
+			tcs := make([]map[string]any, 0, len(m.ToolCalls))
+			for _, tc := range m.ToolCalls {
+				tcs = append(tcs, map[string]any{
+					"function": map[string]any{
+						"name":      tc.Name,
+						"arguments": tc.Args,
+					},
+				})
+			}
+			mm["tool_calls"] = tcs
+		}
+		out = append(out, mm)
+	}
+	return out
+}
+
+// ollamaTools maps ToolDef to the Ollama tools array format.
+func ollamaTools(tools []ToolDef) []map[string]any {
+	out := make([]map[string]any, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        t.Name,
+				"description": t.Description,
+				"parameters":  t.Parameters,
+			},
+		})
+	}
+	return out
 }

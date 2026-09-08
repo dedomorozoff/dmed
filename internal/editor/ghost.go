@@ -85,11 +85,13 @@ func (m *Model) ghostTrigger() tea.Cmd {
 
 	go func() {
 		defer close(ch)
-		err := m.ai.ChatStream(ctx, msgs, func(delta string) {
-			select {
-			case ch <- chatEvent{delta: delta}:
-			case <-ctx.Done():
-			}
+		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs}, ai.Handler{
+			Delta: func(delta string) {
+				select {
+				case ch <- chatEvent{delta: delta}:
+				case <-ctx.Done():
+				}
+			},
 		})
 		if err != nil {
 			select {

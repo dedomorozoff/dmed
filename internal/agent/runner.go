@@ -167,11 +167,13 @@ func (r *Runner) buildMessages(prompt string, targets []TargetFile) ([]ai.Messag
 
 func (r *Runner) stream(ctx context.Context, id string, msgs []ai.Message, ch chan<- runEvent) {
 	defer close(ch)
-	err := r.prov.ChatStream(ctx, msgs, func(d string) {
-		select {
-		case ch <- runEvent{delta: d}:
-		case <-ctx.Done():
-		}
+	err := r.prov.ChatStream(ctx, ai.Request{Messages: msgs}, ai.Handler{
+		Delta: func(d string) {
+			select {
+			case ch <- runEvent{delta: d}:
+			case <-ctx.Done():
+			}
+		},
 	})
 	if err != nil {
 		select {

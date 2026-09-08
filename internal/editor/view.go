@@ -176,6 +176,8 @@ func (m Model) View() tea.View {
 		rows = append(rows, renderSideBySide(m.aiReviewLeft, m.aiReviewRight, m.aiReviewRows, m.aiReviewOffY, m.aiReviewOffX, m.width, h, nil, nil)...)
 	} else if m.agentReviewMode {
 		rows = append(rows, renderSideBySide(m.agentReviewLeft, m.agentReviewRight, m.agentReviewRows, m.agentReviewOffY, m.agentReviewOffX, m.width, h, nil, nil)...)
+	} else if m.chatReviewMode {
+		rows = append(rows, renderSideBySide(m.chatReviewLeft, m.chatReviewRight, m.chatReviewRows, m.chatReviewOffY, m.chatReviewOffX, m.width, h, nil, nil)...)
 	} else if m.conflictOpen && len(m.conflictRows) > 0 {
 		rows = append(rows, renderSideBySide(m.conflictLeftLines, m.conflictRightLines, m.conflictRows, m.conflictOffY, m.conflictOffX, m.width, h, nil, nil)...)
 	} else if m.aiCfgOpen {
@@ -194,6 +196,8 @@ func (m Model) View() tea.View {
 		bottom = m.aiReviewBottom()
 	} else if m.agentReviewMode {
 		bottom = m.agentReviewBottom()
+	} else if m.chatReviewMode {
+		bottom = m.chatReviewBottom()
 	} else if m.agentPrompt {
 		bottom = m.agentPromptLine()
 	} else if m.aiInlineOpen {

@@ -3,70 +3,36 @@ package editor
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"dmed/internal/ai"
 )
 
-func TestParseToolCallsEmpty(t *testing.T) {
-	if tools := parseToolCalls("just a plain answer, no tools"); len(tools) != 0 {
-		t.Fatalf("want no tools, got %+v", tools)
+func TestChatToolDefsIncludesCoreTools(t *testing.T) {
+	defs := chatToolDefs()
+	names := map[string]bool{}
+	for _, d := range defs {
+		names[d.Name] = true
+	}
+	for _, want := range []string{"READ", "SEARCH", "RUN", "EDIT"} {
+		if !names[want] {
+			t.Fatalf("missing tool %s in %v", want, names)
+		}
 	}
 }
 
-func TestParseToolCallsRead(t *testing.T) {
-	reply := "Let me look.\n=== TOOL: READ: main.go ===\nSome prose after."
-	tools := parseToolCalls(reply)
-	if len(tools) != 1 {
-		t.Fatalf("want 1 tool, got %d", len(tools))
-	}
-	if tools[0].name != "READ" || tools[0].arg != "main.go" {
-		t.Fatalf("got %+v", tools[0])
-	}
-}
-
-func TestParseToolCallsEditBlock(t *testing.T) {
-	reply := "I'll change the file.\n" +
-		"=== TOOL: EDIT: file.go ===\n" +
-		"package x\n\nfunc main() {}\n" +
-		"=== END TOOL ===\n" +
-		"Done."
-	tools := parseToolCalls(reply)
-	if len(tools) != 1 {
-		t.Fatalf("want 1 tool, got %d (%+v)", len(tools), tools)
-	}
-	tc := tools[0]
-	if tc.name != "EDIT" || tc.arg != "file.go" {
-		t.Fatalf("got name=%q arg=%q", tc.name, tc.arg)
-	}
-	if tc.body != "package x\n\nfunc main() {}" {
-		t.Fatalf("body = %q", tc.body)
-	}
-}
-
-func TestParseToolCallsMultipleAndEditEndsAtNextMarker(t *testing.T) {
-	reply := "=== TOOL: EDIT: a.go ===\n" +
-		"content A\n" +
-		"=== TOOL: READ: b.go ===\n" +
-		"after"
-	tools := parseToolCalls(reply)
-	if len(tools) != 2 {
-		t.Fatalf("want 2 tools, got %d (%+v)", len(tools), tools)
-	}
-	if tools[0].name != "EDIT" || tools[0].body != "content A" {
-		t.Fatalf("edit = %+v", tools[0])
-	}
-	if tools[1].name != "READ" || tools[1].arg != "b.go" {
-		t.Fatalf("read = %+v", tools[1])
-	}
-}
-
-func TestExecuteToolReadAndSearch(t *testing.T) {
+func TestExecChatToolReadAndSearch(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "hello.go"), "package main\n// greeting\n")
 	writeTestFile(t, filepath.Join(dir, "other.txt"), "nothing here")
 
 	m := Model{root: dir}
 
-	res := executeTool(&m, toolCall{name: "READ", arg: "hello.go"})
+	res, chg := m.execChatTool(ai.ToolCall{Name: "READ", Args: `{"arg":"hello.go"}`})
+	if chg != nil {
+		t.Fatalf("READ must not produce a change")
+	}
 	if !containsStr(res, "greeting") {
 		t.Fatalf("READ result missing content: %q", res)
 	}
@@ -74,29 +40,99 @@ func TestExecuteToolReadAndSearch(t *testing.T) {
 		t.Fatalf("READ errored: %q", res)
 	}
 
-	res = executeTool(&m, toolCall{name: "SEARCH", arg: "greeting"})
+	res, chg = m.execChatTool(ai.ToolCall{Name: "SEARCH", Args: `{"arg":"greeting"}`})
+	if chg != nil {
+		t.Fatalf("SEARCH must not produce a change")
+	}
 	if !containsStr(res, "hello.go") {
 		t.Fatalf("SEARCH result missing file: %q", res)
 	}
 
-	res = executeTool(&m, toolCall{name: "READ", arg: "missing.go"})
+	res, _ = m.execChatTool(ai.ToolCall{Name: "READ", Args: `{"arg":"missing.go"}`})
 	if !containsStr(res, "[READ error]") {
 		t.Fatalf("expected error for missing file: %q", res)
 	}
 }
 
-func TestExecuteToolEdit(t *testing.T) {
+func TestExecChatToolEditProposesChangeButDoesNotWrite(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "t.txt"), "old content\n")
 	m := Model{root: dir}
 
-	res := executeTool(&m, toolCall{name: "EDIT", arg: "t.txt", body: "new content"})
-	if !containsStr(res, "[EDIT applied]") {
-		t.Fatalf("EDIT result = %q", res)
+	res, chg := m.execChatTool(ai.ToolCall{Name: "EDIT", Args: `{"path":"t.txt","content":"new content"}`})
+	if chg == nil {
+		t.Fatalf("EDIT must propose a change, got %q", res)
 	}
+	if chg.Path != filepath.Join(dir, "t.txt") {
+		t.Fatalf("change path = %q", chg.Path)
+	}
+	if chg.Orig != "old content\n" || chg.New != "new content\n" {
+		t.Fatalf("change = orig %q new %q", chg.Orig, chg.New)
+	}
+	// The file must be untouched until the diff review accepts it.
 	data, err := os.ReadFile(filepath.Join(dir, "t.txt"))
-	if err != nil || string(data) != "new content" {
-		t.Fatalf("file after edit = %q err=%v", string(data), err)
+	if err != nil || string(data) != "old content\n" {
+		t.Fatalf("file must not change before review: %q err=%v", string(data), err)
+	}
+	if !containsStr(res, "proposed") {
+		t.Fatalf("result should mention a proposal: %q", res)
+	}
+}
+
+func TestExecChatToolEditCreatesNewFile(t *testing.T) {
+	dir := t.TempDir()
+	m := Model{root: dir}
+
+	_, chg := m.execChatTool(ai.ToolCall{Name: "EDIT", Args: `{"path":"new/file.txt","content":"hi"}`})
+	if chg == nil {
+		t.Fatalf("EDIT of a missing file must propose a create")
+	}
+	if chg.Orig != "" || chg.New != "hi\n" {
+		t.Fatalf("create change = orig %q new %q", chg.Orig, chg.New)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "new", "file.txt")); !os.IsNotExist(err) {
+		t.Fatalf("create must not land before review")
+	}
+}
+
+func TestExecChatToolEditNoChangeIsSkipped(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "t.txt"), "same\n")
+	m := Model{root: dir}
+
+	res, chg := m.execChatTool(ai.ToolCall{Name: "EDIT", Args: `{"path":"t.txt","content":"same"}`})
+	if chg != nil {
+		t.Fatalf("no-change edit must not propose, got change")
+	}
+	if !containsStr(res, "no change") {
+		t.Fatalf("result = %q", res)
+	}
+}
+
+func TestToolArgSummary(t *testing.T) {
+	if s := toolArgSummary(ai.ToolCall{Name: "EDIT", Args: `{"path":"a/b.go","content":"x"}`}); s != "a/b.go" {
+		t.Fatalf("edit summary = %q", s)
+	}
+	if s := toolArgSummary(ai.ToolCall{Name: "RUN", Args: `{"arg":"go test ./..."}`}); s != "go test ./..." {
+		t.Fatalf("run summary = %q", s)
+	}
+}
+
+func TestCompactLinesTruncatesLongOutput(t *testing.T) {
+	in := "l0\nl1\nl2\nl3\nl4\nl5\nl6\nl7"
+	got := compactLines(in, 80, 4)
+	if len(got) != 5 {
+		t.Fatalf("want 4 lines + overflow marker, got %d: %v", len(got), got)
+	}
+	if !strings.Contains(got[4], "more lines") {
+		t.Fatalf("want overflow marker, got %q", got[4])
+	}
+}
+
+func TestCompactLinesCapsWidth(t *testing.T) {
+	got := compactLines("abcdefghij", 5, 10)
+	if strings.ContainsAny(got[0], "fghij") {
+		t.Fatalf("line not capped to width: %q", got[0])
 	}
 }
 

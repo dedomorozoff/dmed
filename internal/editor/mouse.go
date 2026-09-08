@@ -119,7 +119,7 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 
 	// Full-screen modes replace the buffer; their content is scrolled with
 	// the wheel. A click places the cursor only in the buffer.
-	if m.diffViewOpen || m.aiReviewMode || m.agentReviewMode || m.conflictOpen || m.aiCfgOpen || m.helpOpen {
+	if m.diffViewOpen || m.aiReviewMode || m.agentReviewMode || m.chatReviewMode || m.conflictOpen || m.aiCfgOpen || m.helpOpen {
 		return nil
 	}
 

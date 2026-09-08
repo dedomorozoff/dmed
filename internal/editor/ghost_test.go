@@ -17,9 +17,11 @@ type fakeProvider struct {
 
 func (f *fakeProvider) Models(_ context.Context) ([]string, error) { return nil, nil }
 
-func (f *fakeProvider) ChatStream(_ context.Context, _ []ai.Message, onDelta func(string)) error {
+func (f *fakeProvider) ChatStream(_ context.Context, _ ai.Request, h ai.Handler) error {
 	for _, p := range f.pieces {
-		onDelta(p)
+		if h.Delta != nil {
+			h.Delta(p)
+		}
 	}
 	return nil
 }
