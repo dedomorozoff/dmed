@@ -216,6 +216,25 @@ func TestChatThreadTitle(t *testing.T) {
 	}
 }
 
+// TestRebuildChatRowsOnboardingHint verifies the empty-state panel points a
+// beginner at the wizard when no model is resolved yet.
+func TestRebuildChatRowsOnboardingHint(t *testing.T) {
+	isolateHomeConfig(t)
+	m := newChatModel()
+	m.width = 100
+	m.rebuildChatRows()
+	if len(m.chatRows) == 0 {
+		t.Fatal("want welcome hint rows")
+	}
+	joined := ""
+	for _, r := range m.chatRows {
+		joined += r.text + "\n"
+	}
+	if !strings.Contains(joined, "AI: Preferences") {
+		t.Fatalf("onboarding hint must mention the wizard, got:\n%s", joined)
+	}
+}
+
 func TestRebuildChatRowsEmptyStateAndTurns(t *testing.T) {
 	m := newChatModel()
 	m.width = 100

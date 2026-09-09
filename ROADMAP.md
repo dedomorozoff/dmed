@@ -92,8 +92,10 @@
 
 ### M3 — AI v1
 - [x] Чат-панель со стримингом, контекст файла/выделения
-      (`Alt+A` — панель справа, бэкенд — локальный Ollama, `DMED_MODEL`/
-      `DMED_OLLAMA_URL` переопределяют модель/адрес; Enter — отправить,
+      (`Alt+A` — панель справа; бэкенды — пресеты провайдеров: локальный
+      Ollama, OpenAI, DeepSeek, Groq, LM Studio, vLLM; `DMED_PROVIDER`/
+      `DMED_API_KEY`/`DMED_MODEL`/`DMED_OLLAMA_URL` переопределяют настройки;
+      модель при пустом конфиге берётся первая с сервера; Enter — отправить,
       Esc — закрыть, PgUp/PgDn — скролл, Ctrl+U — новый поток с подсказкой
       внизу панели)
 - [x] Inline-запросы («перепиши это») → diff-превью → accept/reject
@@ -159,6 +161,22 @@
 - [x] Встроенный терминал (`Alt+T`): постоянная сессия cmd внизу редактора,
       история команд по ↑/↓, скроллбэк PgUp/PgDn, `Esc` закрыть (сессия живёт).
       Pipe-based: интерактивные TUI-программы внутри не запускаются.
+
+### M6 — AI onboarding
+- [x] Пресеты провайдеров в wizard AI: Preferences (`←`/`→`): Ollama (local),
+      OpenAI, DeepSeek, Groq, LM Studio (local), vLLM (local), Custom — выбор
+      подставляет base URL и модель; провайдер хранится человекочитаемой
+      меткой пресета, старые значения `ollama`/`openai` нормализуются
+- [x] Кнопка Test в wizard (`t`/Enter): фоновый опрос `Models()` с таймаутом
+      3с, результат ✓ connected · N models / ✗ с человеческой подсказкой
+      (refused → запусти ollama, 401 → проверь ключ, unreachable → проверь URL)
+- [x] Нормализация base URL в `internal/ai`: хвостовой `/v1` срезается, чтобы
+      вставленный из доков провайдера endpoint не превращался в `/v1/v1/...`
+- [x] Env-переменные `DMED_PROVIDER` и `DMED_API_KEY` (поверх конфигов)
+- [x] Онбординг-подсказка в пустом чате: путь к wizard + быстрый локальный
+      маршрут `ollama pull llama3.2`
+- [x] CLI-мастер `dmed setup-ai`: провайдер → ключ → тест → запись в
+      `~/.dmed.conf` через `config.WriteAI` (`internal/setup`)
 
 ## Инфраструктура: CI и релизы
 

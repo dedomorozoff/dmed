@@ -39,9 +39,22 @@ AI agents can read, propose, and apply changes directly to your codebase — but
 
 - **Chat panel** (`Alt+A`) — streaming conversation with your code
 - **Inline rewrite** (`Alt+I`) — select text, describe change, review diff, accept/reject
-- Supports multiple providers:
-  - **Ollama** (local, free)
-  - **OpenAI-compatible** (OpenAI, DeepSeek, Groq, Together, vLLM, LM Studio)
+- **Zero-config start**: with a running Ollama the chat just works — the first
+  model reported by the server is picked automatically
+- Built-in provider presets (wizard cycles them with `←`/`→`):
+  **Ollama** (local, free), **OpenAI**, **DeepSeek**, **Groq**,
+  **LM Studio** (local), **vLLM** (local), or any OpenAI-compatible server
+- **First-time setup, three ways**:
+  - `dmed setup-ai` — interactive CLI wizard (provider → key → test → saved)
+  - In the editor: `Ctrl+P` → `AI: Preferences...` — pick a preset with
+    `←`/`→`, paste the API key, press `t` to test the connection, `Ctrl+S` to save
+  - Environment variables (highest priority, nothing written to disk):
+    `DMED_PROVIDER`, `DMED_API_KEY`, `DMED_MODEL`, `DMED_OLLAMA_URL`
+
+```sh
+# example: one-off run against DeepSeek without touching any config file
+DMED_PROVIDER=DeepSeek DMED_API_KEY=sk-... DMED_MODEL=deepseek-chat dmed
+```
 
 ### Change Tracking
 
@@ -193,9 +206,10 @@ line_numbers = true
 skipped_dirs = .git,node_modules,vendor
 
 [ai]
-provider = ollama            # ollama | openai
-model =                      # e.g. gpt-4, qwen2.5-coder:7b
-ollama_url = http://localhost:11434
+provider = Ollama (local)   # wizard preset: Ollama (local) | OpenAI | DeepSeek | Groq | LM Studio (local) | vLLM (local) | Custom
+                            # legacy values "ollama"/"openai" still work
+model =                      # empty = first model reported by the server
+ollama_url = http://localhost:11434   # base URL, no /v1 suffix (it is appended automatically)
 api_key =                    # for OpenAI-compatible providers
 context_max = 6000           # max lines sent as file context
 system_prompt = You are a helpful coding assistant...

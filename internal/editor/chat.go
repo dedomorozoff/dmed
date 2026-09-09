@@ -237,7 +237,7 @@ func (m *Model) chatSubmit() tea.Cmd {
 	if m.chatModel == "" {
 		m.pickChatModel()
 		if m.chatModel == "" {
-			m.chatErr = "no model available; start ollama or run: ollama pull llama3.2"
+			m.chatErr = "no model available — Ctrl+P → 'AI: Preferences' to set one up, or run: ollama pull llama3.2"
 			m.rebuildChatRows()
 			return nil
 		}
@@ -678,8 +678,16 @@ func (m *Model) rebuildChatRows() {
 		}
 	}
 	if len(rows) == 0 {
-		add("hint", " Local AI via Ollama: free and offline.")
-		add("hint", " Type a question, Enter sends.")
+		add("hint", " AI works through presets: Ollama, OpenAI, DeepSeek,")
+		add("hint", " Groq, LM Studio, vLLM or any OpenAI-compatible server.")
+		if m.chatModel == "" {
+			add("hint", " No model yet — quick fix: Ctrl+P → 'AI: Preferences',")
+			add("hint", " pick a provider, press t to test, Ctrl+S to save.")
+			add("hint", " Free local route: install ollama, run `ollama pull")
+			add("hint", " llama3.2`, keep it running — then just type below.")
+		} else {
+			add("hint", " Type a question, Enter sends.")
+		}
 	}
 	m.chatRows = rows
 }

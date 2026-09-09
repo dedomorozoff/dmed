@@ -116,11 +116,17 @@ func Load(projectRoot string) Config {
 	}
 
 	// Environment variable overrides
+	if v := os.Getenv("DMED_PROVIDER"); v != "" {
+		cfg.AI.Provider = v
+	}
 	if v := os.Getenv("DMED_MODEL"); v != "" {
 		cfg.AI.Model = v
 	}
 	if v := os.Getenv("DMED_OLLAMA_URL"); v != "" {
 		cfg.AI.OllamaURL = v
+	}
+	if v := os.Getenv("DMED_API_KEY"); v != "" {
+		cfg.AI.APIKey = v
 	}
 	if v := os.Getenv("DMED_SHELL"); v != "" {
 		// Shell is not in Config struct but stored separately in the editor.
@@ -432,4 +438,48 @@ func WriteAI(path string, ai AIConfig) (int, error) {
 		return 0, err
 	}
 	return len(replaced) + len(missing), nil
+}
+
+// AIPreset describes one built-in "just works" provider entry a beginner can
+// pick without reading docs: choosing it fills the base URL (and a sensible
+// default model when the provider exposes a stable one) so only the API key
+// is left to type. The base URL is the origin only — internal/ai appends the
+// API paths (/v1/chat/completions, /v1/models) itself.
+type AIPreset struct {
+	Name    string // display name shown in the wizard
+	Kind    string // wire protocol: "ollama" | "openai"
+	BaseURL string // origin, no path suffix ("" = keep the current URL)
+	Model   string // optional suggested model ("" = resolved from the server)
+	APIKey  bool   // whether this provider needs an API key
+}
+
+// DefaultOllamaURL is the address a stock local Ollama install listens on.
+// Exported so the wizard test button and the CLI setup can share the hint.
+const DefaultOllamaURL = "http://localhost:11434"
+
+// AIPresets lists the built-in providers in wizard cycle order. Ollama comes
+// first: it is free, local and needs no key, making it the best beginner path.
+// The last entry is Custom — it keeps whatever URL/model the user already had.
+func AIPresets() []AIPreset {
+	return []AIPreset{
+		{Name: "Ollama (local)", Kind: "ollama", BaseURL: DefaultOllamaURL},
+		{Name: "OpenAI", Kind: "openai", BaseURL: "https://api.openai.com", Model: "gpt-4o-mini", APIKey: true},
+		{Name: "DeepSeek", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-chat", APIKey: true},
+		{Name: "Groq", Kind: "openai", BaseURL: "https://api.groq.com", Model: "llama-3.3-70b-versatile", APIKey: true},
+		{Name: "LM Studio (local)", Kind: "openai", BaseURL: "http://localhost:1234"},
+		{Name: "vLLM (local)", Kind: "openai", BaseURL: "http://localhost:8000"},
+		{Name: "Custom", Kind: "openai", BaseURL: ""},
+	}
+}
+
+// ResolvePreset returns the preset matching a stored provider label, falling
+// back to Ollama for unknown/empty values so a hand-edited config never leaves
+// the wizard stuck on a name it cannot cycle from.
+func ResolvePreset(name string) AIPreset {
+	for _, p := range AIPresets() {
+		if strings.EqualFold(p.Name, name) {
+			return p
+		}
+	}
+	return AIPresets()[0]
 }

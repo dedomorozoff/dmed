@@ -83,6 +83,13 @@ func NewProvider(cfg Config) Provider {
 		}
 	}
 	cfg.URL = strings.TrimRight(cfg.URL, "/")
+	// The provider appends /v1/... paths itself; beginners pasting endpoints
+	// like https://api.deepseek.com/v1 (or LM Studio's advertised URL) would
+	// otherwise hit /v1/v1/chat/completions. Strip a trailing /v1 so both the
+	// bare origin and the full endpoint form work.
+	if cfg.Type == OpenAIProvider && strings.HasSuffix(cfg.URL, "/v1") {
+		cfg.URL = strings.TrimSuffix(cfg.URL, "/v1")
+	}
 
 	httpClient := &http.Client{}
 

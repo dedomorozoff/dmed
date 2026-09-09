@@ -177,6 +177,7 @@ type Model struct {
 	aiCfgField int
 	aiCfgEdit  bool
 	aiCfgIn    []rune
+	aiCfgTest  aiTestState // last connection probe from the wizard Test row
 
 	treeVisible    bool
 	treeFocus      bool
@@ -1127,6 +1128,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !msg.Done && msg.Err == nil {
 			return m, waitForChatOutput(m.chatCh, m.chatGen)
 		}
+	case AITestResultMsg:
+		m.handleAITestResult(msg)
+		return m, nil
 	case InlineOutputMsg:
 		cmd := m.handleInlineOutput(msg)
 		return m, cmd

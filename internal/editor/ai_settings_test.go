@@ -20,7 +20,8 @@ func isolateHomeConfig(t *testing.T) {
 	t.Setenv("HOME", dir)
 }
 
-// TestAISettingsProviderCycle verifies ←/→ flips the provider on the choice row.
+// TestAISettingsProviderCycle verifies ←/→ cycles the built-in presets and
+// auto-fills the base URL for cloud providers.
 func TestAISettingsProviderCycle(t *testing.T) {
 	isolateHomeConfig(t)
 	m := New()
@@ -28,16 +29,59 @@ func TestAISettingsProviderCycle(t *testing.T) {
 	if !m.aiCfgOpen {
 		t.Fatal("wizard should open")
 	}
-	if m.cfg.AI.Provider != "ollama" {
+	if m.cfg.AI.Provider != "Ollama (local)" {
 		t.Fatalf("prov in default = %q", m.cfg.AI.Provider)
 	}
 	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyRight})
-	if m.cfg.AI.Provider != "openai" {
-		t.Fatalf("after right = %q, want openai", m.cfg.AI.Provider)
+	if m.cfg.AI.Provider != "OpenAI" {
+		t.Fatalf("after right = %q, want OpenAI", m.cfg.AI.Provider)
+	}
+	if m.cfg.AI.OllamaURL != "https://api.openai.com" {
+		t.Fatalf("url after right = %q, want preset URL", m.cfg.AI.OllamaURL)
 	}
 	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyLeft})
-	if m.cfg.AI.Provider != "ollama" {
-		t.Fatalf("after left = %q, want ollama", m.cfg.AI.Provider)
+	if m.cfg.AI.Provider != "Ollama (local)" {
+		t.Fatalf("after left = %q, want Ollama (local)", m.cfg.AI.Provider)
+	}
+}
+
+// TestAISettingsLegacyProviderNormalizes verifies that a config written by an
+// older dmed (provider = ollama) still lands on the matching preset.
+func TestAISettingsLegacyProviderNormalizes(t *testing.T) {
+	isolateHomeConfig(t)
+	m := New()
+	m.cfg.AI.Provider = "openai"
+	m.startAISettings()
+	if m.cfg.AI.Provider != "OpenAI" {
+		t.Fatalf("legacy openai not normalized, got %q", m.cfg.AI.Provider)
+	}
+}
+
+// TestAISettingsTestRowConnectionProbe verifies the Test row: Enter (or t)
+// starts the probe, and the result message flips the status to the human hint.
+func TestAISettingsTestRowConnectionProbe(t *testing.T) {
+	isolateHomeConfig(t)
+	m := New()
+	m.startAISettings()
+	m.aiCfgField = len(aiSettingsFields) - 1 // Test row
+
+	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.aiCfgTest.running {
+		t.Fatal("probe should be running after Enter on Test row")
+	}
+	m.handleAITestResult(AITestResultMsg{OK: true, Status: "2 models"})
+	if !m.aiCfgTest.ok || m.aiCfgTest.running {
+		t.Fatalf("state after ok result: %+v", m.aiCfgTest)
+	}
+
+	m.aiCfgField = 0 // 't' works from any row
+	cmd := m.handleAISettings(tea.KeyPressMsg{Code: 't'})
+	if cmd == nil {
+		t.Fatal("t should start a probe when none is running")
+	}
+	m.handleAITestResult(AITestResultMsg{OK: false, Status: "dial tcp: connection refused"})
+	if m.aiCfgTest.ok || strings.Contains(m.aiCfgTest.status, "dial tcp") {
+		t.Fatalf("refused must be translated into a human hint, got %q", m.aiCfgTest.status)
 	}
 }
 

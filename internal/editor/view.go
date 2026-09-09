@@ -31,6 +31,8 @@ var (
 	diagErrStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
 	diagWarnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	diagInfoStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
+	okTestStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
+	errTestStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	diffAddBg       = lipgloss.NewStyle().Background(lipgloss.Color("22"))
 	diffDelBg       = lipgloss.NewStyle().Background(lipgloss.Color("52"))
 	diffModBg       = lipgloss.NewStyle().Background(lipgloss.Color("58"))
