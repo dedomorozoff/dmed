@@ -752,15 +752,15 @@ func (m Model) gitCommitInputRows() []string {
 	return lines
 }
 
-// gitCommitExtraRows returns the number of extra rows the commit input
-// occupies beyond the single status-bar line.
+// gitCommitExtraRows returns the number of rows the commit input occupies
+// (the status-bar line remains; the input renders below it).
 func (m Model) gitCommitExtraRows() int {
 	if !m.gitOpen || m.gitMode != gitModeCommit {
 		return 0
 	}
-	n := len(m.gitCommitInputRows()) - 1
-	if n < 0 {
-		n = 0
+	n := len(m.gitCommitInputRows())
+	if n < 1 {
+		n = 1
 	}
 	return n
 }
@@ -1385,7 +1385,7 @@ func (m Model) aiInlineExtraRows() int {
 	if n < 1 {
 		n = 1
 	}
-	return n - 1
+	return n
 }
 
 func (m Model) aiInlineInputRender() []string {
@@ -1440,7 +1440,7 @@ func (m Model) aiFixExtraRows() int {
 	if n < 1 {
 		n = 1
 	}
-	return n - 1
+	return n
 }
 
 func (m Model) aiFixInputRender() []string {

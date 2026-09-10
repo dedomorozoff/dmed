@@ -392,7 +392,7 @@ func (m Model) agentPromptExtraRows() int {
 	if n < 1 {
 		n = 1
 	}
-	return n - 1
+	return n
 }
 
 func (m Model) agentPromptInputRender() []string {
