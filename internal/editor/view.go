@@ -143,7 +143,7 @@ func (m Model) pluginStoreExtraRows() int {
 }
 
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.pluginStoreExtraRows()
+	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -248,6 +248,9 @@ func (m Model) View() tea.View {
 		}
 	}
 	rows = append(rows, bottom)
+	if m.gitOpen && m.gitMode == gitModeCommit {
+		rows = append(rows, m.gitCommitInputRender()...)
+	}
 	if m.finderOpen {
 		rows = append(rows, m.finderPanel()...)
 	}
@@ -712,11 +715,11 @@ func (m Model) treeConfirmLine() string {
 }
 
 func (m Model) gitLine() string {
-	line := statusHiStyle.Render(m.t("git.commit_line")) + statusStyle.Render(string(m.gitCommitIn)) + cursorStyle.Render(" ")
+	line := statusHiStyle.Render(m.t("git.commit_line")) + cursorStyle.Render(" ")
 	if m.repo != nil {
 		branch := m.repo.Branch()
 		if branch != "" {
-			line += hintStyle.Render(fmt.Sprintf(" (%s: %s)", branch, m.repo.StatusSummary()))
+			line += hintStyle.Render(fmt.Sprintf("(%s: %s)", branch, m.repo.StatusSummary()))
 		}
 	}
 	line += hintStyle.Render("  " + m.t("git.commit_hint"))
@@ -725,6 +728,57 @@ func (m Model) gitLine() string {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	return line
+}
+
+// gitCommitInputRows returns the word-wrapped lines of the commit input.
+func (m Model) gitCommitInputRows() []string {
+	w := m.width - 4 // "Commit: " (8 but styled) + cursor (1) — approximate
+	if w < 1 {
+		w = 1
+	}
+	lines := wrapRunes(string(m.gitCommitIn), w)
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	return lines
+}
+
+// gitCommitExtraRows returns the number of extra rows the commit input
+// occupies beyond the single status-bar line.
+func (m Model) gitCommitExtraRows() int {
+	if !m.gitOpen || m.gitMode != gitModeCommit {
+		return 0
+	}
+	n := len(m.gitCommitInputRows()) - 1
+	if n < 0 {
+		n = 0
+	}
+	return n
+}
+
+// gitCommitInputRows renders returns the multi-line commit input rows.
+func (m Model) gitCommitInputRender() []string {
+	w := m.width
+	inputTextW := w - 8 // "Commit: " is 8 chars
+	if inputTextW < 1 {
+		inputTextW = 1
+	}
+	lines := wrapRunes(string(m.gitCommitIn), inputTextW)
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	var out []string
+	for i, line := range lines {
+		row := statusHiStyle.Render("Commit: ") + statusStyle.Render(line)
+		if i == len(lines)-1 {
+			row += cursorStyle.Render(" ")
+		}
+		if fill := w - lipgloss.Width(row); fill > 0 {
+			row += statusStyle.Render(strings.Repeat(" ", fill))
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 func (m Model) gitStatusLine() string {
