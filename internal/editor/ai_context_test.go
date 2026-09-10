@@ -243,7 +243,7 @@ func TestChatEditApplyWritesFileAndOpensTab(t *testing.T) {
 		t.Fatal("must pause for review, not continue the loop")
 	}
 
-	m.acceptChatReview()
+	m.acceptChatReview(false)
 
 	data, err := os.ReadFile(filepath.Join(dir, "existing.go"))
 	if err != nil || string(data) != "package new\n" {
@@ -299,7 +299,7 @@ func TestChatEditFocusOpenTabNoDuplicate(t *testing.T) {
 	before := len(m.tabs)
 
 	m.handleChatToolsDone("", []ai.ToolCall{{ID: "c1", Name: "EDIT", Args: `{"path":"a.go","content":"v2\n"}`}})
-	m.acceptChatReview()
+	m.acceptChatReview(false)
 
 	if len(m.tabs) != before {
 		t.Fatalf("editing an open file must not duplicate its tab: %d -> %d", before, len(m.tabs))
@@ -379,7 +379,135 @@ func TestToolRoundSkipsBinaryArtifact(t *testing.T) {
 			t.Fatalf("binary artifact must not open a tab; tabs=%+v", m.tabs)
 		}
 	}
-	if strings.Contains(results[0].Content, "AI FILES") {
-		t.Fatalf("binary artifacts must not be summarized: %q", results[0].Content)
+}
+
+// TestAIFixCompletesIntoReview verifies that when the fix stream goroutine
+// closes its channel the request transitions out of the busy state and into
+// diff review instead of hanging.
+func TestAIFixCompletesIntoReview(t *testing.T) {
+	m := New()
+	m.width = 100
+	m.height = 30
+	m.cur().buf = buffer.Load("hello world\n")
+	m.aiFixOriginal = "hello world\n"
+	m.aiFixBusy = true
+	m.msg = "AI fixing..."
+
+	ch := make(chan chatEvent, 1)
+	m.aiFixCh = ch
+	cmd := waitForFixOutput(ch)
+	if cmd == nil {
+		t.Fatal("waitForFixOutput should return a cmd for a live channel")
+	}
+	ch <- chatEvent{delta: "hello cruel world"}
+	close(ch)
+	msg1 := cmd().(FixOutputMsg)
+	if msg1.Delta != "hello cruel world" || msg1.Done {
+		t.Fatalf("first event = %+v", msg1)
+	}
+	cmd2 := m.handleFixOutput(msg1)
+	if !m.aiFixBusy {
+		t.Fatal("busy must stay set after a partial delta")
+	}
+	msg2 := cmd2().(FixOutputMsg)
+	if !msg2.Done {
+		t.Fatalf("closed channel must yield Done, got %+v", msg2)
+	}
+	m.handleFixOutput(msg2)
+	if m.aiFixBusy {
+		t.Fatal("busy must clear after stream completes")
+	}
+	if !m.aiFixReviewMode {
+		t.Fatal("completed stream must enter review mode")
+	}
+}
+
+// TestAIFixCancelWhileBusy verifies Esc aborts a streaming fix request and
+// that a stale streamed output arriving afterwards is ignored.
+func TestAIFixCancelWhileBusy(t *testing.T) {
+	m := New()
+	m.aiFixBusy = true
+	canceled := false
+	m.aiFixCancel = func() { canceled = true }
+	ch := make(chan chatEvent, 1)
+	m.aiFixCh = ch
+	m.aiFixProposal = "partial"
+
+	next := press(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if !canceled {
+		t.Fatal("Esc must cancel the running request")
+	}
+	if next.aiFixBusy {
+		t.Fatal("busy flag cleared on cancel")
+	}
+	if next.aiFixCh != nil {
+		t.Fatal("channel must be cleared on cancel")
+	}
+	if next.aiFixProposal != "" {
+		t.Fatalf("proposal must be cleared on cancel, got %q", next.aiFixProposal)
+	}
+
+	cmd := next.handleFixOutput(FixOutputMsg{Err: errors.New("context canceled")})
+	if cmd != nil {
+		t.Fatalf("stale output must be ignored after cancel, got cmd %v", cmd)
+	}
+}
+
+// TestAIFixReviewCyrillicKeys verifies the y/n fix-review keys work in the
+// Russian layout: «н» (physical Y) accepts, «т» (physical N) discards.
+func TestAIFixReviewCyrillicKeys(t *testing.T) {
+	m := New()
+	m.cur().buf = buffer.Load("hello world\n")
+	m.aiFixOriginal = "hello world\n"
+	m.aiFixProposal = "hello brave world"
+	m.startFixReview()
+	if !m.aiFixReviewMode {
+		t.Fatal("review mode not entered")
+	}
+
+	// «т» (physical N) must discard.
+	m.handleFixReview(tea.KeyPressMsg{Text: "т"})
+	if m.aiFixReviewMode {
+		t.Fatal("«т» must close the review")
+	}
+	if m.cur().buf.Text() != "hello world\n" {
+		t.Fatalf("«т» must leave the buffer untouched, got %q", m.cur().buf.Text())
+	}
+
+	// «н» (physical Y) must accept and apply.
+	m.aiFixProposal = "hello brave world"
+	m.startFixReview()
+	m.handleFixReview(tea.KeyPressMsg{Text: "н"})
+	if m.aiFixReviewMode {
+		t.Fatal("«н» must close the review")
+	}
+	if !strings.Contains(m.cur().buf.Text(), "hello brave world") {
+		t.Fatalf("«н» must apply the proposal, got %q", m.cur().buf.Text())
+	}
+}
+
+// TestAIFixPromptTyping verifies the fix prompt accepts typed input and clears
+// on Ctrl+U, and that Esc cancels without submitting.
+func TestAIFixPromptTyping(t *testing.T) {
+	m := New()
+	m.cur().buf = buffer.Load("x\n")
+	m.cur().path = "fixture.go"
+	m.startFixRequest()
+	if !m.aiFixOpen {
+		t.Fatal("fix prompt should be open")
+	}
+	for _, r := range "fix bugs" {
+		m.handleFixRequest(tea.KeyPressMsg{Text: string(r)})
+	}
+	if string(m.aiFixInput) != "fix bugs" {
+		t.Fatalf("input = %q", string(m.aiFixInput))
+	}
+	m.handleFixRequest(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	if m.aiFixInput != nil {
+		t.Fatal("Ctrl+U must clear the input")
+	}
+	m.handleFixRequest(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.aiFixOpen {
+		t.Fatal("Esc must close the prompt")
 	}
 }

@@ -17,6 +17,10 @@ import (
 type Runner struct {
 	prov  ai.Provider
 	queue *Queue
+	// Options carries generation parameters forwarded to the provider.
+	Options ai.Options
+	// Base is the project root used to resolve relative file paths.
+	Base string
 	// Prompt builds the system/user message for a task; defaults to a
 	// built-in prompt if nil.
 	Prompt func(prompt string, files []TargetFile) ([]ai.Message, error)
@@ -167,7 +171,7 @@ func (r *Runner) buildMessages(prompt string, targets []TargetFile) ([]ai.Messag
 
 func (r *Runner) stream(ctx context.Context, id string, msgs []ai.Message, ch chan<- runEvent) {
 	defer close(ch)
-	err := r.prov.ChatStream(ctx, ai.Request{Messages: msgs}, ai.Handler{
+	err := r.prov.ChatStream(ctx, ai.Request{Messages: msgs, Options: r.Options}, ai.Handler{
 		Delta: func(d string) {
 			select {
 			case ch <- runEvent{delta: d}:
@@ -205,17 +209,33 @@ func (r *Runner) origFor(path string, targets []TargetFile) (string, error) {
 	if r.ReadTarget != nil {
 		return r.ReadTarget(TargetFile{Path: path})
 	}
+	norm := normalizeAgentPath(path)
 	for _, t := range targets {
-		if t.Path == path {
+		if normalizeAgentPath(t.Path) == norm {
 			return t.Content, nil
 		}
 	}
-	// Fall back to reading the file directly.
-	data, err := os.ReadFile(filepath.FromSlash(path))
+	// Fall back to reading the file, resolving relative paths against Base so
+	// a model path like "./a/b.go" or with backslashes still resolves.
+	readPath := path
+	if r.Base != "" && !filepath.IsAbs(path) {
+		readPath = filepath.Join(r.Base, filepath.FromSlash(norm))
+	}
+	data, err := os.ReadFile(readPath)
 	if err != nil {
 		return "", fmt.Errorf("cannot read %s: %w", path, err)
 	}
 	return string(data), nil
+}
+
+// normalizeAgentPath normalizes a path the model may have emitted (leading
+// "./", backslashes) into a canonical form for comparing against targets.
+func normalizeAgentPath(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
+	for strings.HasPrefix(p, "./") {
+		p = p[2:]
+	}
+	return p
 }
 
 // runEvent is an internal streaming message from the provider goroutine.

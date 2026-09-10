@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +16,7 @@ func TestChatToolDefsIncludesCoreTools(t *testing.T) {
 	for _, d := range defs {
 		names[d.Name] = true
 	}
-	for _, want := range []string{"READ", "SEARCH", "RUN", "EDIT"} {
+	for _, want := range []string{"READ", "SEARCH", "RUN", "REPLACE", "EDIT"} {
 		if !names[want] {
 			t.Fatalf("missing tool %s in %v", want, names)
 		}
@@ -109,6 +110,63 @@ func TestExecChatToolEditNoChangeIsSkipped(t *testing.T) {
 	}
 }
 
+func TestChatSearchReturnsLineLocations(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "a.go"), "line one\nline two\nthree\n")
+	m := Model{root: dir}
+	args, _ := json.Marshal(map[string]string{"arg": "two"})
+	res, chg := m.execChatTool(ai.ToolCall{Name: "SEARCH", Args: string(args)})
+	if chg != nil {
+		t.Fatalf("SEARCH must not produce a change")
+	}
+	if !containsStr(res, "a.go:2") {
+		t.Fatalf("SEARCH should locate line 2: %q", res)
+	}
+}
+
+func TestExecChatToolReplaceProposesChange(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "t.txt"), "alpha beta\nomega\n")
+	m := Model{root: dir}
+	args, _ := json.Marshal(map[string]string{"path": "t.txt", "search": "beta", "replace": "GAMMA"})
+	res, chg := m.execChatTool(ai.ToolCall{Name: "REPLACE", Args: string(args)})
+	if chg == nil {
+		t.Fatalf("REPLACE must propose a change: %q", res)
+	}
+	if chg.Orig != "alpha beta\nomega\n" {
+		t.Fatalf("orig = %q", chg.Orig)
+	}
+	if !containsStr(chg.New, "alpha GAMMA") {
+		t.Fatalf("new = %q", chg.New)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "t.txt"))
+	if err != nil || string(data) != "alpha beta\nomega\n" {
+		t.Fatalf("file must not change before review: %q err=%v", string(data), err)
+	}
+}
+
+func TestExecChatToolReplaceMissingBlock(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "t.txt"), "one two\n")
+	m := Model{root: dir}
+	args, _ := json.Marshal(map[string]string{"path": "t.txt", "search": "zzz", "replace": "x"})
+	res, chg := m.execChatTool(ai.ToolCall{Name: "REPLACE", Args: string(args)})
+	if chg != nil || !containsStr(res, "not found") {
+		t.Fatalf("want not-found error, got %q chg=%v", res, chg != nil)
+	}
+}
+
+func TestRunBlockedWhenDisabled(t *testing.T) {
+	dir := t.TempDir()
+	m := Model{root: dir}
+	m.cfg.AI.AllowRun = "never"
+	args, _ := json.Marshal(map[string]string{"arg": "echo hi"})
+	res, chg := m.execChatTool(ai.ToolCall{Name: "RUN", Args: string(args)})
+	if chg != nil || !containsStr(res, "blocked") {
+		t.Fatalf("want blocked message, got %q", res)
+	}
+}
+
 func TestToolArgSummary(t *testing.T) {
 	if s := toolArgSummary(ai.ToolCall{Name: "EDIT", Args: `{"path":"a/b.go","content":"x"}`}); s != "a/b.go" {
 		t.Fatalf("edit summary = %q", s)
@@ -133,6 +191,46 @@ func TestCompactLinesCapsWidth(t *testing.T) {
 	got := compactLines("abcdefghij", 5, 10)
 	if strings.ContainsAny(got[0], "fghij") {
 		t.Fatalf("line not capped to width: %q", got[0])
+	}
+}
+
+func TestChatSearchRegexMode(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "a.go"), "line one\nline two\nthree\n")
+
+	m := Model{root: dir}
+
+	// Regex matches lines containing "line" followed by a space.
+	args, _ := json.Marshal(map[string]any{"arg": `line\s+\w+`, "regex": true})
+	res, chg := m.execChatTool(ai.ToolCall{Name: "SEARCH", Args: string(args)})
+	if chg != nil {
+		t.Fatalf("SEARCH must not produce a change")
+	}
+	if !containsStr(res, "a.go:1") || !containsStr(res, "a.go:2") {
+		t.Fatalf("regex should match lines 1 and 2: %q", res)
+	}
+	if containsStr(res, "a.go:3") {
+		t.Fatalf("regex should not match line 3: %q", res)
+	}
+
+	// Invalid regex returns an error, not a panic.
+	args, _ = json.Marshal(map[string]any{"arg": `[invalid(`, "regex": true})
+	res, _ = m.execChatTool(ai.ToolCall{Name: "SEARCH", Args: string(args)})
+	if !containsStr(res, "invalid regex") {
+		t.Fatalf("invalid regex should error gracefully: %q", res)
+	}
+}
+
+func TestChatSearchLiteralStillWorks(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "a.go"), "line one\nline two\nthree\n")
+
+	m := Model{root: dir}
+	// Plain literal search (regex:false) behaves as before.
+	args, _ := json.Marshal(map[string]any{"arg": "two", "regex": false})
+	res, _ := m.execChatTool(ai.ToolCall{Name: "SEARCH", Args: string(args)})
+	if !containsStr(res, "a.go:2") {
+		t.Fatalf("literal search should locate line 2: %q", res)
 	}
 }
 

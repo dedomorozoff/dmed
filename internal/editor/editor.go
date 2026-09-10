@@ -324,6 +324,11 @@ type Model struct {
 	chatReviewOffY  int
 	chatReviewOffX  int
 
+	// Pending RUN command awaiting explicit user confirmation (allow_run = ask).
+	// While non-nil the chat input is parked: the user types y to execute the
+	// held command, or n to decline. The result is fed back either way.
+	chatRunConfirm string
+
 	// Inline AI request (Ctrl+I)
 	aiInlineOpen     bool
 	aiInlineInput    []rune
@@ -339,6 +344,20 @@ type Model struct {
 	aiReviewLeft     []string
 	aiReviewRight    []string
 	aiReviewOffY     int
+	// aiFix (LSP diagnostic fix) state
+	aiFixOpen        bool
+	aiFixBusy        bool
+	aiFixCh          <-chan chatEvent
+	aiFixCancel      context.CancelFunc
+	aiFixInput       []rune
+	aiFixOriginal    string
+	aiFixProposal    string
+	aiFixReviewMode  bool
+	aiFixReviewRows  []vcs.DiffRow
+	aiFixReviewLeft  []string
+	aiFixReviewRight []string
+	aiFixReviewOffY  int
+	aiFixReviewOffX  int
 	aiReviewOffX     int
 
 	// Ghost text (Copilot-style inline suggestions)
@@ -692,7 +711,13 @@ func (m *Model) openConfigFile() {
 			"# model =\n" +
 			"# ollama_url = http://localhost:11434\n" +
 			"# api_key =  # for OpenAI-compatible providers\n" +
-			"# context_max = 6000\n\n" +
+			"# context_max = 6000\n" +
+			"# temperature = 0  # tenths (7 => 0.7); 0 = provider default\n" +
+			"# num_ctx = 0  # Ollama context window tokens; 0 = default\n" +
+			"# num_predict = 0  # max output tokens; 0 = provider default\n" +
+			"# tool_rounds = 0  # chat tool-loop cap; 0 = built-in (6)\n" +
+			"# allow_run = always  # always | never\n" +
+			"# restrict_to_root = false  # true = keep READ/EDIT/REPLACE inside the project\n\n" +
 			"[agent]\n" +
 			"# system_prompt =  # optional override for background agent tasks\n" +
 			"# context_max = 262144  # bytes of file context sent to the agent\n\n" +
@@ -997,7 +1022,7 @@ func waitForFileEvent(ch <-chan string) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForLSPDiag(m.diagCh))
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1133,6 +1158,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case InlineOutputMsg:
 		cmd := m.handleInlineOutput(msg)
+		return m, cmd
+	case FixOutputMsg:
+		cmd := m.handleFixOutput(msg)
 		return m, cmd
 	case GhostOutputMsg:
 		cmd := m.handleGhostOutput(msg)
@@ -1285,6 +1313,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.toggleAgentPanel()
 	case "alt+i":
 		m.startInlineRequest()
+		return nil
+	case "alt+f":
+		m.startFixRequest()
 		return nil
 	case "alt+g":
 		m.dismissGhost()
@@ -1440,6 +1471,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.aiReviewMode {
 		return m.handleInlineReview(msg)
 	}
+	if m.aiFixReviewMode {
+		return m.handleFixReview(msg)
+	}
+	if m.aiFixOpen {
+		return m.handleFixRequest(msg)
+	}
 	if m.aiInlineOpen {
 		return m.handleInlineRequest(msg)
 	}
@@ -1451,6 +1488,14 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	}
+	// While the fix AI streams, swallow all keys; Esc aborts.
+	if m.aiFixBusy {
+		if s == "esc" || s == "ctrl+c" {
+			m.cancelFixRequest()
+		}
+		return nil
+	}
+
 	if m.quitConfirm {
 		return m.handleQuitConfirm(msg)
 	}

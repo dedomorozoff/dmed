@@ -176,6 +176,8 @@ func (m Model) View() tea.View {
 		rows = append(rows, m.composeSidebar(diffRows)...)
 	} else if m.aiReviewMode {
 		rows = append(rows, renderSideBySide(m.aiReviewLeft, m.aiReviewRight, m.aiReviewRows, m.aiReviewOffY, m.aiReviewOffX, m.width, h, nil, nil)...)
+	} else if m.aiFixReviewMode {
+		rows = append(rows, renderSideBySide(m.aiFixReviewLeft, m.aiFixReviewRight, m.aiFixReviewRows, m.aiFixReviewOffY, m.aiFixReviewOffX, m.width, h, nil, nil)...)
 	} else if m.agentReviewMode {
 		rows = append(rows, renderSideBySide(m.agentReviewLeft, m.agentReviewRight, m.agentReviewRows, m.agentReviewOffY, m.agentReviewOffX, m.width, h, nil, nil)...)
 	} else if m.chatReviewMode {
@@ -206,6 +208,12 @@ func (m Model) View() tea.View {
 		bottom = m.aiInlinePrompt()
 	} else if m.aiInlineBusy {
 		bottom = m.aiInlineBusyLine()
+	} else if m.aiFixOpen {
+		bottom = m.aiFixPrompt()
+	} else if m.aiFixBusy {
+		bottom = m.aiFixBusyLine()
+	} else if m.aiFixReviewMode {
+		bottom = m.aiFixReviewBottom()
 	} else if m.conflictOpen {
 		bottom = m.conflictLine()
 	} else if m.treeConfirm != "" {
@@ -1282,6 +1290,56 @@ func (m Model) aiInlinePrompt() string {
 	return line
 }
 
+// aiFixPrompt renders the input bar for the LSP/AI fix instruction prompt.
+func (m Model) aiFixPrompt() string {
+	line := statusHiStyle.Render(m.t("ai.fix_instr")) + statusStyle.Render(string(m.aiFixInput)) + cursorStyle.Render(" ")
+	line += hintStyle.Render(m.t("ai.fix_instr_hint"))
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+// aiFixBusyLine renders the streaming status while the AI is fixing the file.
+func (m Model) aiFixBusyLine() string {
+	preview := m.aiFixProposal
+	if len(preview) > 60 {
+		preview = preview[:60] + "..."
+	}
+	line := statusHiStyle.Render(m.t("ai.fix_streaming")) + hintStyle.Render(preview)
+	hint := "  (Esc to cancel)"
+	line += hintStyle.Render(hint)
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+// aiFixReviewBottom renders the diff-review hint bar for the AI fix.
+func (m Model) aiFixReviewBottom() string {
+	added, modified, deleted := 0, 0, 0
+	for _, dr := range m.aiFixReviewRows {
+		switch dr.Type {
+		case vcs.DiffAdded:
+			added++
+		case vcs.DiffModified:
+			modified++
+		case vcs.DiffDeleted:
+			deleted++
+		}
+	}
+	line := statusHiStyle.Render(m.t("ai.diff")) +
+		hintStyle.Render(fmt.Sprintf("  +%d ~%d -%d", added, modified, deleted)) +
+		hintStyle.Render(m.t("ai.fix_review_hint"))
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
 func (m Model) aiInlineBusyLine() string {
 	preview := m.aiInlineProposal
 	if len(preview) > 60 {
@@ -1633,7 +1691,7 @@ func (m Model) statusBar() string {
 		fileInfo = fmt.Sprintf("%s %s ", endings[t.lineEnding], enc)
 	}
 	hint := ""
-	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiCfgOpen && !m.helpOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
+	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
 		hint = m.t("status.f1_help")
 		if m.layout != splitNone {
 			hint += m.t("status.f8_pane")

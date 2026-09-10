@@ -144,6 +144,7 @@ func (m *Model) resetChatConversation() {
 	m.chatIn = nil
 	m.chatScroll = 0
 	m.chatReviewMode = false
+	m.chatRunConfirm = ""
 	m.rebuildChatRows()
 }
 

@@ -252,3 +252,52 @@ func TestOpenAIToolCallingIncremental(t *testing.T) {
 		t.Fatal("request missing tools array")
 	}
 }
+
+func TestChatStreamSendsOptions(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"hi"},"done":true}` + "\n"))
+	}))
+	defer srv.Close()
+
+	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL, Model: "m"})
+	err := p.ChatStream(context.Background(), Request{
+		Messages: []Message{{Role: "user", Content: "x"}},
+		Options:  Options{Temperature: 8, NumCtx: 32768, NumPredict: 512},
+	}, Handler{Delta: func(string) {}})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	if _, ok := gotBody["temperature"]; !ok {
+		t.Fatalf("request missing temperature: %v", gotBody)
+	}
+	if opt, ok := gotBody["options"].(map[string]any); !ok {
+		t.Fatalf("request missing options: %v", gotBody)
+	} else if opt["num_ctx"].(float64) != 32768 || opt["num_predict"].(float64) != 512 {
+		t.Fatalf("options = %v, want num_ctx 32768 / num_predict 512", opt)
+	}
+}
+
+func TestChatStreamOmitsOptionsWhenUnset(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"hi"},"done":true}` + "\n"))
+	}))
+	defer srv.Close()
+
+	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL, Model: "m"})
+	err := p.ChatStream(context.Background(), Request{Messages: []Message{{Role: "user", Content: "x"}}}, Handler{Delta: func(string) {}})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	if _, ok := gotBody["options"]; ok {
+		t.Fatalf("options should be omitted when all zero: %v", gotBody)
+	}
+	if _, ok := gotBody["temperature"]; ok {
+		t.Fatalf("temperature should be omitted when zero: %v", gotBody)
+	}
+}

@@ -197,8 +197,8 @@ tree_width = 20
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 5 {
-		t.Errorf("wrote %d keys, want 5", n)
+	if n != 10 {
+		t.Errorf("wrote %d keys, want 10", n)
 	}
 
 	data, _ := os.ReadFile(path)
@@ -228,8 +228,8 @@ func TestWriteAIRetainsMissingKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 5 {
-		t.Errorf("wrote %d keys, want 5 (3 existing + 2 added)", n)
+	if n != 10 {
+		t.Errorf("wrote %d keys, want 10 (2 existing + 8 added)", n)
 	}
 	data, _ := os.ReadFile(path)
 	out := string(data)
@@ -250,6 +250,41 @@ func TestWriteAICreatesSectionInEmptyFile(t *testing.T) {
 	out := string(data)
 	if !strings.Contains(out, "[ai]") || !strings.Contains(out, "context_max = 6000") {
 		t.Errorf("missing [ai] section or defaults:\n%s", out)
+	}
+}
+
+func TestLoadAINewKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[ai]
+temperature = 8
+num_ctx = 32768
+num_predict = 512
+tool_rounds = 3
+allow_run = never
+restrict_to_root = true
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if cfg.AI.Temperature != 8 {
+		t.Errorf("temperature = %d, want 8", cfg.AI.Temperature)
+	}
+	if cfg.AI.NumCtx != 32768 {
+		t.Errorf("num_ctx = %d, want 32768", cfg.AI.NumCtx)
+	}
+	if cfg.AI.NumPredict != 512 {
+		t.Errorf("num_predict = %d, want 512", cfg.AI.NumPredict)
+	}
+	if cfg.AI.ToolRounds != 3 {
+		t.Errorf("tool_rounds = %d, want 3", cfg.AI.ToolRounds)
+	}
+	if cfg.AI.AllowRun != "never" {
+		t.Errorf("allow_run = %q, want never", cfg.AI.AllowRun)
+	}
+	if !cfg.AI.RestrictToRoot {
+		t.Error("restrict_to_root = false, want true")
 	}
 }
 

@@ -12,6 +12,94 @@ import (
 	"dmed/internal/buffer"
 )
 
+func TestTrimChatHistoryCondensesOldToolDumps(t *testing.T) {
+	m := Model{}
+	m.cfg.AI.ContextMax = 100000 // don't drop by size, only condense
+	big := strings.Repeat("x", 2000)
+	m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "tool", ToolName: "READ", Content: big})
+	m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "user", Content: "q1"})
+	m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "assistant", Content: "a1"})
+	m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "user", Content: "q2"})
+	m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "user", Content: "q3"})
+	m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "user", Content: "q4"})
+	m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "user", Content: "q5"})
+	m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "user", Content: "q6"})
+
+	trimmed := m.trimChatHistory()
+	if len(trimmed) != 8 {
+		t.Fatalf("expected 8 messages, got %d", len(trimmed))
+	}
+	if strings.Contains(trimmed[0].Content, "xxxxx") {
+		t.Fatalf("old tool dump was not condensed: %q", trimmed[0].Content)
+	}
+	if !strings.Contains(trimmed[0].Content, "truncated") {
+		t.Fatalf("condensed placeholder missing marker: %q", trimmed[0].Content)
+	}
+}
+
+func TestTrimChatHistoryDropsOldestWhenOverBudget(t *testing.T) {
+	m := Model{}
+	m.cfg.AI.ContextMax = 100
+	for i := 0; i < 10; i++ {
+		m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "user", Content: "m" + iaitoa(i)})
+	}
+	trimmed := m.trimChatHistory()
+	// keepLast = 8, so the two oldest messages must be dropped and the newest 8 kept.
+	if len(trimmed) != 8 {
+		t.Fatalf("expected 8 messages kept, got %d", len(trimmed))
+	}
+	if trimmed[0].Content != "m2" {
+		t.Fatalf("first kept message = %q, want m2 (oldest dropped)", trimmed[0].Content)
+	}
+	if trimmed[7].Content != "m9" {
+		t.Fatalf("last kept message = %q, want m9", trimmed[7].Content)
+	}
+}
+
+func iaitoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [20]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(b[i:])
+}
+
+// TestChatRequestMessagesEmbedsFileOnlyOnFirstTurn verifies the active file is
+// added to the system prompt on the first turn of a thread but not re-sent on
+// subsequent turns (it is already in the transcript by then).
+func TestChatRequestMessagesEmbedsFileOnlyOnFirstTurn(t *testing.T) {
+	m := New()
+	m.width = 100
+	m.height = 30
+	m.root = t.TempDir()
+	m.tabs = []tab{{path: "main.go", buf: buffer.Load("package main\n")}}
+	m.panes = []pane{{tabIdx: 0}}
+
+	msgs := m.chatRequestMessages()
+	if len(msgs) != 1 || !strings.Contains(msgs[0].Content, "Current file: main.go") {
+		t.Fatalf("first turn must embed the current file: %q", msgs[0].Content)
+	}
+
+	// Simulate one completed user/assistant exchange.
+	m.chatMsgs = []ai.Message{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "hello"},
+	}
+	msgs = m.chatRequestMessages()
+	if len(msgs) != 3 {
+		t.Fatalf("expected system + 2 history messages, got %d", len(msgs))
+	}
+	if strings.Contains(msgs[0].Content, "Current file: main.go") {
+		t.Fatalf("subsequent turns must NOT re-embed the file: %q", msgs[0].Content)
+	}
+}
+
 func TestWrapRunes(t *testing.T) {
 	got := wrapRunes("hello brave world", 11)
 	want := []string{"hello brave", "world"}

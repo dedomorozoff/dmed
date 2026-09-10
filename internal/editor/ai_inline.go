@@ -142,7 +142,7 @@ func (m *Model) submitInlineRequest() tea.Cmd {
 	m.aiInlineCh = ch
 	go func() {
 		defer close(ch)
-		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs}, ai.Handler{
+		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs, Options: m.aiRequestOptions()}, ai.Handler{
 			Delta: func(d string) {
 				select {
 				case ch <- chatEvent{delta: d}:

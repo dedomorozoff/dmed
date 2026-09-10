@@ -25,6 +25,12 @@ var aiSettingsFields = []struct {
 	{name: "Base URL", kind: "text"},
 	{name: "API Key", kind: "text"},
 	{name: "Context Max", kind: "text"},
+	{name: "Temperature", kind: "text"},
+	{name: "Num Ctx", kind: "text"},
+	{name: "Num Predict", kind: "text"},
+	{name: "Tool Rounds", kind: "text"},
+	{name: "Allow Run", kind: "choice"},
+	{name: "Restrict Root", kind: "choice"},
 	{name: "Test", kind: "action"},
 }
 

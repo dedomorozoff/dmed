@@ -34,10 +34,21 @@ type ToolCall struct {
 	Args string // JSON-encoded arguments object
 }
 
-// Request bundles the conversation and the tools available for one turn.
+// Options carries generation parameters. All fields are 0 when unset, meaning
+// "use the provider default" (this keeps Request literals terse). Temperature
+// is in tenths (e.g. 8 => 0.8) so config parsing can stay on integers.
+type Options struct {
+	Temperature int // temperature in tenths; 0 = provider default
+	NumCtx      int // ollama context window in tokens; 0 = provider default
+	NumPredict  int // max output tokens; 0 = provider default
+}
+
+// Request bundles the conversation, the tools available for one turn, and the
+// optional generation options.
 type Request struct {
 	Messages []Message
 	Tools    []ToolDef
+	Options  Options
 }
 
 // Handler delivers the streamed content and, once complete, any tool calls

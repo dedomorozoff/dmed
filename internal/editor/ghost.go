@@ -85,7 +85,7 @@ func (m *Model) ghostTrigger() tea.Cmd {
 
 	go func() {
 		defer close(ch)
-		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs}, ai.Handler{
+		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs, Options: m.aiRequestOptions()}, ai.Handler{
 			Delta: func(delta string) {
 				select {
 				case ch <- chatEvent{delta: delta}:
@@ -170,6 +170,14 @@ func (m *Model) applyGhost() {
 	}
 
 	t := m.activeTab()
+
+	// The suggestion was computed for a specific cursor position; if the cursor
+	// moved while it streamed, discard the stale suggestion instead of inserting
+	// it in the wrong place.
+	if t.buf.CurLine() != m.ghostRow || t.buf.Col() != m.ghostCol {
+		m.dismissGhost()
+		return
+	}
 
 	// The first ghost line is a continuation of the current line,
 	// so we only insert the part after the cursor.

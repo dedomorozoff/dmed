@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -163,6 +165,41 @@ func TestProgressGrowsWithBytes(t *testing.T) {
 	}
 	if !(large > small && large <= 0.9) {
 		t.Fatalf("large = %v, small = %v", large, small)
+	}
+}
+
+func TestOrigForMatchesNormalizedPaths(t *testing.T) {
+	prov := &fakeProvider{delta: ""}
+	q := NewQueue(nil)
+	r := NewRunner(prov, q)
+	targets := []TargetFile{
+		{Path: "src/a.go", Content: "one\n"},
+		{Path: "src/b.go", Content: "two\n"},
+	}
+	// A leading "./" and backslashes from the model must still match targets.
+	got, err := r.origFor("./src/a.go", targets)
+	if err != nil || got != "one\n" {
+		t.Fatalf("a.go: got %q err=%v", got, err)
+	}
+	got, err = r.origFor("src\\b.go", targets)
+	if err != nil || got != "two\n" {
+		t.Fatalf("b.go: got %q err=%v", got, err)
+	}
+}
+
+func TestOrigForResolvesAgainstBase(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "x.txt")
+	if err := os.WriteFile(p, []byte("disc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prov := &fakeProvider{delta: ""}
+	q := NewQueue(nil)
+	r := NewRunner(prov, q)
+	r.Base = dir
+	got, err := r.origFor("x.txt", nil)
+	if err != nil || got != "disc\n" {
+		t.Fatalf("got %q err=%v", got, err)
 	}
 }
 

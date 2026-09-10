@@ -96,6 +96,8 @@ func TestApplyGhostInsertsContinuation(t *testing.T) {
 	m.tabs = []tab{{buf: tb}}
 	m.initPanes()
 	tb.SetCursor(1, 0)
+	m.ghostRow = 1
+	m.ghostCol = 0
 	m.ghostLines = []string{"fmt.Println()", "}"}
 	m.ghostVisible = true
 

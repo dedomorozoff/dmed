@@ -211,7 +211,13 @@ provider = Ollama (local)   # wizard preset: Ollama (local) | OpenAI | DeepSeek 
 model =                      # empty = first model reported by the server
 ollama_url = http://localhost:11434   # base URL, no /v1 suffix (it is appended automatically)
 api_key =                    # for OpenAI-compatible providers
-context_max = 6000           # max lines sent as file context
+context_max = 6000           # max runes sent as file context
+temperature = 0              # generation temperature in tenths (7 => 0.7); 0 = provider default
+num_ctx = 0                  # context window in tokens for Ollama (num_ctx); 0 = default
+num_predict = 0              # max output tokens; 0 = provider default
+tool_rounds = 0              # chat tool-calling loop cap; 0 = built-in (6)
+allow_run = always           # always | never — let the model run shell commands (RUN tool)
+restrict_to_root = false     # true bounds READ/EDIT/REPLACE paths to the project root
 system_prompt = You are a helpful coding assistant...
 
 [ui]

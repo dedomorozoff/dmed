@@ -61,6 +61,12 @@ func (p *openAIProvider) ChatStream(ctx context.Context, req Request, h Handler)
 	if len(req.Tools) > 0 {
 		body["tools"] = openAITools(req.Tools)
 	}
+	if req.Options.Temperature > 0 {
+		body["temperature"] = float32(req.Options.Temperature) / 10
+	}
+	if req.Options.NumPredict > 0 {
+		body["max_tokens"] = req.Options.NumPredict
+	}
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err

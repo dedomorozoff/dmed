@@ -38,12 +38,25 @@ type EditorConfig struct {
 
 // AIConfig holds AI-related settings.
 type AIConfig struct {
-	Provider     string // ollama | openai
-	Model        string
-	OllamaURL    string
-	APIKey       string
-	SystemPrompt string
-	ContextMax   int
+	Provider       string // ollama | openai
+	Model          string
+	OllamaURL      string
+	APIKey         string
+	SystemPrompt   string
+	ContextMax     int
+	// Temperature is in tenths (7 => 0.7); 0 uses the provider default.
+	Temperature int
+	// NumCtx is the model context window in tokens (ollama `num_ctx`); 0 = default.
+	NumCtx int
+	// NumPredict is the max output tokens; 0 = provider default.
+	NumPredict int
+	// ToolRounds caps the chat tool-calling loop depth; 0 uses the built-in cap (6).
+	ToolRounds int
+	// AllowRun: "always" runs the model's commands, "never" blocks them, and
+	// "ask" pauses for explicit per-command confirmation.
+	AllowRun string
+	// RestrictToRoot bounds READ/EDIT/REPLACE paths to the project root when true.
+	RestrictToRoot bool
 }
 
 // UIConfig holds UI-related settings.
@@ -71,11 +84,17 @@ func Defaults() Config {
 			SkippedDirs: []string{".git", "node_modules"},
 		},
 		AI: AIConfig{
-			Provider:   "ollama",
-			Model:      "",
-			OllamaURL:  "http://localhost:11434",
-			ContextMax: 6000,
-			SystemPrompt: "You are a helpful coding assistant inside the dmed editor. " +
+			Provider:       "ollama",
+			Model:          "",
+			OllamaURL:      "http://localhost:11434",
+			ContextMax:     6000,
+			Temperature:    0,
+			NumCtx:         0,
+			NumPredict:     0,
+			ToolRounds:     0,
+			AllowRun:       "always",
+			RestrictToRoot: false,
+			SystemPrompt:   "You are a helpful coding assistant inside the dmed editor. " +
 				"Answer concisely. You have tools: EDIT creates or rewrites a whole file, " +
 				"READ reads a file, SEARCH finds text, RUN executes a shell command. " +
 				"When the user asks to create, change or fix files, you MUST call EDIT " +
@@ -137,6 +156,31 @@ func Load(projectRoot string) Config {
 	}
 	if v := os.Getenv("DMED_PLUGIN_REPO"); v != "" {
 		cfg.Plugins.Repo = v
+	}
+	if v := os.Getenv("DMED_TEMPERATURE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.AI.Temperature = n
+		}
+	}
+	if v := os.Getenv("DMED_NUM_CTX"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.AI.NumCtx = n
+		}
+	}
+	if v := os.Getenv("DMED_NUM_PREDICT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.AI.NumPredict = n
+		}
+	}
+	if v := os.Getenv("DMED_TOOL_ROUNDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.AI.ToolRounds = n
+		}
+	}
+	if v := os.Getenv("DMED_ALLOW_RUN"); v != "" {
+		if v == "always" || v == "never" || v == "ask" {
+			cfg.AI.AllowRun = v
+		}
 	}
 
 	return cfg
@@ -264,6 +308,34 @@ func loadFile(path string, cfg *Config) {
 				cfg.AI.ContextMax = n
 			}
 		}
+		if v, ok := s["temperature"]; ok {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+				cfg.AI.Temperature = n
+			}
+		}
+		if v, ok := s["num_ctx"]; ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				cfg.AI.NumCtx = n
+			}
+		}
+		if v, ok := s["num_predict"]; ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				cfg.AI.NumPredict = n
+			}
+		}
+		if v, ok := s["tool_rounds"]; ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				cfg.AI.ToolRounds = n
+			}
+		}
+		if v, ok := s["allow_run"]; ok {
+			if v == "always" || v == "never" || v == "ask" {
+				cfg.AI.AllowRun = v
+			}
+		}
+		if v, ok := s["restrict_to_root"]; ok {
+			cfg.AI.RestrictToRoot = parseBool(v)
+		}
 	}
 
 	// [agent]
@@ -362,6 +434,11 @@ func WriteAI(path string, ai AIConfig) (int, error) {
 		{"ollama_url", ai.OllamaURL},
 		{"api_key", ai.APIKey},
 		{"context_max", strconv.Itoa(ai.ContextMax)},
+		{"temperature", strconv.Itoa(ai.Temperature)},
+		{"num_ctx", strconv.Itoa(ai.NumCtx)},
+		{"num_predict", strconv.Itoa(ai.NumPredict)},
+		{"tool_rounds", strconv.Itoa(ai.ToolRounds)},
+		{"allow_run", ai.AllowRun},
 	}
 
 	data, err := os.ReadFile(path)

@@ -56,6 +56,19 @@ func (p *ollamaProvider) ChatStream(ctx context.Context, req Request, h Handler)
 	if len(req.Tools) > 0 {
 		body["tools"] = ollamaTools(req.Tools)
 	}
+	if req.Options.Temperature > 0 {
+		body["temperature"] = float32(req.Options.Temperature) / 10
+	}
+	if req.Options.NumCtx > 0 || req.Options.NumPredict > 0 {
+		opt := make(map[string]any)
+		if req.Options.NumCtx > 0 {
+			opt["num_ctx"] = req.Options.NumCtx
+		}
+		if req.Options.NumPredict > 0 {
+			opt["num_predict"] = req.Options.NumPredict
+		}
+		body["options"] = opt
+	}
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err

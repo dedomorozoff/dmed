@@ -58,6 +58,8 @@ func (m *Model) ensureAgent() tea.Cmd {
 
 	m.agentQueue = agent.NewQueue(m.bus)
 	m.agentRunner = agent.NewRunner(prov, m.agentQueue)
+	m.agentRunner.Base = m.baseDir()
+	m.agentRunner.Options = m.aiRequestOptions()
 	if sp := strings.TrimSpace(m.cfg.Agent.SystemPrompt); sp != "" {
 		m.agentRunner.Prompt = func(prompt string, files []agent.TargetFile) ([]ai.Message, error) {
 			var b strings.Builder
