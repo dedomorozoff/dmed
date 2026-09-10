@@ -1139,10 +1139,11 @@ func (m Model) chatPanel(h int) []string {
 	}
 	rows = append(rows, header)
 
-	bodyH := h - 2 // header + input line
+	inputH := m.chatInputHeight()
+	bodyH := h - 1 - inputH // header + multi-line input
 	showHint := h >= 5
 	if showHint {
-		bodyH = h - 3 // also reserve room for the hint bar
+		bodyH = h - 2 - inputH // also reserve room for the hint bar
 	}
 	if bodyH < 1 {
 		bodyH = 1
@@ -1196,14 +1197,33 @@ func (m Model) chatPanel(h int) []string {
 		rows = append(rows, hint)
 	}
 
-	input := statusHiStyle.Render(" ❯ ") + statusStyle.Render(string(m.chatIn)) + cursorStyle.Render(" ")
-	if m.chatBusy {
-		input += hintStyle.Render("⋯")
+	inputTextW := w - 4 // " ❯ " (3) + cursor (1)
+	if inputTextW < 1 {
+		inputTextW = 1
 	}
-	if fill := w - lipgloss.Width(input); fill > 0 {
-		input += statusStyle.Render(strings.Repeat(" ", fill))
+	inputLines := wrapRunes(string(m.chatIn), inputTextW)
+	if len(inputLines) == 0 {
+		inputLines = []string{""}
 	}
-	rows = append(rows, input)
+	for i, line := range inputLines {
+		var input string
+		if i == 0 {
+			input = statusHiStyle.Render(" ❯ ")
+		} else {
+			input = statusHiStyle.Render("   ")
+		}
+		input += statusStyle.Render(line)
+		if i == len(inputLines)-1 {
+			input += cursorStyle.Render(" ")
+			if m.chatBusy {
+				input += hintStyle.Render("⋯")
+			}
+		}
+		if fill := w - lipgloss.Width(input); fill > 0 {
+			input += statusStyle.Render(strings.Repeat(" ", fill))
+		}
+		rows = append(rows, input)
+	}
 	return rows
 }
 

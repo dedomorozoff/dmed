@@ -97,6 +97,20 @@ func (m Model) chatInnerWidth() int {
 	return w
 }
 
+// chatInputHeight returns the number of terminal rows the current input
+// occupies after word-wrapping to the available width.
+func (m Model) chatInputHeight() int {
+	w := m.chatPanelWidth() - 4 // " ❯ " (3) + cursor (1)
+	if w < 1 {
+		w = 1
+	}
+	n := len(wrapRunes(string(m.chatIn), w))
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
 func (m Model) rightRailWidth() int {
 	if m.chatOpen {
 		return m.chatPanelWidth()
@@ -204,8 +218,6 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 		m.chatHistoryPrev()
 	case "down": // back toward the newest prompt / draft
 		m.chatHistoryNext()
-	case "ctrl+p": // older conversation thread
-		m.switchChatThread(+1)
 	case "ctrl+n": // newer thread (from the newest one: a new thread)
 		m.switchChatThread(-1)
 	case "ctrl+u": // start a new conversation thread
@@ -841,12 +853,10 @@ func (m *Model) cancelChat() {
 // bar when there is room for it).
 func (m *Model) clampChatScroll() {
 	h := m.viewHeight()
-	bodyH := h - 2
+	inputH := m.chatInputHeight()
+	bodyH := h - 1 - inputH
 	if h >= 5 {
-		bodyH = h - 3 // the panel also renders the hint bar (see chatPanel)
-	}
-	if h >= 5 {
-		bodyH = h - 3
+		bodyH = h - 2 - inputH // also account for the hint bar
 	}
 	if bodyH < 1 {
 		bodyH = 1

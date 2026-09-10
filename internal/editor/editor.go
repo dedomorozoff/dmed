@@ -2068,6 +2068,12 @@ func (m *Model) startPalette() {
 	m.paletteQ = nil
 	m.paletteSel = 0
 	m.paletteOffset = 0
+	// Unfocus all panels so the palette receives keystrokes (the palette
+	// is lower priority than chat/agent/git in the mode-guard chain).
+	m.chatFocus = false
+	m.agentFocus = false
+	m.gitFocus = false
+	m.treeFocus = false
 }
 
 // setLang switches the interface language, rebuilding the translator and

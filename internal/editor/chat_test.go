@@ -275,9 +275,9 @@ func TestChatThreadSwitchAndPersist(t *testing.T) {
 	if len(m2.chatMsgs) != 1 || m2.chatMsgs[0].Content != "hello there" {
 		t.Fatalf("newest thread must load: %+v", m2.chatMsgs)
 	}
-	m2.handleChat(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	m2.switchChatThread(+1)
 	if len(m2.chatMsgs) != 2 || m2.chatMsgs[0].Content != "what is rope?\n" {
-		t.Fatalf("Ctrl+P must switch to the older thread: %+v", m2.chatMsgs)
+		t.Fatalf("switchChatThread(+1) must switch to the older thread: %+v", m2.chatMsgs)
 	}
 	m2.handleChat(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
 	if len(m2.chatMsgs) != 1 || m2.chatMsgs[0].Content != "hello there" {
