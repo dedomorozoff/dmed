@@ -143,7 +143,7 @@ func (m Model) pluginStoreExtraRows() int {
 }
 
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows()
+	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -250,6 +250,15 @@ func (m Model) View() tea.View {
 	rows = append(rows, bottom)
 	if m.gitOpen && m.gitMode == gitModeCommit {
 		rows = append(rows, m.gitCommitInputRender()...)
+	}
+	if m.aiInlineOpen {
+		rows = append(rows, m.aiInlineInputRender()...)
+	}
+	if m.aiFixOpen {
+		rows = append(rows, m.aiFixInputRender()...)
+	}
+	if m.agentPrompt {
+		rows = append(rows, m.agentPromptInputRender()...)
 	}
 	if m.finderOpen {
 		rows = append(rows, m.finderPanel()...)
@@ -1355,8 +1364,8 @@ func (m Model) replaceLine() string {
 }
 
 func (m Model) aiInlinePrompt() string {
-	line := statusHiStyle.Render(m.t("ai.instr")) + statusStyle.Render(string(m.aiInlineInput)) + cursorStyle.Render(" ")
-	line += hintStyle.Render(m.t("ai.instr_hint"))
+	label := m.t("ai.instr")
+	line := statusHiStyle.Render(label) + hintStyle.Render(m.t("ai.instr_hint"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -1364,15 +1373,104 @@ func (m Model) aiInlinePrompt() string {
 	return line
 }
 
+func (m Model) aiInlineExtraRows() int {
+	if !m.aiInlineOpen {
+		return 0
+	}
+	w := m.width - lipgloss.Width(m.t("ai.instr")) - 1
+	if w < 1 {
+		w = 1
+	}
+	n := len(wrapRunes(string(m.aiInlineInput), w))
+	if n < 1 {
+		n = 1
+	}
+	return n - 1
+}
+
+func (m Model) aiInlineInputRender() []string {
+	labelW := lipgloss.Width(m.t("ai.instr"))
+	inputTextW := m.width - labelW - 1
+	if inputTextW < 1 {
+		inputTextW = 1
+	}
+	lines := wrapRunes(string(m.aiInlineInput), inputTextW)
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	var out []string
+	for i, line := range lines {
+		var row string
+		if i == 0 {
+			row = statusHiStyle.Render(m.t("ai.instr"))
+		} else {
+			row = statusHiStyle.Render(strings.Repeat(" ", labelW))
+		}
+		row += statusStyle.Render(line)
+		if i == len(lines)-1 {
+			row += cursorStyle.Render(" ")
+		}
+		if fill := m.width - lipgloss.Width(row); fill > 0 {
+			row += statusStyle.Render(strings.Repeat(" ", fill))
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
 // aiFixPrompt renders the input bar for the LSP/AI fix instruction prompt.
 func (m Model) aiFixPrompt() string {
-	line := statusHiStyle.Render(m.t("ai.fix_instr")) + statusStyle.Render(string(m.aiFixInput)) + cursorStyle.Render(" ")
-	line += hintStyle.Render(m.t("ai.fix_instr_hint"))
+	line := statusHiStyle.Render(m.t("ai.fix_instr")) + hintStyle.Render(m.t("ai.fix_instr_hint"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	return line
+}
+
+func (m Model) aiFixExtraRows() int {
+	if !m.aiFixOpen {
+		return 0
+	}
+	w := m.width - lipgloss.Width(m.t("ai.fix_instr")) - 1
+	if w < 1 {
+		w = 1
+	}
+	n := len(wrapRunes(string(m.aiFixInput), w))
+	if n < 1 {
+		n = 1
+	}
+	return n - 1
+}
+
+func (m Model) aiFixInputRender() []string {
+	labelW := lipgloss.Width(m.t("ai.fix_instr"))
+	inputTextW := m.width - labelW - 1
+	if inputTextW < 1 {
+		inputTextW = 1
+	}
+	lines := wrapRunes(string(m.aiFixInput), inputTextW)
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	var out []string
+	for i, line := range lines {
+		var row string
+		if i == 0 {
+			row = statusHiStyle.Render(m.t("ai.fix_instr"))
+		} else {
+			row = statusHiStyle.Render(strings.Repeat(" ", labelW))
+		}
+		row += statusStyle.Render(line)
+		if i == len(lines)-1 {
+			row += cursorStyle.Render(" ")
+		}
+		if fill := m.width - lipgloss.Width(row); fill > 0 {
+			row += statusStyle.Render(strings.Repeat(" ", fill))
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 // aiFixBusyLine renders the streaming status while the AI is fixing the file.

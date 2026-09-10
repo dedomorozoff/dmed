@@ -372,14 +372,57 @@ func progressBar(p float32, width int) string {
 
 // agentPromptLine renders the bottom input line while entering a new task.
 func (m Model) agentPromptLine() string {
-	line := statusHiStyle.Render(m.t("agent.task_label")) + statusStyle.Render(string(m.agentPromptIn)) + cursorStyle.Render(" ")
-	hint := "  (Enter: queue, Esc: cancel)"
-	line += hintStyle.Render(hint)
+	line := statusHiStyle.Render(m.t("agent.task_label")) + hintStyle.Render("  (Enter: queue, Esc: cancel)")
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	return line
+}
+
+func (m Model) agentPromptExtraRows() int {
+	if !m.agentPrompt {
+		return 0
+	}
+	w := m.width - lipgloss.Width(m.t("agent.task_label")) - 1
+	if w < 1 {
+		w = 1
+	}
+	n := len(wrapRunes(string(m.agentPromptIn), w))
+	if n < 1 {
+		n = 1
+	}
+	return n - 1
+}
+
+func (m Model) agentPromptInputRender() []string {
+	labelW := lipgloss.Width(m.t("agent.task_label"))
+	inputTextW := m.width - labelW - 1
+	if inputTextW < 1 {
+		inputTextW = 1
+	}
+	lines := wrapRunes(string(m.agentPromptIn), inputTextW)
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	var out []string
+	for i, line := range lines {
+		var row string
+		if i == 0 {
+			row = statusHiStyle.Render(m.t("agent.task_label"))
+		} else {
+			row = statusHiStyle.Render(strings.Repeat(" ", labelW))
+		}
+		row += statusStyle.Render(line)
+		if i == len(lines)-1 {
+			row += cursorStyle.Render(" ")
+		}
+		if fill := m.width - lipgloss.Width(row); fill > 0 {
+			row += statusStyle.Render(strings.Repeat(" ", fill))
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 // ---- Agent diff review (T6) ----
