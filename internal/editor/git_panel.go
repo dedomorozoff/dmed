@@ -107,6 +107,19 @@ func gitKeyName(msg tea.KeyPressMsg) string {
 			return string(c)
 		}
 	}
+	// Special keys: match on Code directly because String() may return the
+	// raw control character (e.g. "\r") when Text is non-empty (Enter sends
+	// "\r" as text on most terminals).
+	switch msg.Code {
+	case tea.KeyEnter, tea.KeyKpEnter:
+		return "enter"
+	case tea.KeyEsc:
+		return "esc"
+	case tea.KeyBackspace:
+		return "backspace"
+	case tea.KeyTab:
+		return "tab"
+	}
 	return msg.String()
 }
 
@@ -756,7 +769,8 @@ func (m *Model) gitInit() {
 
 func (m *Model) handleGitCommit(msg tea.KeyPressMsg) tea.Cmd {
 	r := m.repoForCur()
-	switch msg.String() {
+	key := gitKeyName(msg)
+	switch key {
 	case "esc":
 		m.gitMode = gitModeStatus
 		m.gitCommitIn = nil
