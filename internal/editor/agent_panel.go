@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -99,7 +98,11 @@ func (m *Model) agentWorker() {
 		}
 		task := m.agentQueue.Next()
 		if task == nil {
-			time.Sleep(150 * time.Millisecond)
+			select {
+			case <-m.agentCtx.Done():
+				return
+			case <-m.agentQueue.Wake():
+			}
 			continue
 		}
 		m.agentRunner.Run(m.agentCtx, task, m.agentTargets())

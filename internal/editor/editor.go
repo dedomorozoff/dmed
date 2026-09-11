@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -37,6 +38,19 @@ type tab struct {
 	diffText     string
 	lineEnding   string // "lf" or "crlf"
 	encoding     string // "utf-8", "utf-16le", "utf-16be", "latin-1"
+	wrapSegs     []wrapSeg
+	wrapW        int
+	wrapTabW     int
+	wrapText     string
+}
+
+// wrapSeg describes one screen row of a wrapped (or plain) buffer line: the
+// line number and the tab-expanded column range it covers. In non-wrap mode
+// every buffer line yields exactly one segment spanning the whole line.
+type wrapSeg struct {
+	line     int
+	expStart int
+	expEnd   int
 }
 
 func (t *tab) name(base string) string {
@@ -118,6 +132,100 @@ func (t *tab) getSyntaxLines() []syntax.HighlightedLine {
 	return t.syntaxCached
 }
 
+// tabWrap returns the wrap segments for the tab at the given content width:
+// one segment per screen row. In non-wrap mode this is one full-line segment
+// per buffer line; callers only enable segmentation when the pane wraps.
+// Results are cached and invalidated automatically when the text, content
+// width, or tab width changes.
+func (t *tab) tabWrap(contentW, tabW int) []wrapSeg {
+	text := t.buf.Text()
+	if t.wrapSegs != nil && t.wrapW == contentW && t.wrapTabW == tabW && t.wrapText == text {
+		return t.wrapSegs
+	}
+	var segs []wrapSeg
+	for ln := 0; ln < t.buf.LineCount(); ln++ {
+		line := t.buf.LineAt(ln)
+		var exp []rune
+		for _, r := range line {
+			if r == '\t' {
+				for k := 0; k < tabW; k++ {
+					exp = append(exp, ' ')
+				}
+			} else {
+				exp = append(exp, r)
+			}
+		}
+		segs = append(segs, wrapLine(ln, exp, contentW)...)
+	}
+	t.wrapSegs = segs
+	t.wrapW = contentW
+	t.wrapTabW = tabW
+	t.wrapText = text
+	return segs
+}
+
+// wrapLine splits one tab-expanded line into width-sized segments, breaking at
+// word boundaries when possible.
+func wrapLine(ln int, exp []rune, w int) []wrapSeg {
+	if w < 1 {
+		w = 1
+	}
+	if len(exp) <= w {
+		return []wrapSeg{{line: ln, expStart: 0, expEnd: len(exp)}}
+	}
+	var segs []wrapSeg
+	start := 0
+	for start < len(exp) {
+		end := start + w
+		if end > len(exp) {
+			end = len(exp)
+		}
+		if end < len(exp) {
+			// Prefer breaking right after the last space inside the window.
+			brk := -1
+			for i := end - 1; i > start; i-- {
+				if exp[i] == ' ' {
+					brk = i + 1
+					break
+				}
+			}
+			if brk > start {
+				end = brk
+			}
+		}
+		if end <= start {
+			end = start + 1
+			if end > len(exp) {
+				end = len(exp)
+			}
+		}
+		segs = append(segs, wrapSeg{line: ln, expStart: start, expEnd: end})
+		if end == len(exp) {
+			break
+		}
+		start = end
+	}
+	return segs
+}
+
+// segRowForCol finds the screen row (index into tabWrap's result) that shows
+// the given tab-expanded column of a buffer line, returning its segment start.
+func segRowForCol(segs []wrapSeg, line, expCol int) (row, expStart int) {
+	for i := range segs {
+		s := segs[i]
+		if s.line == line && expCol >= s.expStart && expCol < s.expEnd {
+			return i, s.expStart
+		}
+	}
+	// Fall back to the last segment of the line (column past end of line).
+	for i := len(segs) - 1; i >= 0; i-- {
+		if segs[i].line == line {
+			return i, segs[i].expStart
+		}
+	}
+	return 0, 0
+}
+
 func (t *tab) getDiff(repo *vcs.Repo) vcs.FileDiff {
 	if t.path == "" {
 		return vcs.FileDiff{}
@@ -196,6 +304,10 @@ type Model struct {
 	replaceOpen        bool
 	replaceWith        []rune
 	replaceFocusFind   bool
+
+	// Go to line
+	gotoOpen bool
+	gotoIn   []rune
 
 	// Events, watcher, Git
 	bus                *events.Bus
@@ -1468,6 +1580,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return m.handleSearch(msg)
 	}
+	if m.gotoOpen {
+		return m.handleGoto(msg)
+	}
 	if m.aiReviewMode {
 		return m.handleInlineReview(msg)
 	}
@@ -1545,6 +1660,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		} else {
 			m.saveActive()
 		}
+	case "ctrl+l":
+		m.startGotoPrompt()
+	case "ctrl+/", "ctrl+_":
+		m.toggleComment()
+	case "alt+z":
+		m.toggleWordWrap()
 	case "ctrl+z":
 		if m.cur().buf.Undo() {
 			m.msg = ""
@@ -1595,6 +1716,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.cur().buf.MoveLineUp()
 	case "alt+down":
 		m.cur().buf.MoveLineDown()
+	case "alt+shift+down":
+		m.cur().buf.DuplicateLine()
+	case "alt+shift+up":
+		m.cur().buf.DuplicateLineUp()
 	case "shift+up":
 		m.cur().buf.MoveUpWithSelect()
 	case "shift+down":
@@ -1790,6 +1915,29 @@ func (m *Model) clampScroll() {
 	}
 	h := m.paneViewHeight(m.activePane)
 	cur := t.buf.CurLine()
+	tabW := m.cfg.Editor.TabWidth
+	if p.wordWrap {
+		w := m.paneContentWidth(m.activePane)
+		if w > 0 && h > 0 {
+			segs := t.tabWrap(w, tabW)
+			expCol := visCol(t.buf.LineAt(cur), t.buf.Col(), tabW)
+			row, _ := segRowForCol(segs, cur, expCol)
+			if row < p.offsetY {
+				p.offsetY = row
+			}
+			if row >= p.offsetY+h {
+				p.offsetY = row - h + 1
+			}
+			if maxOff := len(segs) - h; p.offsetY > maxOff {
+				p.offsetY = maxOff
+			}
+			if p.offsetY < 0 {
+				p.offsetY = 0
+			}
+		}
+		p.offsetX = 0
+		return
+	}
 	if h > 0 {
 		if cur < p.offsetY {
 			p.offsetY = cur
@@ -1802,7 +1950,7 @@ func (m *Model) clampScroll() {
 	if w <= 0 {
 		return
 	}
-	x := visCol(t.buf.LineAt(cur), t.buf.Col(), m.cfg.Editor.TabWidth)
+	x := visCol(t.buf.LineAt(cur), t.buf.Col(), tabW)
 	if x < p.offsetX {
 		p.offsetX = x
 	}
@@ -1906,6 +2054,126 @@ func (m *Model) handleReplace(msg tea.KeyPressMsg) tea.Cmd {
 type searchMatch struct {
 	line int
 	col  int
+}
+
+// startGotoPrompt opens the "Go to Line" input (empty; type N, N:C, or +N/-N).
+func (m *Model) startGotoPrompt() {
+	m.gotoOpen = true
+	m.gotoIn = nil
+}
+
+// handleGoto handles input in the "Go to Line" prompt. Accepts absolute
+// (N, or N:C) and relative (+N/-N, or +N:C/-N:C) line specs.
+func (m *Model) handleGoto(msg tea.KeyPressMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc":
+		m.gotoOpen = false
+		m.msg = ""
+	case "enter":
+		s := strings.TrimSpace(string(m.gotoIn))
+		m.gotoOpen = false
+		m.msg = ""
+		if s != "" {
+			m.applyGoto(s)
+		}
+	case "backspace":
+		if n := len(m.gotoIn); n > 0 {
+			m.gotoIn = m.gotoIn[:n-1]
+		}
+	case "ctrl+l":
+		m.gotoIn = nil
+	default:
+		if len(msg.Text) > 0 {
+			for _, r := range msg.Text {
+				if (r >= '0' && r <= '9') || r == ':' || r == '+' || r == '-' {
+					m.gotoIn = append(m.gotoIn, r)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// applyGoto jumps the active buffer's cursor to the parsed line spec.
+func (m *Model) applyGoto(s string) {
+	t := m.cur()
+	cur := t.buf.CurLine()
+
+	rel := false
+	sign := 1
+	rest := s
+	switch rest[0] {
+	case '+':
+		rel = true
+		rest = rest[1:]
+	case '-':
+		rel = true
+		sign = -1
+		rest = rest[1:]
+	}
+
+	col := 0
+	if i := strings.IndexByte(rest, ':'); i >= 0 {
+		col, _ = strconv.Atoi(rest[i+1:])
+		if col < 0 {
+			col = 0
+		}
+		rest = rest[:i]
+	}
+	if len(rest) == 0 {
+		return
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil {
+		return
+	}
+	line := n - 1
+	if rel {
+		line = cur + sign*n
+	}
+	if line < 0 {
+		line = 0
+	}
+	if line >= t.buf.LineCount() {
+		line = t.buf.LineCount() - 1
+	}
+	t.buf.SetCursor(line, 0)
+	if col > 0 {
+		if col > t.buf.LineLen(line) {
+			col = t.buf.LineLen(line)
+		}
+		t.buf.SetCursor(line, col)
+	}
+	m.clampScroll()
+	m.msg = fmt.Sprintf("line %d", line+1)
+}
+
+// toggleComment comments or uncomments the current line(s) using the comment
+// syntax of the active file type (from the syntax highlighter's lexer).
+func (m *Model) toggleComment() {
+	t := m.cur()
+	prefix, suffix := syntax.CommentTokens(t.path, t.buf.Text())
+	if prefix == "" {
+		m.msg = m.t("msg.no_comment")
+		return
+	}
+	t.buf.ToggleComment(prefix, suffix)
+	m.msg = ""
+	m.clampScroll()
+}
+
+func (m *Model) toggleWordWrap() {
+	p := m.curPane()
+	p.wordWrap = !p.wordWrap
+	if p.wordWrap {
+		p.offsetX = 0
+	}
+	m.clampScroll()
+	if p.wordWrap {
+		m.msg = m.t("msg.word_wrap_on")
+	} else {
+		m.msg = m.t("msg.word_wrap_off")
+	}
 }
 
 func findMatchesInRunes(line []rune, query []rune) []int {
@@ -2167,33 +2435,10 @@ func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
 		y = h
 	}
 
-	p := m.curPane()
-	t := &m.tabs[p.tabIdx]
 	editorRow := y - 1
-	ln := editorRow + p.offsetY
+	ln, rawCol := m.clickPosToLineCol(m.activePane, editorRow, x)
 
-	// Clamp line before accessing buffer.
-	if ln >= t.buf.LineCount() {
-		ln = t.buf.LineCount() - 1
-	}
-	if ln < 0 {
-		ln = 0
-	}
-
-	leftW := m.leftRailWidth()
-	gw := m.gutterWidthForTab(t)
-	clickX := x - leftW - gw + p.offsetX
-	if clickX < 0 {
-		clickX = 0
-	}
-	rawCol := expandedToRawCol(t.buf.LineAt(ln), clickX, m.cfg.Editor.TabWidth)
-
-	lineLen := t.buf.LineLen(ln)
-	if rawCol > lineLen {
-		rawCol = lineLen
-	}
-
-	t.buf.DragSelect(ln, rawCol)
+	m.cur().buf.DragSelect(ln, rawCol)
 	return nil
 }
 
@@ -2224,7 +2469,7 @@ func expandedToRaw(line []rune, expCol, tabWidth int) int {
 
 // cursorScreenPos returns the (x, y) position of the editor cursor in
 // the terminal content, accounting for the tab bar, left rail, gutter,
-// scroll offsets, and split layout.
+// scroll offsets, word wrap, and split layout.
 func (m Model) cursorScreenPos() (int, int) {
 	p := m.curPane()
 	t := &m.tabs[p.tabIdx]
@@ -2245,8 +2490,20 @@ func (m Model) cursorScreenPos() (int, int) {
 	gw := m.gutterWidthForTab(t)
 	leftW := m.leftRailWidth()
 
+	screenRow := curLine
+	segStart := 0
+	if p.wordWrap {
+		w := m.paneContentWidth(m.activePane)
+		if w > 0 {
+			segs := t.tabWrap(w, m.cfg.Editor.TabWidth)
+			row, es := segRowForCol(segs, curLine, expCol)
+			screenRow = row
+			segStart = es
+		}
+	}
+
 	// X position within the pane content area.
-	paneX := gw + (expCol - p.offsetX)
+	paneX := gw + (expCol - (p.offsetX + segStart))
 
 	// Determine the screen X based on which pane we're in.
 	var screenX int
@@ -2262,7 +2519,7 @@ func (m Model) cursorScreenPos() (int, int) {
 	}
 
 	// Y position: tab bar (1 row) + line offset within the pane.
-	screenY := 1 + (curLine - p.offsetY)
+	screenY := 1 + (screenRow - p.offsetY)
 
 	// For horizontal split, the second pane starts lower.
 	if m.layout == splitHoriz && m.activePane == 1 {

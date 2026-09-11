@@ -3,9 +3,10 @@ package editor
 import tea "charm.land/bubbletea/v2"
 
 type pane struct {
-	tabIdx  int
-	offsetX int
-	offsetY int
+	tabIdx   int
+	offsetX  int
+	offsetY  int
+	wordWrap bool
 }
 
 type splitLayout int
@@ -21,7 +22,7 @@ func (m *Model) initPanes() {
 	if idx < 0 {
 		idx = 0
 	}
-	m.panes = []pane{{tabIdx: idx}}
+	m.panes = []pane{{tabIdx: idx, wordWrap: m.cfg.Editor.WordWrap}}
 	m.activePane = 0
 	m.layout = splitNone
 }

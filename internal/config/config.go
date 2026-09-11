@@ -33,6 +33,7 @@ type EditorConfig struct {
 	TabWidth    int
 	SyntaxTheme string
 	LineNumbers bool
+	WordWrap    bool
 	SkippedDirs []string
 }
 
@@ -81,6 +82,7 @@ func Defaults() Config {
 			TabWidth:    4,
 			SyntaxTheme: "monokai",
 			LineNumbers: true,
+			WordWrap:    false,
 			SkippedDirs: []string{".git", "node_modules"},
 		},
 		AI: AIConfig{
@@ -277,6 +279,9 @@ func loadFile(path string, cfg *Config) {
 		}
 		if v, ok := s["line_numbers"]; ok {
 			cfg.Editor.LineNumbers = parseBool(v)
+		}
+		if v, ok := s["word_wrap"]; ok {
+			cfg.Editor.WordWrap = parseBool(v)
 		}
 		if v, ok := s["skipped_dirs"]; ok {
 			cfg.Editor.SkippedDirs = strings.Split(v, ",")

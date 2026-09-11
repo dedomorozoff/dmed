@@ -54,6 +54,8 @@ var helpEntries = []helpEntry{
 	{"", ""},
 	{"Ctrl+F", "help.search"},
 	{"Ctrl+H", "help.replace"},
+	{"Ctrl+L", "help.goto_line"},
+	{"Alt+Z", "help.word_wrap"},
 	{"Ctrl+G", "help.git_panel"},
 	{"D (in Git panel)", "help.git_diff"},
 	{"Alt+[ / Alt+]", "help.hunk"},
@@ -246,6 +248,8 @@ func (m Model) View() tea.View {
 		} else {
 			bottom = m.searchLine()
 		}
+	} else if m.gotoOpen {
+		bottom = m.gotoLine()
 	}
 	rows = append(rows, bottom)
 	if m.gitOpen && m.gitMode == gitModeCommit {
@@ -285,7 +289,7 @@ func (m Model) View() tea.View {
 	v.MouseMode = tea.MouseModeCellMotion
 
 	// Terminal cursor: positioned at the editor cursor location.
-	if !m.gitOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode && !m.paletteOpen && !m.langChooserOpen && !m.pluginStoreOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
+	if !m.gitOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode && !m.paletteOpen && !m.langChooserOpen && !m.pluginStoreOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.gotoOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
 		cx, cy := m.cursorScreenPos()
 		v.Cursor = tea.NewCursor(cx, cy)
 	}
@@ -399,8 +403,36 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	diagPath, _ := filepath.Abs(t.path)
 	tabDiags := m.diags[diagPath]
 
+	wrap := p.wordWrap && contentW > 0
+	var segs []wrapSeg
+	if wrap {
+		segs = t.tabWrap(contentW, m.cfg.Editor.TabWidth)
+	}
+
 	for row := 0; row < h; row++ {
 		ln := p.offsetY + row
+		segStart, segEnd := 0, 0
+		continuation := false
+		if wrap {
+			si := p.offsetY + row
+			if si >= len(segs) {
+				if gw > 0 {
+					rows[row] = strings.Repeat(" ", gw)
+				}
+				continue
+			}
+			ln = segs[si].line
+			segStart = segs[si].expStart
+			segEnd = segs[si].expEnd
+			continuation = segStart > 0
+		}
+
+		if continuation {
+			// Wrapped continuation row: blank gutter, content segment only.
+			rows[row] = strings.Repeat(" ", gw) + m.renderLineWrap(p, t, ln, segStart, segEnd, active, syntaxLines)
+			continue
+		}
+
 		num := strconv.Itoa(ln + 1)
 		gitMark := " "
 		gitMarkStyle := gutterStyle
@@ -448,7 +480,7 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 		gutStr += diagMarkStyle.Render(diagMark)
 		gutStr += gitMarkStyle.Render(gitMark)
 
-		if active && m.ghostVisible && len(m.ghostLines) > 1 && ln > m.ghostRow {
+		if active && !wrap && m.ghostVisible && len(m.ghostLines) > 1 && ln > m.ghostRow {
 			// Multi-line ghost: subsequent ghost lines appear on their own rows.
 			gidx := ln - m.ghostRow
 			if gidx < len(m.ghostLines) {
@@ -465,13 +497,28 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 			}
 		}
 
-		if ln < t.buf.LineCount() {
-			rows[row] = gutStr + m.renderLine(p, t, ln, contentW, active, syntaxLines)
+		if ln >= t.buf.LineCount() {
+			rows[row] = gutStr
+			continue
+		}
+		if wrap {
+			rows[row] = gutStr + m.renderLineWrap(p, t, ln, segStart, segEnd, active, syntaxLines)
 		} else {
 			rows[row] = gutStr + m.renderLine(p, t, ln, contentW, active, syntaxLines)
 		}
 	}
 	return rows
+}
+
+// renderLineWrap renders one wrap segment (expanded rune range [segStart,
+// segEnd)) of a buffer line as its own screen row.
+func (m Model) renderLineWrap(p *pane, t *tab, ln, segStart, segEnd int, activePane bool, syntaxLines []syntax.HighlightedLine) string {
+	if ln < 0 || ln >= t.buf.LineCount() || segEnd <= segStart {
+		return ""
+	}
+	pp := *p
+	pp.offsetX = segStart
+	return m.renderLine(&pp, t, ln, segEnd-segStart, activePane, syntaxLines)
 }
 
 // diagMarkFor returns the gutter marker for a line given the file's
@@ -1332,6 +1379,16 @@ func (m Model) searchLine() string {
 	return line
 }
 
+func (m Model) gotoLine() string {
+	line := statusHiStyle.Render(m.t("goto.label")) + statusStyle.Render(string(m.gotoIn)) + cursorStyle.Render(" ")
+	line += hintStyle.Render(m.t("goto.hint"))
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
 func (m Model) replaceLine() string {
 	findPart := statusHiStyle.Render(m.t("replace.find")) + statusStyle.Render(string(m.searchQuery))
 	if m.replaceFocusFind {
@@ -1863,7 +1920,7 @@ func (m Model) statusBar() string {
 		fileInfo = fmt.Sprintf("%s %s ", endings[t.lineEnding], enc)
 	}
 	hint := ""
-	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
+	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gotoOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
 		hint = m.t("status.f1_help")
 		if m.layout != splitNone {
 			hint += m.t("status.f8_pane")

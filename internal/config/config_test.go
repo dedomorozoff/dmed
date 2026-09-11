@@ -9,6 +9,9 @@ import (
 
 func TestDefaults(t *testing.T) {
 	cfg := Defaults()
+	if cfg.Editor.WordWrap {
+		t.Error("word_wrap should default to false")
+	}
 	if cfg.Editor.TabWidth != 4 {
 		t.Errorf("tab_width = %d, want 4", cfg.Editor.TabWidth)
 	}
@@ -34,6 +37,7 @@ func TestParseINI(t *testing.T) {
 tab_width = 2
 syntax_theme = dracula
 line_numbers = false
+word_wrap = true
 skipped_dirs = .git,node_modules,vendor
 
 [ai]
@@ -48,6 +52,9 @@ lang = ru
 
 	if sections["editor"]["tab_width"] != "2" {
 		t.Errorf("editor.tab_width = %q, want 2", sections["editor"]["tab_width"])
+	}
+	if sections["editor"]["word_wrap"] != "true" {
+		t.Errorf("editor.word_wrap = %q, want true", sections["editor"]["word_wrap"])
 	}
 	if sections["editor"]["syntax_theme"] != "dracula" {
 		t.Errorf("editor.syntax_theme = %q, want dracula", sections["editor"]["syntax_theme"])
@@ -81,6 +88,7 @@ func TestLoadFile(t *testing.T) {
 	content := `[editor]
 tab_width = 2
 syntax_theme = dracula
+word_wrap = true
 
 [ai]
 model = llama3
@@ -94,6 +102,9 @@ model = llama3
 
 	if cfg.Editor.TabWidth != 2 {
 		t.Errorf("tab_width = %d, want 2", cfg.Editor.TabWidth)
+	}
+	if !cfg.Editor.WordWrap {
+		t.Errorf("word_wrap = %v, want true", cfg.Editor.WordWrap)
 	}
 	if cfg.Editor.SyntaxTheme != "dracula" {
 		t.Errorf("syntax_theme = %q, want dracula", cfg.Editor.SyntaxTheme)

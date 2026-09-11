@@ -28,3 +28,35 @@ func TestHighlightBufferFallback(t *testing.T) {
 		t.Fatalf("expected line length %d, got %d", len([]rune(code)), len(hl[0]))
 	}
 }
+
+func TestCommentTokens(t *testing.T) {
+	cases := []struct {
+		file, content, prefix, suffix string
+	}{
+		{"main.go", "package main\n", "//", ""},
+		{"app.py", "print(1)\n", "#", ""},
+		{"x.c", "int main(void) {}\n", "//", ""},
+		{"style.css", "body {}\n", "/*", "*/"},
+		{"index.html", "<html></html>\n", "<!--", "-->"},
+		{"page.vue", "<template></template>\n", "<!--", "-->"},
+		{"Makefile", "all:\n", "#", ""},
+		{"a.sql", "SELECT 1;\n", "--", ""},
+		{"a.lua", "print('x')\n", "#", ""},
+		{"a.erl", "ok.\n", "%", ""},
+		{"a.hs", "main = putStrLn \"x\"\n", "--", ""},
+	}
+	for _, c := range cases {
+		p, s := CommentTokens(c.file, c.content)
+		if p != c.prefix || s != c.suffix {
+			t.Errorf("CommentTokens(%s) = (%q,%q), want (%q,%q)",
+				c.file, p, s, c.prefix, c.suffix)
+		}
+	}
+}
+
+func TestCommentTokensUnknown(t *testing.T) {
+	p, s := CommentTokens("blob.unknownext", "some text")
+	if p != "" || s != "" {
+		t.Fatalf("unknown type: got (%q,%q), want empty", p, s)
+	}
+}

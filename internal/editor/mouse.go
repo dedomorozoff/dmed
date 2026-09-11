@@ -330,24 +330,7 @@ func (m *Model) clickBuffer(x, y int, mod tea.KeyMod) tea.Cmd {
 
 	p := m.curPane()
 	t := &m.tabs[p.tabIdx]
-	ln := editorRow + p.offsetY
-	if ln >= t.buf.LineCount() {
-		ln = t.buf.LineCount() - 1
-	}
-	if ln < 0 {
-		ln = 0
-	}
-
-	gw := m.gutterWidthForTab(t)
-	clickX := x - leftW - gw + p.offsetX
-	if clickX < 0 {
-		clickX = 0
-	}
-
-	rawCol := expandedToRawCol(t.buf.LineAt(ln), clickX, m.cfg.Editor.TabWidth)
-	if lineLen := t.buf.LineLen(ln); rawCol > lineLen {
-		rawCol = lineLen
-	}
+	ln, rawCol := m.clickPosToLineCol(m.activePane, editorRow, x)
 
 	if mod&tea.ModAlt != 0 {
 		if t.buf.AddCursor(ln, rawCol, rawCol, rawCol) {
@@ -365,6 +348,60 @@ func (m *Model) clickBuffer(x, y int, mod tea.KeyMod) tea.Cmd {
 	m.chatFocus = false
 	m.mouseDown = true
 	return nil
+}
+
+// clickPosToLineCol converts a pointer at screen (x, editorRow) inside the
+// pane content into a buffer (line, raw column), accounting for word wrap
+// segments and horizontal scrolling.
+func (m Model) clickPosToLineCol(paneIdx, editorRow, x int) (int, int) {
+	p := &m.panes[paneIdx]
+	t := &m.tabs[p.tabIdx]
+	leftW := m.leftRailWidth()
+	gw := m.gutterWidthForTab(t)
+	tabW := m.cfg.Editor.TabWidth
+
+	if p.wordWrap {
+		w := m.paneContentWidth(paneIdx)
+		if w > 0 {
+			si := editorRow + p.offsetY
+			segs := t.tabWrap(w, tabW)
+			if si >= 0 && si < len(segs) {
+				s := segs[si]
+				clickX := x - leftW - gw + s.expStart
+				if clickX < 0 {
+					clickX = 0
+				}
+				return clampLineCol(t, s.line, clickX, tabW)
+			}
+			ll := t.buf.LineCount() - 1
+			if ll < 0 {
+				ll = 0
+			}
+			return ll, t.buf.LineLen(ll)
+		}
+	}
+
+	ln := editorRow + p.offsetY
+	clickX := x - leftW - gw + p.offsetX
+	if clickX < 0 {
+		clickX = 0
+	}
+	return clampLineCol(t, ln, clickX, tabW)
+}
+
+// clampLineCol maps an expanded column to a raw buffer column on a line.
+func clampLineCol(t *tab, ln, clickX, tabW int) (int, int) {
+	if ln >= t.buf.LineCount() {
+		ln = t.buf.LineCount() - 1
+	}
+	if ln < 0 {
+		ln = 0
+	}
+	rawCol := expandedToRawCol(t.buf.LineAt(ln), clickX, tabW)
+	if lineLen := t.buf.LineLen(ln); rawCol > lineLen {
+		rawCol = lineLen
+	}
+	return ln, rawCol
 }
 
 func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
@@ -501,16 +538,22 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 
 	// Buffer scroll.
 	p := m.curPane()
+	t := &m.tabs[p.tabIdx]
+	maxOff := t.buf.LineCount() - m.paneViewHeight(m.activePane)
+	if p.wordWrap {
+		w := m.paneContentWidth(m.activePane)
+		if w > 0 {
+			maxOff = len(t.tabWrap(w, m.cfg.Editor.TabWidth)) - m.paneViewHeight(m.activePane)
+		}
+	}
+	if maxOff < 0 {
+		maxOff = 0
+	}
 	if dir < 0 {
 		if p.offsetY > 0 {
 			p.offsetY--
 		}
 	} else {
-		t := &m.tabs[p.tabIdx]
-		maxOff := t.buf.LineCount() - m.paneViewHeight(m.activePane)
-		if maxOff < 0 {
-			maxOff = 0
-		}
 		if p.offsetY < maxOff {
 			p.offsetY++
 		}
