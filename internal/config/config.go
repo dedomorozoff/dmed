@@ -11,10 +11,11 @@ import (
 
 // Config holds all editor configuration.
 type Config struct {
-	Editor EditorConfig
-	AI     AIConfig
-	Agent  AgentConfig
-	UI     UIConfig
+	Editor  EditorConfig
+	AI      AIConfig
+	Agent   AgentConfig
+	UI      UIConfig
+	Plugins PluginsConfig
 }
 
 // AgentConfig holds settings for background agent tasks (M4).
@@ -32,17 +33,31 @@ type EditorConfig struct {
 	TabWidth    int
 	SyntaxTheme string
 	LineNumbers bool
+	WordWrap    bool
 	SkippedDirs []string
 }
 
 // AIConfig holds AI-related settings.
 type AIConfig struct {
-	Provider     string // ollama | openai
-	Model        string
-	OllamaURL    string
-	APIKey       string
-	SystemPrompt string
-	ContextMax   int
+	Provider       string // ollama | openai
+	Model          string
+	OllamaURL      string
+	APIKey         string
+	SystemPrompt   string
+	ContextMax     int
+	// Temperature is in tenths (7 => 0.7); 0 uses the provider default.
+	Temperature int
+	// NumCtx is the model context window in tokens (ollama `num_ctx`); 0 = default.
+	NumCtx int
+	// NumPredict is the max output tokens; 0 = provider default.
+	NumPredict int
+	// ToolRounds caps the chat tool-calling loop depth; 0 uses the built-in cap (6).
+	ToolRounds int
+	// AllowRun: "always" runs the model's commands, "never" blocks them, and
+	// "ask" pauses for explicit per-command confirmation.
+	AllowRun string
+	// RestrictToRoot bounds READ/EDIT/REPLACE paths to the project root when true.
+	RestrictToRoot bool
 }
 
 // UIConfig holds UI-related settings.
@@ -52,6 +67,14 @@ type UIConfig struct {
 	Lang         string
 }
 
+// PluginsConfig configures the remote plugin store. Plugins are listed and
+// installed from a GitHub repo's plugins/ directory.
+type PluginsConfig struct {
+	Repo   string // "owner/repo"
+	Dir    string // path inside the repo holding .lua plugins
+	Branch string // branch to read from
+}
+
 // Defaults returns the default configuration.
 func Defaults() Config {
 	return Config{
@@ -59,15 +82,25 @@ func Defaults() Config {
 			TabWidth:    4,
 			SyntaxTheme: "monokai",
 			LineNumbers: true,
+			WordWrap:    false,
 			SkippedDirs: []string{".git", "node_modules"},
 		},
 		AI: AIConfig{
-			Provider:   "ollama",
-			Model:      "",
-			OllamaURL:  "http://localhost:11434",
-			ContextMax: 6000,
-			SystemPrompt: "You are a helpful coding assistant. " +
-				"Answer concisely. When showing code, use markdown fences.",
+			Provider:       "ollama",
+			Model:          "",
+			OllamaURL:      "http://localhost:11434",
+			ContextMax:     6000,
+			Temperature:    0,
+			NumCtx:         0,
+			NumPredict:     0,
+			ToolRounds:     0,
+			AllowRun:       "always",
+			RestrictToRoot: false,
+			SystemPrompt:   "You are a helpful coding assistant inside the dmed editor. " +
+				"Answer concisely. You have tools: EDIT creates or rewrites a whole file, " +
+				"READ reads a file, SEARCH finds text, RUN executes a shell command. " +
+				"When the user asks to create, change or fix files, you MUST call EDIT " +
+				"(after READ for existing files) instead of printing code in the reply.",
 		},
 		Agent: AgentConfig{
 			SystemPrompt: "",
@@ -77,6 +110,11 @@ func Defaults() Config {
 			TreeWidth:    25,
 			ChatWidthPct: 40,
 			Lang:         "en",
+		},
+		Plugins: PluginsConfig{
+			Repo:   "dedomorozoff/dmed",
+			Dir:    "plugins",
+			Branch: "main",
 		},
 	}
 }
@@ -99,11 +137,17 @@ func Load(projectRoot string) Config {
 	}
 
 	// Environment variable overrides
+	if v := os.Getenv("DMED_PROVIDER"); v != "" {
+		cfg.AI.Provider = v
+	}
 	if v := os.Getenv("DMED_MODEL"); v != "" {
 		cfg.AI.Model = v
 	}
 	if v := os.Getenv("DMED_OLLAMA_URL"); v != "" {
 		cfg.AI.OllamaURL = v
+	}
+	if v := os.Getenv("DMED_API_KEY"); v != "" {
+		cfg.AI.APIKey = v
 	}
 	if v := os.Getenv("DMED_SHELL"); v != "" {
 		// Shell is not in Config struct but stored separately in the editor.
@@ -111,6 +155,34 @@ func Load(projectRoot string) Config {
 	}
 	if v := os.Getenv("DMED_LANG"); v != "" {
 		cfg.UI.Lang = v
+	}
+	if v := os.Getenv("DMED_PLUGIN_REPO"); v != "" {
+		cfg.Plugins.Repo = v
+	}
+	if v := os.Getenv("DMED_TEMPERATURE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.AI.Temperature = n
+		}
+	}
+	if v := os.Getenv("DMED_NUM_CTX"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.AI.NumCtx = n
+		}
+	}
+	if v := os.Getenv("DMED_NUM_PREDICT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.AI.NumPredict = n
+		}
+	}
+	if v := os.Getenv("DMED_TOOL_ROUNDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.AI.ToolRounds = n
+		}
+	}
+	if v := os.Getenv("DMED_ALLOW_RUN"); v != "" {
+		if v == "always" || v == "never" || v == "ask" {
+			cfg.AI.AllowRun = v
+		}
 	}
 
 	return cfg
@@ -208,6 +280,9 @@ func loadFile(path string, cfg *Config) {
 		if v, ok := s["line_numbers"]; ok {
 			cfg.Editor.LineNumbers = parseBool(v)
 		}
+		if v, ok := s["word_wrap"]; ok {
+			cfg.Editor.WordWrap = parseBool(v)
+		}
 		if v, ok := s["skipped_dirs"]; ok {
 			cfg.Editor.SkippedDirs = strings.Split(v, ",")
 			for i := range cfg.Editor.SkippedDirs {
@@ -238,6 +313,34 @@ func loadFile(path string, cfg *Config) {
 				cfg.AI.ContextMax = n
 			}
 		}
+		if v, ok := s["temperature"]; ok {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+				cfg.AI.Temperature = n
+			}
+		}
+		if v, ok := s["num_ctx"]; ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				cfg.AI.NumCtx = n
+			}
+		}
+		if v, ok := s["num_predict"]; ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				cfg.AI.NumPredict = n
+			}
+		}
+		if v, ok := s["tool_rounds"]; ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				cfg.AI.ToolRounds = n
+			}
+		}
+		if v, ok := s["allow_run"]; ok {
+			if v == "always" || v == "never" || v == "ask" {
+				cfg.AI.AllowRun = v
+			}
+		}
+		if v, ok := s["restrict_to_root"]; ok {
+			cfg.AI.RestrictToRoot = parseBool(v)
+		}
 	}
 
 	// [agent]
@@ -266,6 +369,19 @@ func loadFile(path string, cfg *Config) {
 		}
 		if v, ok := s["lang"]; ok {
 			cfg.UI.Lang = v
+		}
+	}
+
+	// [plugins]
+	if s, ok := sections["plugins"]; ok {
+		if v, ok := s["repo"]; ok {
+			cfg.Plugins.Repo = v
+		}
+		if v, ok := s["dir"]; ok {
+			cfg.Plugins.Dir = v
+		}
+		if v, ok := s["branch"]; ok {
+			cfg.Plugins.Branch = v
 		}
 	}
 }
@@ -323,6 +439,11 @@ func WriteAI(path string, ai AIConfig) (int, error) {
 		{"ollama_url", ai.OllamaURL},
 		{"api_key", ai.APIKey},
 		{"context_max", strconv.Itoa(ai.ContextMax)},
+		{"temperature", strconv.Itoa(ai.Temperature)},
+		{"num_ctx", strconv.Itoa(ai.NumCtx)},
+		{"num_predict", strconv.Itoa(ai.NumPredict)},
+		{"tool_rounds", strconv.Itoa(ai.ToolRounds)},
+		{"allow_run", ai.AllowRun},
 	}
 
 	data, err := os.ReadFile(path)
@@ -399,4 +520,48 @@ func WriteAI(path string, ai AIConfig) (int, error) {
 		return 0, err
 	}
 	return len(replaced) + len(missing), nil
+}
+
+// AIPreset describes one built-in "just works" provider entry a beginner can
+// pick without reading docs: choosing it fills the base URL (and a sensible
+// default model when the provider exposes a stable one) so only the API key
+// is left to type. The base URL is the origin only — internal/ai appends the
+// API paths (/v1/chat/completions, /v1/models) itself.
+type AIPreset struct {
+	Name    string // display name shown in the wizard
+	Kind    string // wire protocol: "ollama" | "openai"
+	BaseURL string // origin, no path suffix ("" = keep the current URL)
+	Model   string // optional suggested model ("" = resolved from the server)
+	APIKey  bool   // whether this provider needs an API key
+}
+
+// DefaultOllamaURL is the address a stock local Ollama install listens on.
+// Exported so the wizard test button and the CLI setup can share the hint.
+const DefaultOllamaURL = "http://localhost:11434"
+
+// AIPresets lists the built-in providers in wizard cycle order. Ollama comes
+// first: it is free, local and needs no key, making it the best beginner path.
+// The last entry is Custom — it keeps whatever URL/model the user already had.
+func AIPresets() []AIPreset {
+	return []AIPreset{
+		{Name: "Ollama (local)", Kind: "ollama", BaseURL: DefaultOllamaURL},
+		{Name: "OpenAI", Kind: "openai", BaseURL: "https://api.openai.com", Model: "gpt-4o-mini", APIKey: true},
+		{Name: "DeepSeek", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-chat", APIKey: true},
+		{Name: "Groq", Kind: "openai", BaseURL: "https://api.groq.com", Model: "llama-3.3-70b-versatile", APIKey: true},
+		{Name: "LM Studio (local)", Kind: "openai", BaseURL: "http://localhost:1234"},
+		{Name: "vLLM (local)", Kind: "openai", BaseURL: "http://localhost:8000"},
+		{Name: "Custom", Kind: "openai", BaseURL: ""},
+	}
+}
+
+// ResolvePreset returns the preset matching a stored provider label, falling
+// back to Ollama for unknown/empty values so a hand-edited config never leaves
+// the wizard stuck on a name it cannot cycle from.
+func ResolvePreset(name string) AIPreset {
+	for _, p := range AIPresets() {
+		if strings.EqualFold(p.Name, name) {
+			return p
+		}
+	}
+	return AIPresets()[0]
 }

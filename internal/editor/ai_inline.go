@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"dmed/internal/ai"
+	"dmed/internal/buffer"
 	"dmed/internal/vcs"
 )
 
@@ -24,7 +25,7 @@ func waitForInlineOutput(ch <-chan chatEvent) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-ch
 		if !ok {
-			return nil
+			return InlineOutputMsg{Done: true}
 		}
 		return InlineOutputMsg{Delta: ev.delta, Err: ev.err, Done: ev.done}
 	}
@@ -65,7 +66,7 @@ func (m *Model) handleInlineRequest(msg tea.KeyPressMsg) tea.Cmd {
 		m.aiInlineBusy = false
 		m.msg = ""
 	case "enter":
-		m.submitInlineRequest()
+		return m.submitInlineRequest()
 	case "backspace":
 		if n := len(m.aiInlineInput); n > 0 {
 			m.aiInlineInput = m.aiInlineInput[:n-1]
@@ -78,11 +79,13 @@ func (m *Model) handleInlineRequest(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-// submitInlineRequest sends the selected text + instruction to the AI.
-func (m *Model) submitInlineRequest() {
+// submitInlineRequest sends the selected text + instruction to the AI. It
+// returns a tea.Cmd that reads the stream; without it no InlineOutputMsg would
+// ever be delivered and the rewrite would appear to hang at "AI: rewriting...".
+func (m *Model) submitInlineRequest() tea.Cmd {
 	instruction := strings.TrimSpace(string(m.aiInlineInput))
 	if instruction == "" || m.aiInlineBusy {
-		return
+		return nil
 	}
 	if m.ai == nil {
 		m.ai = ai.NewProvider(ai.Config{
@@ -96,7 +99,7 @@ func (m *Model) submitInlineRequest() {
 		m.pickChatModel()
 		if m.chatModel == "" {
 			m.msg = "no model available; check provider config"
-			return
+			return nil
 		}
 	}
 
@@ -108,7 +111,21 @@ func (m *Model) submitInlineRequest() {
 		"Return ONLY the modified code that follows the instruction. " +
 		"No explanations, no markdown fences, no extra text — just the raw modified code."
 
+	// Add surrounding context lines so the AI understands the local code.
+	tb := m.cur().buf
+	ctxBefore, ctxAfter := surroundingContext(tb, m.aiInlineSelStart[0], m.aiInlineSelEnd[0])
+
 	userMsg := "Text:\n```\n" + m.aiInlineOriginal + "\n```\n\nInstruction: " + instruction
+	if ctxBefore != "" || ctxAfter != "" {
+		userMsg += "\n\nSurrounding context:\n"
+		if ctxBefore != "" {
+			userMsg += "...\n" + ctxBefore + "\n"
+		}
+		userMsg += "[BEGIN selected/replaced region]"
+		if ctxAfter != "" {
+			userMsg += "\n" + ctxAfter + "\n..."
+		}
+	}
 
 	msgs := []ai.Message{
 		{Role: "system", Content: systemPrompt},
@@ -125,11 +142,13 @@ func (m *Model) submitInlineRequest() {
 	m.aiInlineCh = ch
 	go func() {
 		defer close(ch)
-		err := m.ai.ChatStream(ctx, msgs, func(d string) {
-			select {
-			case ch <- chatEvent{delta: d}:
-			case <-ctx.Done():
-			}
+		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs, Options: m.aiRequestOptions()}, ai.Handler{
+			Delta: func(d string) {
+				select {
+				case ch <- chatEvent{delta: d}:
+				case <-ctx.Done():
+				}
+			},
 		})
 		if err != nil {
 			select {
@@ -138,11 +157,29 @@ func (m *Model) submitInlineRequest() {
 			}
 		}
 	}()
+	return waitForInlineOutput(ch)
+}
+
+// cancelInlineRequest aborts a streaming inline AI request. The channel is
+// cleared so any stale output event still in flight is ignored by
+// handleInlineOutput instead of surfacing as an error.
+func (m *Model) cancelInlineRequest() {
+	if m.aiInlineCancel != nil {
+		m.aiInlineCancel()
+		m.aiInlineCancel = nil
+	}
+	m.aiInlineBusy = false
+	m.aiInlineCh = nil
+	m.aiInlineProposal = ""
+	m.msg = ""
 }
 
 // handleInlineOutput processes a streaming delta or completion from the inline
 // AI goroutine. Called from the main Update() loop.
 func (m *Model) handleInlineOutput(msg InlineOutputMsg) tea.Cmd {
+	if m.aiInlineCh == nil {
+		return nil
+	}
 	if msg.Err != nil {
 		m.msg = "AI error: " + msg.Err.Error()
 		m.aiInlineBusy = false
@@ -184,7 +221,9 @@ func (m *Model) startInlineReview() {
 
 // handleInlineReview handles keys while the AI diff preview is shown.
 func (m *Model) handleInlineReview(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+	// gitKeyName keeps the y/n prompts layout-independent (н or т in Cyrillic
+	// stand for the physical Y and N keys).
+	switch gitKeyName(msg) {
 	case "y", "enter":
 		m.applyInlineProposal()
 		m.aiReviewMode = false
@@ -263,4 +302,23 @@ func (m *Model) applyInlineProposal() {
 	m.aiReviewRows = nil
 	m.aiReviewLeft = nil
 	m.aiReviewRight = nil
+}
+
+// surroundingContext returns up to 3 lines before startLine and up to 3 lines
+// after endLine for inline AI context. Empty strings mean no context available.
+func surroundingContext(b *buffer.Buffer, startLine, endLine int) (before, after string) {
+	const ctx = 3
+	var pre []string
+	for i := startLine - ctx; i < startLine; i++ {
+		if i >= 0 && i < b.LineCount() {
+			pre = append(pre, string(b.LineAt(i)))
+		}
+	}
+	var post []string
+	for i := endLine + 1; i <= endLine+ctx; i++ {
+		if i < b.LineCount() {
+			post = append(post, string(b.LineAt(i)))
+		}
+	}
+	return strings.Join(pre, "\n"), strings.Join(post, "\n")
 }

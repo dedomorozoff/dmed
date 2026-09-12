@@ -186,27 +186,85 @@ func (m Model) complExtraRows() int {
 	return n + 1
 }
 
-// complPanel renders the completion popup as a compact list.
+// complWidth is the natural popup width: the widest candidate (or the title),
+// capped so the window stays compact next to the cursor.
+func (m Model) complWidth() int {
+	w := lipgloss.Width(m.t("compl.title")) + 4
+	for _, it := range m.complItems {
+		if lw := lipgloss.Width(it) + 4; lw > w {
+			w = lw
+		}
+	}
+	if w > 44 {
+		w = 44
+	}
+	return w
+}
+
+// complPanel renders the completion popup as a compact list. The block is
+// left-aligned at the edit cursor and blank-padded to the full terminal width,
+// so the caller can splice it over the rendered rows as a floating window.
 func (m Model) complPanel() []string {
 	items := m.complItems
 	total := len(items)
 	if total > complVisible {
 		items = items[m.complOffset : m.complOffset+complVisible]
 	}
+	w := m.complWidth()
 	rows := make([]string, 0, len(items)+1)
-	rows = append(rows, statusHiStyle.Render(" "+m.t("compl.title")+" "))
+	rows = append(rows, statusHiStyle.Render(padTo(" "+m.t("compl.title")+" ", w)))
 	for i, it := range items {
-		label := " " + it + " "
-		pad := m.width - lipgloss.Width(label)
-		if pad < 0 {
-			pad = 0
-		}
-		label += strings.Repeat(" ", pad)
+		label := padTo(" "+it+" ", w)
 		if m.complOffset+i == m.complSel {
 			rows = append(rows, statusHiStyle.Render(label))
 		} else {
 			rows = append(rows, statusStyle.Render(label))
 		}
+	}
+
+	// Left-align the popup at the cursor column so it reads as a floating
+	// window under the text instead of a full-width banner.
+	cx, _ := m.cursorScreenPos()
+	if cx+w > m.width {
+		cx = m.width - w
+		if cx < 0 {
+			cx = 0
+		}
+	}
+	indent := strings.Repeat(" ", cx)
+	fill := m.width - (cx + w)
+	if fill < 0 {
+		fill = 0
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, indent+r+strings.Repeat(" ", fill))
+	}
+	return out
+}
+
+// overlayCompletion splices the popup into the assembled screen rows right
+// below the edit line, covering those rows for its height (no reflow), so the
+// rest of the buffer stays put while it is open.
+func (m Model) overlayCompletion(rows []string) []string {
+	if !m.complOpen || len(m.complItems) == 0 {
+		return rows
+	}
+	panel := m.complPanel()
+	if len(panel) == 0 {
+		return rows
+	}
+	_, sy := m.cursorScreenPos()
+	start := sy + 1
+	if start < 0 {
+		start = 0
+	}
+	for i, r := range panel {
+		idx := start + i
+		if idx >= len(rows) {
+			break
+		}
+		rows[idx] = r
 	}
 	return rows
 }

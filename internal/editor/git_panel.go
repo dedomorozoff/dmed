@@ -107,6 +107,19 @@ func gitKeyName(msg tea.KeyPressMsg) string {
 			return string(c)
 		}
 	}
+	// Special keys: match on Code directly because String() may return the
+	// raw control character (e.g. "\r") when Text is non-empty (Enter sends
+	// "\r" as text on most terminals).
+	switch msg.Code {
+	case tea.KeyEnter, tea.KeyKpEnter:
+		return "enter"
+	case tea.KeyEsc:
+		return "esc"
+	case tea.KeyBackspace:
+		return "backspace"
+	case tea.KeyTab:
+		return "tab"
+	}
 	return msg.String()
 }
 
@@ -125,10 +138,12 @@ func (m Model) t(key string, args ...any) string { return m.tr.T(key, args...) }
 
 func (m *Model) openGitPanel() {
 	m.gitOpen = true
+	m.gitFocus = true
 	m.gitMode = gitModeStatus
 	m.gitCommitIn = nil
 	m.gitDiffFocused = false
 	m.treeFocus = false
+	m.chatFocus = false
 	m.refreshGitFiles()
 	m.refreshGitDiffPreview()
 }
@@ -560,6 +575,7 @@ func (m *Model) handleGit(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "ctrl+b", "f9":
 		m.gitOpen = false
+		m.gitFocus = false
 		m.msg = ""
 		m.showTree()
 		return nil
@@ -590,6 +606,7 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 	switch keyL {
 	case "esc", "ctrl+g":
 		m.gitOpen = false
+		m.gitFocus = false
 		m.gitDiffFocused = false
 		m.msg = ""
 		return nil
@@ -599,6 +616,7 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		m.gitOpen = false
+		m.gitFocus = false
 		m.gitDiffFocused = false
 		m.msg = ""
 		return nil
@@ -751,7 +769,8 @@ func (m *Model) gitInit() {
 
 func (m *Model) handleGitCommit(msg tea.KeyPressMsg) tea.Cmd {
 	r := m.repoForCur()
-	switch msg.String() {
+	key := gitKeyName(msg)
+	switch key {
 	case "esc":
 		m.gitMode = gitModeStatus
 		m.gitCommitIn = nil
@@ -772,6 +791,7 @@ func (m *Model) handleGitCommit(msg tea.KeyPressMsg) tea.Cmd {
 			m.gitCommitIn = nil
 			m.gitMode = gitModeStatus
 			m.gitOpen = false
+			m.gitFocus = false
 			for i := range m.tabs {
 				m.tabs[i].diffText = ""
 			}

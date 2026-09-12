@@ -427,6 +427,214 @@ func (b *Buffer) DuplicateLine() {
 	b.hasSelection = false
 }
 
+// DuplicateLineUp duplicates the current line (or selected lines) above the
+// block, keeping the caret on the original lines.
+func (b *Buffer) DuplicateLineUp() {
+	b.beginChange()
+	b.pushUndo()
+	sl, _, el, _ := b.SelectionRange()
+	if !b.HasSelection() {
+		sl = b.line
+		el = b.line
+	}
+	dup := make([][]rune, el-sl+1)
+	for i := sl; i <= el; i++ {
+		dup[i-sl] = append([]rune(nil), b.d.lineAt(i)...)
+	}
+	b.d.root = b.d.insertLines(sl, dup)
+	b.line = el + 1
+	b.goalCol = b.col
+	b.hasSelection = false
+}
+
+// ToggleComment comments or uncomments the current line (or the selected
+// lines). With no selection a single line is toggled. prefix/suffix come from
+// the file type (e.g. "//"/"", "<!--"/"-->"): a block-style marker is applied
+// to each line individually, VSCode-style. With multiple cursors, each cursor
+// line is toggled independently.
+func (b *Buffer) ToggleComment(prefix, suffix string) {
+	if prefix == "" {
+		return
+	}
+	b.beginChange()
+	b.pushUndo()
+
+	mat := b.linesCopy()
+	if b.HasMultipleCursors() {
+		pts := b.Cursors()
+		altered := map[int][][]rune{} // line -> [old, new]
+		for i := range pts {
+			ln := pts[i].Line
+			oldNew, ok := altered[ln]
+			var old, newLine []rune
+			if !ok {
+				old = append([]rune(nil), mat[ln]...)
+				newLine = toggleLine(old, prefix, suffix)
+				altered[ln] = [][]rune{old, newLine}
+			} else {
+				old, newLine = oldNew[0], oldNew[1]
+			}
+			mat[ln] = newLine
+			pts[i].Col = commentedCol(old, newLine, pts[i].Col, prefix, suffix)
+			pts[i].From = pts[i].Col
+			pts[i].To = pts[i].Col
+		}
+		b.setLines(mat)
+		b.setFromPoints(pts)
+		return
+	}
+
+	sl, _, el, _ := b.SelectionRange()
+	if !b.HasSelection() {
+		sl = b.line
+		el = b.line
+	}
+	// Invert the block: comment unless every line is already commented.
+	allCommented := true
+	for i := sl; i <= el; i++ {
+		if !isLineCommented(mat[i], prefix, suffix) {
+			allCommented = false
+			break
+		}
+	}
+	comment := !allCommented
+	oldCaret := append([]rune(nil), mat[b.line]...)
+	for i := sl; i <= el; i++ {
+		if comment {
+			mat[i] = commentLine(mat[i], prefix, suffix)
+		} else {
+			mat[i] = uncommentLine(mat[i], prefix, suffix)
+		}
+	}
+	// Adjust the caret column for the line it sits on, using the pre-edit line.
+	b.col = commentedCol(oldCaret, mat[b.line], b.col, prefix, suffix)
+	b.hasSelection = false
+	b.setLines(mat)
+	b.goalCol = b.col
+}
+
+// toggleLine flips one line between commented and uncommented.
+func toggleLine(line []rune, prefix, suffix string) []rune {
+	if isLineCommented(line, prefix, suffix) {
+		return uncommentLine(line, prefix, suffix)
+	}
+	return commentLine(line, prefix, suffix)
+}
+
+// isLineCommented reports whether the line carries the comment prefix after
+// its leading whitespace.
+func isLineCommented(line []rune, prefix, suffix string) bool {
+	idx := leadingWS(line)
+	if !hasPrefixAt(line, idx, prefix) {
+		return false
+	}
+	return true
+}
+
+// commentLine inserts the comment prefix (and block suffix) on a line.
+func commentLine(line []rune, prefix, suffix string) []rune {
+	idx := leadingWS(line)
+	var out []rune
+	out = append(out, line[:idx]...)
+	out = append(out, []rune(prefix)...)
+	out = append(out, ' ')
+	out = append(out, line[idx:]...)
+	if suffix != "" {
+		out = append(out, ' ')
+		out = append(out, []rune(suffix)...)
+	}
+	return out
+}
+
+// uncommentLine strips the comment prefix (and block suffix) from a line.
+func uncommentLine(line []rune, prefix, suffix string) []rune {
+	idx := leadingWS(line)
+	if !hasPrefixAt(line, idx, prefix) {
+		return line
+	}
+	var out []rune
+	out = append(out, line[:idx]...)
+	rest := line[idx+len(prefix):]
+	if len(rest) > 0 && rest[0] == ' ' {
+		rest = rest[1:]
+	}
+	if suffix != "" {
+		t := len(rest)
+		if t >= len(suffix) && hasPrefixAt(rest, t-len(suffix), suffix) {
+			rest = rest[:t-len(suffix)]
+			if len(rest) > 0 && rest[len(rest)-1] == ' ' {
+				rest = rest[:len(rest)-1]
+			}
+		}
+	}
+	out = append(out, rest...)
+	return out
+}
+
+// commentedCol maps an old caret column to its position on a line after the
+// leading comment toggle (comment or uncomment). oldLine is the pre-edit line
+// content, newLine the toggled one.
+func commentedCol(oldLine, newLine []rune, oldCol int, prefix, suffix string) int {
+	idx := leadingWS(oldLine)
+	P := len(prefix) + 1
+	S := len(suffix) + 1
+	oldEnd := len(oldLine)
+	commented := hasPrefixAt(newLine, idx, prefix)
+
+	c := oldCol
+	if commented {
+		// Comment: prefix inserted at idx, block suffix appended at the end.
+		if c == oldEnd {
+			c += P
+			if suffix != "" {
+				c += S
+			}
+		} else if c > 0 && c >= idx {
+			c += P
+		}
+	} else {
+		// Uncomment: P chars removed at idx, block suffix removed at the end.
+		if c >= idx+P {
+			c -= P
+		} else if c > idx {
+			c = idx
+		}
+		if suffix != "" && c > len(newLine) {
+			c = len(newLine)
+		}
+	}
+	if c < 0 {
+		c = 0
+	}
+	if c > len(newLine) {
+		c = len(newLine)
+	}
+	return c
+}
+
+// leadingWS returns the index of the first non-space/tab rune in line.
+func leadingWS(line []rune) int {
+	i := 0
+	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+		i++
+	}
+	return i
+}
+
+// hasPrefixAt reports whether line contains the ASCII string p starting at
+// rune index idx.
+func hasPrefixAt(line []rune, idx int, p string) bool {
+	if idx < 0 || idx+len(p) > len(line) {
+		return false
+	}
+	for i := 0; i < len(p); i++ {
+		if line[idx+i] != rune(p[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 func (b *Buffer) MoveLeft() {
 	b.hasSelection = false
 	b.breakGroup()

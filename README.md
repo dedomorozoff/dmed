@@ -14,7 +14,8 @@ AI agents can read, propose, and apply changes directly to your codebase — but
 *   **Keyboard-First & Terminal-Native:** Fast, lightweight, and works seamlessly over SSH.
 *   **Human-in-the-Loop AI:** High-level autonomy for agents (Ollama, OpenAI, DeepSeek, etc.) with 100% human control via explicit diff reviews.
 *   **Zero-Dependency Git:** Native side-by-side diffs, gutter indicators, and staging directly from the editor without needing an external git binary.
-*   **All-in-One Dev Environment:** Built-in persistent terminal, LSP diagnostics, and smart fuzzy searching out of the box.
+*   **All-in-One Dev Environment:** Built-in persistent terminal, LSP diagnostics,
+    autocompletion, and a plugin store out of the box.
 
 
 ## Features
@@ -30,15 +31,30 @@ AI agents can read, propose, and apply changes directly to your codebase — but
 - Full undo/redo with typing-run grouping
 - Clipboard: copy (`Ctrl+C`), cut (`Ctrl+X`), paste (`Ctrl+V`)
 - Multi-selection with `Shift+Arrows`
+- Uppercase selection or whole buffer (`Ctrl+U`)
+- Rope-backed buffer: O(1) undo, cheap branching
 - Configurable via `.dmed.conf` (INI format, hot-reload on save)
 
 ### AI Integration
 
 - **Chat panel** (`Alt+A`) — streaming conversation with your code
 - **Inline rewrite** (`Alt+I`) — select text, describe change, review diff, accept/reject
-- Supports multiple providers:
-  - **Ollama** (local, free)
-  - **OpenAI-compatible** (OpenAI, DeepSeek, Groq, Together, vLLM, LM Studio)
+- **Zero-config start**: with a running Ollama the chat just works — the first
+  model reported by the server is picked automatically
+- Built-in provider presets (wizard cycles them with `←`/`→`):
+  **Ollama** (local, free), **OpenAI**, **DeepSeek**, **Groq**,
+  **LM Studio** (local), **vLLM** (local), or any OpenAI-compatible server
+- **First-time setup, three ways**:
+  - `dmed setup-ai` — interactive CLI wizard (provider → key → test → saved)
+  - In the editor: `Ctrl+P` → `AI: Preferences...` — pick a preset with
+    `←`/`→`, paste the API key, press `t` to test the connection, `Ctrl+S` to save
+  - Environment variables (highest priority, nothing written to disk):
+    `DMED_PROVIDER`, `DMED_API_KEY`, `DMED_MODEL`, `DMED_OLLAMA_URL`
+
+```sh
+# example: one-off run against DeepSeek without touching any config file
+DMED_PROVIDER=DeepSeek DMED_API_KEY=sk-... DMED_MODEL=deepseek-chat dmed
+```
 
 ### Change Tracking
 
@@ -52,7 +68,10 @@ AI agents can read, propose, and apply changes directly to your codebase — but
 ### Developer Tools
 
 - Built-in **terminal** (`Alt+T`) — persistent shell session at the bottom
-- **LSP client** — diagnostics, go-to-definition, go-to-references
+- **LSP client** — diagnostics (rendered in the gutter), completion, go-to-definition; hints the install command when a language server is missing
+- **Autocompletion** (`Ctrl+Space`, auto-trigger) — buffer words + LSP sources for Go, Python, TS/JS, Rust, C/C++, Lua, Ruby, PHP, Zig, JSON, YAML, CSS, HTML
+- **Lua plugins** — keybindings, palette commands and events; hot-reload on edit, plus a built-in store (`Plugins: Install...`) with embedded and GitHub-hosted plugins
+- **Localization** — English/Russian UI, switchable from the palette
 - **Sessions** — auto-save/restore open files across restarts
 - **Command palette** (`Ctrl+P` / `F2`) — fuzzy search all commands
 
@@ -116,6 +135,8 @@ dmed a.txt b.txt               # multiple files → tabs
 | `Alt+D` | Add multi-cursor at next word occurrence |
 | `Alt+Click` | Add cursor at click position |
 | `Esc` | Exit multi-cursor mode |
+| `Ctrl+Space` | Autocomplete (word + LSP) |
+| `Ctrl+U` | Uppercase selection / buffer |
 | `Enter` / `Backspace` / `Delete` | Standard editing |
 
 ### Files & Tabs
@@ -147,7 +168,7 @@ dmed a.txt b.txt               # multiple files → tabs
 |------|--------|
 | `Alt+A` | Toggle AI chat panel |
 | `Alt+I` | Inline rewrite (select text first) |
-| `Ctrl+U` | Clear chat history |
+| `Ctrl+U` | Clear chat history (in chat panel) |
 
 ### Search
 
@@ -185,16 +206,28 @@ line_numbers = true
 skipped_dirs = .git,node_modules,vendor
 
 [ai]
-provider = ollama            # ollama | openai
-model =                      # e.g. gpt-4, qwen2.5-coder:7b
-ollama_url = http://localhost:11434
+provider = Ollama (local)   # wizard preset: Ollama (local) | OpenAI | DeepSeek | Groq | LM Studio (local) | vLLM (local) | Custom
+                            # legacy values "ollama"/"openai" still work
+model =                      # empty = first model reported by the server
+ollama_url = http://localhost:11434   # base URL, no /v1 suffix (it is appended automatically)
 api_key =                    # for OpenAI-compatible providers
-context_max = 6000           # max lines sent as file context
+context_max = 6000           # max runes sent as file context
+temperature = 0              # generation temperature in tenths (7 => 0.7); 0 = provider default
+num_ctx = 0                  # context window in tokens for Ollama (num_ctx); 0 = default
+num_predict = 0              # max output tokens; 0 = provider default
+tool_rounds = 0              # chat tool-calling loop cap; 0 = built-in (6)
+allow_run = always           # always | never — let the model run shell commands (RUN tool)
+restrict_to_root = false     # true bounds READ/EDIT/REPLACE paths to the project root
 system_prompt = You are a helpful coding assistant...
 
 [ui]
 tree_width = 25
 chat_width_pct = 40          # percentage of screen width
+
+[plugins]                     # remote source for the plugin store
+repo = dedomorozoff/dmed     # "owner/repo"
+dir = plugins                # directory holding .lua plugins
+branch = main
 ```
 
 ## Documentation
@@ -208,7 +241,11 @@ chat_width_pct = 40          # percentage of screen width
 
 ```
 internal/buffer/     pure text buffer + undo/redo (no TUI deps)
+internal/rope/       persistent line-rope backing the buffer (O(1) undo)
 internal/editor/     Bubbletea model: keys, tabs, splits, rendering
+internal/plugin/     Lua plugin framework (gopher-lua)
+internal/bundled/    embedded official plugins for the plugin store
+internal/i18n/       en/ru localization catalogs
 internal/ai/         provider interface: Ollama + OpenAI-compatible
 internal/config/     INI parser, hot-reload, defaults
 internal/syntax/     Chroma-based highlighting

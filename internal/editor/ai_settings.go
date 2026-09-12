@@ -1,26 +1,51 @@
 package editor
 
 import (
+	"context"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"dmed/internal/ai"
 	"dmed/internal/config"
 )
 
 // aiSettingsFields describes the wizard rows. The value is edited inline for
-// text rows; the Provider row is a two-way choice cycled with ←/→.
+// text rows; the Provider row is a choice cycled with ←/→ over the built-in
+// presets (see config.AIPresets), and the Test row probes the provider.
 var aiSettingsFields = []struct {
 	name string
-	kind string // "choice" | "text"
+	kind string // "choice" | "text" | "action"
 }{
 	{name: "Provider", kind: "choice"},
 	{name: "Model", kind: "text"},
-	{name: "Ollama URL", kind: "text"},
+	{name: "Base URL", kind: "text"},
 	{name: "API Key", kind: "text"},
 	{name: "Context Max", kind: "text"},
+	{name: "Temperature", kind: "text"},
+	{name: "Num Ctx", kind: "text"},
+	{name: "Num Predict", kind: "text"},
+	{name: "Tool Rounds", kind: "text"},
+	{name: "Allow Run", kind: "choice"},
+	{name: "Restrict Root", kind: "choice"},
+	{name: "Test", kind: "action"},
+}
+
+// aiTestState tracks the background connection probe started from the Test row.
+type aiTestState struct {
+	running bool
+	ok      bool
+	status  string // one-line result shown on the Test row
+}
+
+// AITestResultMsg carries the outcome of a wizard connection test started by
+// testAIConnection. Fields are plain values, so handling stays side-effect free.
+type AITestResultMsg struct {
+	OK     bool
+	Status string
 }
 
 func (m *Model) startAISettings() {
@@ -28,7 +53,44 @@ func (m *Model) startAISettings() {
 	m.aiCfgField = 0
 	m.aiCfgEdit = false
 	m.aiCfgIn = nil
+	m.aiCfgTest = aiTestState{}
+	m.syncProviderKind()
 	m.msg = ""
+}
+
+// syncProviderKind maps the stored provider label onto the matching preset's
+// display name. Unknown labels (e.g. a hand-edited config with provider =
+// ollama) fall back to the first preset so cycling and saving keep working.
+func (m *Model) syncProviderKind() {
+	m.cfg.AI.Provider = config.ResolvePreset(m.cfg.AI.Provider).Name
+}
+
+// cycleAIProvider moves to the previous/next built-in preset and applies its
+// defaults: base URL always, model only when the provider exposes a stable
+// suggestion and the user has not pinned one. URL is left untouched for Custom
+// so users with a self-hosted endpoint keep their value.
+func (m *Model) cycleAIProvider(d int) {
+	presets := config.AIPresets()
+	cur := config.ResolvePreset(m.cfg.AI.Provider)
+	idx := 0
+	for i, p := range presets {
+		if p.Name == cur.Name {
+			idx = i
+			break
+		}
+	}
+	idx = (idx + d + len(presets)) % len(presets)
+	p := presets[idx]
+	m.cfg.AI.Provider = p.Name
+	if p.BaseURL != "" {
+		m.cfg.AI.OllamaURL = p.BaseURL
+	}
+	if p.Model != "" && m.cfg.AI.Model == "" {
+		m.cfg.AI.Model = p.Model
+	}
+	if p.Name != cur.Name { // switching providers invalidates a previous probe
+		m.aiCfgTest = aiTestState{}
+	}
 }
 
 func (m *Model) aiFieldValue(i int) string {
@@ -84,13 +146,9 @@ func (m *Model) handleAISettings(msg tea.KeyPressMsg) tea.Cmd {
 		m.aiCfgOpen = false
 		m.aiCfgIn = nil
 	case "j", "down":
-		if m.aiCfgField < len(aiSettingsFields)-1 {
-			m.aiCfgField++
-		}
+		m.aiCfgField = (m.aiCfgField + 1) % len(aiSettingsFields)
 	case "k", "up":
-		if m.aiCfgField > 0 {
-			m.aiCfgField--
-		}
+		m.aiCfgField = (m.aiCfgField - 1 + len(aiSettingsFields)) % len(aiSettingsFields)
 	case "left":
 		if m.aiCfgField == 0 {
 			m.cycleAIProvider(-1)
@@ -99,11 +157,13 @@ func (m *Model) handleAISettings(msg tea.KeyPressMsg) tea.Cmd {
 		if m.aiCfgField == 0 {
 			m.cycleAIProvider(1)
 		}
+	case "t", "T":
+		return m.testAIConnection()
 	case "enter":
 		if m.aiCfgField == 0 {
-			if m.aiCfgField < len(aiSettingsFields)-1 {
-				m.aiCfgField++
-			}
+			m.cycleAIProvider(1)
+		} else if m.aiCfgField == len(aiSettingsFields)-1 {
+			return m.testAIConnection()
 		} else {
 			m.aiCfgEdit = true
 			m.aiCfgIn = []rune(m.rawAIFieldValue(m.aiCfgField))
@@ -114,12 +174,56 @@ func (m *Model) handleAISettings(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-func (m *Model) cycleAIProvider(d int) {
-	if m.cfg.AI.Provider == "openai" {
-		m.cfg.AI.Provider = "ollama"
-	} else {
-		m.cfg.AI.Provider = "openai"
+// testAIConnection launches a background probe of the current provider
+// settings. The result lands as AITestResultMsg; nothing is persisted here.
+func (m *Model) testAIConnection() tea.Cmd {
+	if m.aiCfgTest.running {
+		return nil
 	}
+	prov := ai.NewProvider(ai.Config{
+		Type:   ai.ProviderType(m.currentProviderKind()),
+		URL:    m.cfg.AI.OllamaURL,
+		Model:  m.cfg.AI.Model,
+		APIKey: m.cfg.AI.APIKey,
+	})
+	m.aiCfgTest = aiTestState{running: true, status: "testing..."}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		models, err := prov.Models(ctx)
+		if err != nil {
+			return AITestResultMsg{OK: false, Status: strings.TrimSpace(err.Error())}
+		}
+		return AITestResultMsg{OK: true, Status: strconv.Itoa(len(models)) + " models"}
+	}
+}
+
+// currentProviderKind returns the wire protocol for the provider label
+// currently selected in the wizard ("ollama" | "openai").
+func (m *Model) currentProviderKind() string {
+	return config.ResolvePreset(m.cfg.AI.Provider).Kind
+}
+
+// handleAITestResult records the outcome of the connection probe and, on
+// failure, replaces the terse transport error with a hint a beginner can act on.
+func (m *Model) handleAITestResult(res AITestResultMsg) {
+	status, ok := res.Status, res.OK
+	if !ok {
+		l := strings.ToLower(status)
+		switch {
+		case strings.Contains(l, "refused"):
+			if m.currentProviderKind() == "ollama" {
+				status = "refused — start ollama (or run: ollama serve)"
+			} else {
+				status = "refused — is the server running?"
+			}
+		case strings.Contains(l, "401") || strings.Contains(l, "unauthorized") || strings.Contains(l, "invalid"):
+			status = "auth failed — check API Key"
+		case strings.Contains(l, "no such host") || strings.Contains(l, "dial tcp") || strings.Contains(l, "timeout") || strings.Contains(l, "context deadline"):
+			status = "unreachable — check Base URL"
+		}
+	}
+	m.aiCfgTest = aiTestState{ok: ok, status: status}
 }
 
 func (m *Model) commitAIField() {
@@ -146,14 +250,21 @@ func (m *Model) aiConfigPath() string {
 }
 
 func (m *Model) saveAISettings() {
+	m.syncProviderKind()
 	path := m.aiConfigPath()
 	if _, err := config.WriteAI(path, m.cfg.AI); err != nil {
 		m.msg = "AI settings write failed: " + err.Error()
 		return
 	}
 	// Reload so defaults/env overrides merge with the persisted values and the
-	// live provider config reflects the change immediately.
+	// live provider config reflects the change immediately. The wizard's label
+	// is preserved, so cycling inside an open wizard keeps pointing at the same
+	// preset after the reload.
+	was := m.cfg.AI.Provider
 	m.cfg = config.Load(m.root)
+	if m.cfg.AI.Provider != was {
+		m.cfg.AI.Provider = was
+	}
 	m.msg = "AI settings saved"
 }
 
@@ -166,13 +277,32 @@ func (m Model) aiSettingsPanel(h int) []string {
 			marker = ">"
 		}
 		if i == 0 {
-			v := m.cfg.AI.Provider
-			rows = append(rows, " "+statusHiStyle.Render(marker)+" "+padTo(f.name, 12)+" "+statusStyle.Render(v)+"   "+hintStyle.Render(m.t("ai.choice")))
+			rows = append(rows, " "+statusHiStyle.Render(marker)+" "+padTo(f.name, 12)+" "+statusStyle.Render(m.cfg.AI.Provider)+"   "+hintStyle.Render(m.t("ai.choice")))
+			continue
+		}
+		if f.kind == "action" {
+			rows = append(rows, " "+statusHiStyle.Render(marker)+" "+padTo(f.name, 12)+" "+m.testStatusLine())
 			continue
 		}
 		rows = append(rows, " "+marker+" "+padTo(f.name, 12)+" "+statusStyle.Render(m.aiFieldValue(i)))
 	}
 	return rows
+}
+
+// testStatusLine renders the outcome of the last connection probe: green
+// check with the model count, red cross with the human hint, or a neutral
+// "not tested yet" placeholder.
+func (m Model) testStatusLine() string {
+	switch {
+	case m.aiCfgTest.running:
+		return hintStyle.Render("testing...")
+	case m.aiCfgTest.ok:
+		return okTestStyle.Render("✓ connected · " + m.aiCfgTest.status)
+	case m.aiCfgTest.status != "":
+		return errTestStyle.Render("✗ " + m.aiCfgTest.status)
+	default:
+		return hintStyle.Render(m.t("ai.test_hint"))
+	}
 }
 
 func (m Model) aiCfgEditLine() string {

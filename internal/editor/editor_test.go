@@ -64,6 +64,91 @@ func TestTabsOpenSwitchClose(t *testing.T) {
 	}
 }
 
+func TestGotoLine(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "f.txt", "l1\nl2\nl3\nl4\nl5\n")
+
+	m := New(f)
+	m = press(m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+	if !m.gotoOpen {
+		t.Fatal("ctrl+l must open goto prompt")
+	}
+	if len(m.gotoIn) != 0 {
+		t.Fatalf("goto input should start empty, got %q", string(m.gotoIn))
+	}
+	m = press(m, tea.KeyPressMsg{Text: "3"})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.gotoOpen {
+		t.Fatal("esc must close goto without moving")
+	}
+	if m.cur().buf.CurLine() != 0 {
+		t.Fatalf("cursor must stay on line 0 after esc, got %d", m.cur().buf.CurLine())
+	}
+
+	m = press(m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+	m = press(m, tea.KeyPressMsg{Text: "3"})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.gotoOpen {
+		t.Fatal("enter must close goto")
+	}
+	if m.cur().buf.CurLine() != 2 {
+		t.Fatalf("goto 3: cursor on line %d", m.cur().buf.CurLine())
+	}
+	if m.cur().buf.Col() != 0 {
+		t.Fatalf("goto: cursor col = %d", m.cur().buf.Col())
+	}
+}
+
+func TestGotoLineRelative(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "f.txt", "l1\nl2\nl3\nl4\nl5\nl6\n")
+	m := New(f)
+
+	m = press(m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+	m = press(m, tea.KeyPressMsg{Text: "+2"})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.cur().buf.CurLine() != 2 {
+		t.Fatalf("goto +2 from 0: cursor on line %d", m.cur().buf.CurLine())
+	}
+
+	m = press(m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+	m = press(m, tea.KeyPressMsg{Text: "-2"})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.cur().buf.CurLine() != 0 {
+		t.Fatalf("goto -2 from 2: cursor on line %d", m.cur().buf.CurLine())
+	}
+}
+
+func TestGotoLineClamp(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "f.txt", "a\nb\nc\n")
+	m := New(f)
+
+	m = press(m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+	m = press(m, tea.KeyPressMsg{Text: "100"})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.cur().buf.CurLine() != 2 {
+		t.Fatalf("goto 100 should clamp to last line, got %d", m.cur().buf.CurLine())
+	}
+}
+
+func TestGotoPaletteCommand(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "f.txt", "one\n")
+	m := New(f)
+	m.startPalette()
+	m.paletteQ = []rune("go to line")
+	sel := m.filterPalette()
+	if len(sel) != 1 {
+		t.Fatalf("expected 1 palette hit, got %d", len(sel))
+	}
+	c := sel[0]
+	c.action(&m)
+	if !m.gotoOpen {
+		t.Fatal("Go to Line palette command must open the goto prompt")
+	}
+}
+
 func TestPromptOpensAndCancels(t *testing.T) {
 	dir := t.TempDir()
 	f1 := writeTemp(t, dir, "one.txt", "one\n")
@@ -213,6 +298,81 @@ func TestQuitDirtyCancel(t *testing.T) {
 	}
 	if !m.cur().buf.Dirty() {
 		t.Fatal("buffer must remain dirty")
+	}
+}
+
+func TestQuitDirtyConfirmCyrillic(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "a.txt", "alpha\n")
+	m := New(f1)
+	m.width, m.height = 80, 24
+	typeStr(m, "X")
+	m = press(m, tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl})
+	if !m.quitConfirm {
+		t.Fatal("dirty ctrl+q must open quit confirm")
+	}
+
+	// Physical Y key in the Russian layout types «н» — it must confirm (yes).
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "н"})
+	nm := next.(Model)
+	if cmd == nil || nm.quitConfirm {
+		t.Fatalf("«н» (physical Y) must confirm save+quit, got cmd=%v quitConfirm=%v", cmd, nm.quitConfirm)
+	}
+
+	// «т» (physical N key in Russian layout) must be "no": quit without saving.
+	m = New(f1)
+	m.width, m.height = 80, 24
+	typeStr(m, "X")
+	m = press(m, tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "т"})
+	nm = next.(Model)
+	if nm.quitConfirm || cmd == nil {
+		t.Fatalf("«т» (physical N) must say no, got quitConfirm=%v cmd=%v", nm.quitConfirm, cmd)
+	}
+	if !nm.cur().buf.Dirty() {
+		t.Fatal("denying must leave the buffer unsaved")
+	}
+
+	// BaseCode is the layout-independent physical key (Windows Console API).
+	// The real console delivers all three fields together; a bare BaseCode
+	// message would be mangled by handleKey's control-byte normalization.
+	m = New(f1)
+	m.width, m.height = 80, 24
+	typeStr(m, "X")
+	m = press(m, tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl})
+	next, cmd = m.Update(tea.KeyPressMsg{BaseCode: 'y', Code: 'н', Text: "н"})
+	nm = next.(Model)
+	if cmd == nil || nm.quitConfirm {
+		t.Fatalf("BaseCode 'y' must confirm save+quit, got cmd=%v quitConfirm=%v", cmd, nm.quitConfirm)
+	}
+}
+
+func TestPasteIntoBuffer(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "a.txt", "alpha\n")
+	m := New(f1)
+	m.width, m.height = 80, 24
+
+	next, _ := m.Update(tea.PasteMsg{Content: "INSERTED"})
+	m = next.(Model)
+	if m.cur().buf.Text() != "INSERTEDalpha\n" {
+		t.Fatalf("buffer = %q, want pasted text before existing content", m.cur().buf.Text())
+	}
+}
+
+func TestPasteIntoChatInput(t *testing.T) {
+	m := New()
+	before := m.cur().buf.Text()
+	m.chatOpen = true
+	m.chatFocus = true
+
+	next, _ := m.Update(tea.PasteMsg{Content: "explain this"})
+	m = next.(Model)
+	if string(m.chatIn) != "explain this" {
+		t.Fatalf("chat input = %q, want pasted text", string(m.chatIn))
+	}
+	if m.cur().buf.Text() != before {
+		t.Fatalf("paste must not leak into the buffer, changed %q -> %q", before, m.cur().buf.Text())
 	}
 }
 
@@ -418,14 +578,14 @@ func TestMouseScroll(t *testing.T) {
 		t.Fatalf("initial scroll offset must be 0, got %d", p.offsetY)
 	}
 
-	// Simulate mouse wheel down.
-	_ = m.handleMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	// Simulate mouse wheel down over the buffer area.
+	_ = m.handleMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 40, Y: 10})
 	if p.offsetY != 1 {
 		t.Fatalf("after wheel down: offset=%d, want 1", p.offsetY)
 	}
 
 	// Simulate mouse wheel up.
-	_ = m.handleMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	_ = m.handleMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelUp, X: 40, Y: 10})
 	if p.offsetY != 0 {
 		t.Fatalf("after wheel up: offset=%d, want 0", p.offsetY)
 	}
@@ -450,5 +610,140 @@ func TestMouseClick(t *testing.T) {
 	// Column should be 2 (at 'l' in "hello").
 	if m.cur().buf.Col() != 2 {
 		t.Fatalf("col = %d, want 2", m.cur().buf.Col())
+	}
+}
+
+func TestToggleCommentKey(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "main.go", "func main() {}\n// x\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	m = press(m, tea.KeyPressMsg{Code: '/', Mod: tea.ModCtrl})
+	if m.cur().buf.Text() != "// func main() {}\n// x\n" {
+		t.Fatalf("ctrl+/ comment: got %q", m.cur().buf.Text())
+	}
+	if m.cur().buf.CurLine() != 1 {
+		t.Fatalf("ctrl+/ cursor line = %d, want 1 (jump to next line)", m.cur().buf.CurLine())
+	}
+	m = press(m, tea.KeyPressMsg{Code: '/', Mod: tea.ModCtrl})
+	if m.cur().buf.Text() != "// func main() {}\nx\n" {
+		t.Fatalf("ctrl+/ uncomment: got %q", m.cur().buf.Text())
+	}
+}
+
+func TestToggleCommentKeyUnderscore(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "main.go", "func main() {}\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	// Some terminals deliver Ctrl+/ as 0x1f, decoded as ctrl+_.
+	m = press(m, tea.KeyPressMsg{Code: '_', Mod: tea.ModCtrl})
+	if m.cur().buf.Text() != "// func main() {}\n" {
+		t.Fatalf("ctrl+_ comment: got %q", m.cur().buf.Text())
+	}
+}
+
+func TestToggleCommentNoSyntax(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "f.txt", "plain\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	m = press(m, tea.KeyPressMsg{Code: '/', Mod: tea.ModCtrl})
+	if m.cur().buf.Text() != "plain\n" {
+		t.Fatalf("text changed for unknown type: %q", m.cur().buf.Text())
+	}
+	if m.msg != "no comment syntax for this file type" {
+		t.Fatalf("msg = %q", m.msg)
+	}
+}
+
+func TestWordWrapSegments(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "f.txt", "hello world foo bar baz\n")
+	m := New(f)
+	m.width, m.height = 26, 24
+
+	tt := m.cur()
+	contentW := m.paneContentWidth(m.activePane)
+	segs := tt.tabWrap(contentW, m.cfg.Editor.TabWidth)
+	if len(segs) < 2 {
+		t.Fatalf("expected >=2 segments for contentW=%d, got %d: %+v", contentW, len(segs), segs)
+	}
+	if segs[0].line != 0 || segs[0].expStart != 0 {
+		t.Fatalf("first segment: %+v", segs[0])
+	}
+	if segs[1].line != 0 || segs[1].expStart < segs[0].expEnd {
+		t.Fatalf("second segment should follow first: %+v", segs[1])
+	}
+}
+
+func TestWordWrapSegRowForCol(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "f.txt", "hello world foo bar baz\n")
+	m := New(f)
+	m.width, m.height = 26, 24
+
+	tt := m.cur()
+	contentW := m.paneContentWidth(m.activePane)
+	segs := tt.tabWrap(contentW, m.cfg.Editor.TabWidth)
+	if len(segs) < 2 {
+		t.Skipf("contentW=%d didn't wrap", contentW)
+	}
+
+	// Col 0 → first segment, row 0.
+	row, expStart := segRowForCol(segs, 0, 0)
+	if row != 0 || expStart != 0 {
+		t.Fatalf("col 0: row=%d expStart=%d", row, expStart)
+	}
+
+	// Col 20 → first char of second segment.
+	row, expStart = segRowForCol(segs, 0, segs[1].expStart)
+	if row != 1 || expStart != segs[1].expStart {
+		t.Fatalf("col %d: row=%d expStart=%d", segs[1].expStart, row, expStart)
+	}
+
+	// Col 22 (last char 'z') → still second segment.
+	row, _ = segRowForCol(segs, 0, 22)
+	if row != 1 {
+		t.Fatalf("col 22: row=%d, want 1", row)
+	}
+}
+
+func TestToggleWordWrap(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "f.txt", "hello world\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	m = press(m, tea.KeyPressMsg{Code: 'z', Mod: tea.ModAlt})
+	if !m.panes[0].wordWrap {
+		t.Fatal("alt+z should enable word wrap")
+	}
+	if m.msg != "word wrap on" {
+		t.Fatalf("msg after enable = %q", m.msg)
+	}
+
+	m = press(m, tea.KeyPressMsg{Code: 'z', Mod: tea.ModAlt})
+	if m.panes[0].wordWrap {
+		t.Fatal("alt+z again should disable word wrap")
+	}
+	if m.msg != "word wrap off" {
+		t.Fatalf("msg after disable = %q", m.msg)
+	}
+}
+
+func TestToggleWordWrapResetsOffsetX(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "f.txt", "hello world\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+	m.panes[0].offsetX = 5
+
+	m = press(m, tea.KeyPressMsg{Code: 'z', Mod: tea.ModAlt})
+	if m.panes[0].offsetX != 0 {
+		t.Fatalf("offsetX after wrap toggle: %d, want 0", m.panes[0].offsetX)
 	}
 }

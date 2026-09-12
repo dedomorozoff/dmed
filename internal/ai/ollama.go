@@ -47,36 +47,60 @@ func (p *ollamaProvider) Models(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
-func (p *ollamaProvider) ChatStream(ctx context.Context, msgs []Message, onDelta func(string)) error {
-	payload, err := json.Marshal(map[string]any{
+func (p *ollamaProvider) ChatStream(ctx context.Context, req Request, h Handler) error {
+	body := map[string]any{
 		"model":    p.model,
-		"messages": msgs,
+		"messages": ollamaMessages(req.Messages),
 		"stream":   true,
-	})
+	}
+	if len(req.Tools) > 0 {
+		body["tools"] = ollamaTools(req.Tools)
+	}
+	if req.Options.Temperature > 0 {
+		body["temperature"] = float32(req.Options.Temperature) / 10
+	}
+	if req.Options.NumCtx > 0 || req.Options.NumPredict > 0 {
+		opt := make(map[string]any)
+		if req.Options.NumCtx > 0 {
+			opt["num_ctx"] = req.Options.NumCtx
+		}
+		if req.Options.NumPredict > 0 {
+			opt["num_predict"] = req.Options.NumPredict
+		}
+		body["options"] = opt
+	}
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url+"/api/chat", bytes.NewReader(payload))
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url+"/api/chat", bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := p.http.Do(req)
+	r.Header.Set("Content-Type", "application/json")
+	resp, err := p.http.Do(r)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("ollama %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("ollama %s: %s", resp.Status, strings.TrimSpace(string(b)))
 	}
 
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	toolFired := false
 	for sc.Scan() {
 		var chunk struct {
 			Message struct {
-				Content string `json:"content"`
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					Function struct {
+						Name      string          `json:"name"`
+						Arguments json.RawMessage `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
 			} `json:"message"`
 			Error string `json:"error"`
 			Done  bool   `json:"done"`
@@ -87,12 +111,116 @@ func (p *ollamaProvider) ChatStream(ctx context.Context, msgs []Message, onDelta
 		if chunk.Error != "" {
 			return fmt.Errorf("ollama: %s", chunk.Error)
 		}
-		if chunk.Message.Content != "" && onDelta != nil {
-			onDelta(chunk.Message.Content)
+		if chunk.Message.Content != "" && h.Delta != nil {
+			h.Delta(chunk.Message.Content)
+		}
+		// Tool calls usually arrive in their own chunk before the done marker,
+		// so collect them on any chunk. Some providers deliver them together
+		// with done instead; fire at most once per response.
+		if len(chunk.Message.ToolCalls) > 0 && h.ToolCalls != nil && !toolFired {
+			toolFired = true
+			calls := make([]ToolCall, 0, len(chunk.Message.ToolCalls))
+			for i, tc := range chunk.Message.ToolCalls {
+				calls = append(calls, ToolCall{
+					ID:   fmt.Sprintf("call_%d", i),
+					Name: tc.Function.Name,
+					Args: ollamaArgsString(tc.Function.Arguments),
+				})
+			}
+			h.ToolCalls(calls)
 		}
 		if chunk.Done {
 			return nil
 		}
 	}
 	return sc.Err()
+}
+
+// ollamaArgsString normalizes tool-call arguments: Ollama sends them as a JSON
+// object, but some models emit a JSON-encoded string.
+func ollamaArgsString(raw json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return "{}"
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			return s
+		}
+	}
+	return trimmed
+}
+
+// ollamaArgsRaw turns a stored tool-call argument string back into a raw JSON
+// object for the request payload: Ollama rejects requests where "arguments"
+// is a JSON-encoded string instead of an object (HTTP 400).
+func ollamaArgsRaw(args string) json.RawMessage {
+	trimmed := strings.TrimSpace(args)
+	if trimmed == "" {
+		return json.RawMessage("{}")
+	}
+	if trimmed[0] == '"' { // doubly-encoded string
+		var s string
+		if json.Unmarshal([]byte(trimmed), &s) == nil && strings.TrimSpace(s) != "" {
+			trimmed = s
+		}
+	}
+	if trimmed[0] != '{' && trimmed[0] != '[' {
+		// Plain text arguments: wrap into an object so the payload stays valid.
+		b, _ := json.Marshal(map[string]string{"input": trimmed})
+		return b
+	}
+	var v any
+	if json.Unmarshal([]byte(trimmed), &v) != nil {
+		return json.RawMessage("{}")
+	}
+	return json.RawMessage(trimmed)
+}
+
+// ollamaMessages maps ai.Message to the Ollama /api/chat wire format. Assistant
+// tool-call messages carry tool_calls; role "tool" messages use tool_name.
+func ollamaMessages(msgs []Message) []map[string]any {
+	out := make([]map[string]any, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Role == "tool" {
+			out = append(out, map[string]any{
+				"role":      "tool",
+				"content":   m.Content,
+				"tool_name": m.ToolName,
+			})
+			continue
+		}
+		mm := map[string]any{"role": m.Role, "content": m.Content}
+		if len(m.ToolCalls) > 0 {
+			tcs := make([]map[string]any, 0, len(m.ToolCalls))
+			for _, tc := range m.ToolCalls {
+				tcs = append(tcs, map[string]any{
+					"function": map[string]any{
+						"name":      tc.Name,
+						"arguments": ollamaArgsRaw(tc.Args),
+					},
+				})
+			}
+			mm["tool_calls"] = tcs
+		}
+		out = append(out, mm)
+	}
+	return out
+}
+
+// ollamaTools maps ToolDef to the Ollama tools array format.
+func ollamaTools(tools []ToolDef) []map[string]any {
+	out := make([]map[string]any, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        t.Name,
+				"description": t.Description,
+				"parameters":  t.Parameters,
+			},
+		})
+	}
+	return out
 }

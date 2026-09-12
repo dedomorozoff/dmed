@@ -7,7 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
@@ -35,6 +38,19 @@ type tab struct {
 	diffText     string
 	lineEnding   string // "lf" or "crlf"
 	encoding     string // "utf-8", "utf-16le", "utf-16be", "latin-1"
+	wrapSegs     []wrapSeg
+	wrapW        int
+	wrapTabW     int
+	wrapText     string
+}
+
+// wrapSeg describes one screen row of a wrapped (or plain) buffer line: the
+// line number and the tab-expanded column range it covers. In non-wrap mode
+// every buffer line yields exactly one segment spanning the whole line.
+type wrapSeg struct {
+	line     int
+	expStart int
+	expEnd   int
 }
 
 func (t *tab) name(base string) string {
@@ -116,6 +132,100 @@ func (t *tab) getSyntaxLines() []syntax.HighlightedLine {
 	return t.syntaxCached
 }
 
+// tabWrap returns the wrap segments for the tab at the given content width:
+// one segment per screen row. In non-wrap mode this is one full-line segment
+// per buffer line; callers only enable segmentation when the pane wraps.
+// Results are cached and invalidated automatically when the text, content
+// width, or tab width changes.
+func (t *tab) tabWrap(contentW, tabW int) []wrapSeg {
+	text := t.buf.Text()
+	if t.wrapSegs != nil && t.wrapW == contentW && t.wrapTabW == tabW && t.wrapText == text {
+		return t.wrapSegs
+	}
+	var segs []wrapSeg
+	for ln := 0; ln < t.buf.LineCount(); ln++ {
+		line := t.buf.LineAt(ln)
+		var exp []rune
+		for _, r := range line {
+			if r == '\t' {
+				for k := 0; k < tabW; k++ {
+					exp = append(exp, ' ')
+				}
+			} else {
+				exp = append(exp, r)
+			}
+		}
+		segs = append(segs, wrapLine(ln, exp, contentW)...)
+	}
+	t.wrapSegs = segs
+	t.wrapW = contentW
+	t.wrapTabW = tabW
+	t.wrapText = text
+	return segs
+}
+
+// wrapLine splits one tab-expanded line into width-sized segments, breaking at
+// word boundaries when possible.
+func wrapLine(ln int, exp []rune, w int) []wrapSeg {
+	if w < 1 {
+		w = 1
+	}
+	if len(exp) <= w {
+		return []wrapSeg{{line: ln, expStart: 0, expEnd: len(exp)}}
+	}
+	var segs []wrapSeg
+	start := 0
+	for start < len(exp) {
+		end := start + w
+		if end > len(exp) {
+			end = len(exp)
+		}
+		if end < len(exp) {
+			// Prefer breaking right after the last space inside the window.
+			brk := -1
+			for i := end - 1; i > start; i-- {
+				if exp[i] == ' ' {
+					brk = i + 1
+					break
+				}
+			}
+			if brk > start {
+				end = brk
+			}
+		}
+		if end <= start {
+			end = start + 1
+			if end > len(exp) {
+				end = len(exp)
+			}
+		}
+		segs = append(segs, wrapSeg{line: ln, expStart: start, expEnd: end})
+		if end == len(exp) {
+			break
+		}
+		start = end
+	}
+	return segs
+}
+
+// segRowForCol finds the screen row (index into tabWrap's result) that shows
+// the given tab-expanded column of a buffer line, returning its segment start.
+func segRowForCol(segs []wrapSeg, line, expCol int) (row, expStart int) {
+	for i := range segs {
+		s := segs[i]
+		if s.line == line && expCol >= s.expStart && expCol < s.expEnd {
+			return i, s.expStart
+		}
+	}
+	// Fall back to the last segment of the line (column past end of line).
+	for i := len(segs) - 1; i >= 0; i-- {
+		if segs[i].line == line {
+			return i, segs[i].expStart
+		}
+	}
+	return 0, 0
+}
+
 func (t *tab) getDiff(repo *vcs.Repo) vcs.FileDiff {
 	if t.path == "" {
 		return vcs.FileDiff{}
@@ -160,6 +270,8 @@ type Model struct {
 	promptSaveIn    []rune
 	promptNewFile   bool
 	promptNewFolder bool
+	promptRename    bool
+	promptRenameRel string
 
 	finderOpen  bool
 	finderQ     []rune
@@ -173,13 +285,16 @@ type Model struct {
 	aiCfgField int
 	aiCfgEdit  bool
 	aiCfgIn    []rune
+	aiCfgTest  aiTestState // last connection probe from the wizard Test row
 
-	treeVisible bool
-	treeFocus   bool
-	treeRows    []treeEntry
-	treeSel     int
-	treeOffset  int
-	expanded    map[string]bool
+	treeVisible    bool
+	treeFocus      bool
+	treeRows       []treeEntry
+	treeSel        int
+	treeOffset     int
+	expanded       map[string]bool
+	treeConfirm    string // "" | "delete" | "trash" — pending file action confirmation
+	treeConfirmRel string // path (relative to baseDir) the confirmation applies to
 
 	// Search/replace
 	searchOpen         bool
@@ -189,6 +304,10 @@ type Model struct {
 	replaceOpen        bool
 	replaceWith        []rune
 	replaceFocusFind   bool
+
+	// Go to line
+	gotoOpen bool
+	gotoIn   []rune
 
 	// Events, watcher, Git
 	bus                *events.Bus
@@ -203,6 +322,7 @@ type Model struct {
 	conflictOffY       int
 	conflictOffX       int
 	gitOpen            bool
+	gitFocus           bool // keys route to the git panel; open+unfocused shows it in the sidebar
 	gitMode            gitPanelMode
 	gitFiles           []vcs.FileStatus
 	gitSel             int
@@ -255,6 +375,15 @@ type Model struct {
 	langChooserOpen bool
 	langChooserSel  int
 
+	// Plugin store (install/uninstall bundled plugins)
+	pluginStoreOpen       bool
+	pluginStoreSel        int
+	pendingPluginRemovals map[string]bool
+	storeItems            []storeItem
+	storeLoading          bool
+	storeErr              string
+	pendingStoreInstall   string
+
 	// Autocompletion popup
 	complOpen   bool
 	complItems  []string
@@ -264,19 +393,53 @@ type Model struct {
 	complStart  int
 
 	// Right-side AI chat panel (local Ollama)
-	chatOpen   bool
-	chatFocus  bool
-	chatIn     []rune
-	chatMsgs   []ai.Message
-	chatReply  string // assistant reply being streamed
-	chatErr    string
-	chatBusy   bool
-	chatRows   []chatRow
-	chatScroll int    // lines of scrollback from the bottom (0 = follow)
-	chatModel  string // resolved Ollama model tag
-	ai         ai.Provider
-	chatCh     <-chan chatEvent
-	chatCancel context.CancelFunc
+	chatOpen      bool
+	chatFocus     bool
+	chatIn        []rune
+	chatMsgs      []ai.Message
+	chatReply     string // assistant reply being streamed
+	chatErr       string
+	chatBusy      bool
+	chatRows      []chatRow
+	chatScroll    int    // lines of scrollback from the bottom (0 = follow)
+	chatModel     string // resolved Ollama model tag
+	ai            ai.Provider
+	chatCh        <-chan chatEvent
+	chatCancel    context.CancelFunc
+	chatToolRound int    // remaining tool loop iterations for the current turn
+	chatGen       uint64 // conversation generation, guards against stale stream events
+
+	// Chat history: persisted threads (newest-first; -1 = new unsaved thread)
+	// and the prompt input history browsed with Up/Down in the input.
+	chatThreads    []chatThread
+	chatThreadPos  int
+	chatPrompts    []string
+	chatPromptIdx  int // -1 = free input, 0 = most recent prompt
+	chatDraft      string
+	chatHistLoaded bool
+	chatClearArm   bool // Ctrl+L pressed once: next Ctrl+L wipes history
+
+	// Pending native-tool round awaiting finalisation (assistant message with
+	// its tool calls plus the tool result messages that follow).
+	chatPendingAssistant ai.Message
+	chatPendingResults   []ai.Message
+	chatPendingChanges   []agent.Change
+	chatEditTracks       []chatEditTrack
+
+	// Chat EDIT diff review: proposals are applied only after the user picks
+	// y (apply) or n (discard), routed through the agent Applier.
+	chatReviewMode  bool
+	chatReviewIdx   int
+	chatReviewRows  []vcs.DiffRow
+	chatReviewLeft  []string
+	chatReviewRight []string
+	chatReviewOffY  int
+	chatReviewOffX  int
+
+	// Pending RUN command awaiting explicit user confirmation (allow_run = ask).
+	// While non-nil the chat input is parked: the user types y to execute the
+	// held command, or n to decline. The result is fed back either way.
+	chatRunConfirm string
 
 	// Inline AI request (Ctrl+I)
 	aiInlineOpen     bool
@@ -293,7 +456,30 @@ type Model struct {
 	aiReviewLeft     []string
 	aiReviewRight    []string
 	aiReviewOffY     int
+	// aiFix (LSP diagnostic fix) state
+	aiFixOpen        bool
+	aiFixBusy        bool
+	aiFixCh          <-chan chatEvent
+	aiFixCancel      context.CancelFunc
+	aiFixInput       []rune
+	aiFixOriginal    string
+	aiFixProposal    string
+	aiFixReviewMode  bool
+	aiFixReviewRows  []vcs.DiffRow
+	aiFixReviewLeft  []string
+	aiFixReviewRight []string
+	aiFixReviewOffY  int
+	aiFixReviewOffX  int
 	aiReviewOffX     int
+
+	// Ghost text (Copilot-style inline suggestions)
+	ghostLines   []string // lines of ghost suggestion
+	ghostCol     int      // column where ghost starts
+	ghostRow     int      // line where ghost starts
+	ghostVisible bool     // whether ghost overlay is active
+	ghostCh      <-chan chatEvent
+	ghostText    string // accumulated text during streaming
+	ghostCancel  context.CancelFunc
 
 	quitConfirm bool
 	quitTab     bool // true if confirming close of a single tab (not quit)
@@ -308,6 +494,7 @@ type Model struct {
 	agentCancel   context.CancelFunc
 	agentCh       chan struct{} // repaint signal from the agent worker
 	agentOpen     bool
+	agentFocus    bool // keys route to the agent panel; open+unfocused shows it in the sidebar
 	agentPrompt   bool // entering a new task prompt
 	agentPromptIn []rune
 	agentSel      int
@@ -325,6 +512,13 @@ type Model struct {
 
 	// Mouse state
 	mouseDown bool
+
+	// Double-click detection: last click position/time plus a validity flag so
+	// a third quick click starts a fresh pair instead of chaining.
+	lastClickX     int
+	lastClickY     int
+	lastClickTime  time.Time
+	lastClickValid bool
 }
 
 var debugKeys = os.Getenv("DMED_DEBUG_KEYS") != ""
@@ -342,21 +536,45 @@ var ruToEn = map[rune]rune{
 
 func normalizeKey(r rune) rune {
 	if en, ok := ruToEn[r]; ok {
-		return en
+		return unicode.ToLower(en)
+	}
+	if en, ok := ruToEn[unicode.ToLower(r)]; ok {
+		return unicode.ToLower(en)
 	}
 	return r
+}
+
+// c0Special reports whether a C0 control code is really one of the control
+// keys that ultraviolet delivers as a special key code (Tab, Enter, Escape)
+// rather than a Ctrl+letter chord that needs re-encoding.
+func c0Special(r rune) bool {
+	return r == '\t' || r == tea.KeyEnter || r == tea.KeyEsc
+}
+
+// controlByteKey converts a raw control byte (0x01–0x1f, NUL = Ctrl+Space)
+// into the matching ctrl+key message, preserving any other modifiers reported
+// by the terminal (notably Alt for Ctrl+Alt combos sent as ESC + a control
+// byte on some terminals).
+func controlByteKey(r rune, mod tea.KeyMod) tea.KeyPressMsg {
+	if r == 0 {
+		return tea.KeyPressMsg{Code: tea.KeySpace, Mod: mod | tea.ModCtrl}
+	}
+	return tea.KeyPressMsg{Code: r + 96, Mod: mod | tea.ModCtrl}
 }
 
 func New(paths ...string) Model {
 	fe := make(chan string, 16)
 	m := Model{
-		width:      80,
-		height:     24,
-		expanded:   map[string]bool{},
-		fileEvents: fe,
-		bus:        events.New(),
-		diagCh:     make(chan lspDiagMsg, 64),
-		diags:      map[string][]lsp.Diagnostic{},
+		width:                 80,
+		height:                24,
+		expanded:              map[string]bool{},
+		fileEvents:            fe,
+		bus:                   events.New(),
+		diagCh:                make(chan lspDiagMsg, 64),
+		diags:                 map[string][]lsp.Diagnostic{},
+		pendingPluginRemovals: map[string]bool{},
+		chatThreadPos:         -1,
+		chatPromptIdx:         -1,
 	}
 	if w, err := watcher.New(func(p string) {
 		select {
@@ -400,6 +618,15 @@ func New(paths ...string) Model {
 		m.tabs = append(m.tabs, tab{buf: buffer.New()})
 	}
 	m.cfg = config.Load(m.root)
+	// Create the AI provider up front so chat, inline, and ghost all work even
+	// before the chat panel is first opened (previously ghost silently no-opped
+	// until toggleChat ran).
+	m.ai = ai.NewProvider(ai.Config{
+		Type:   ai.ProviderType(m.cfg.AI.Provider),
+		URL:    m.cfg.AI.OllamaURL,
+		Model:  m.cfg.AI.Model,
+		APIKey: m.cfg.AI.APIKey,
+	})
 	m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
 	syntax.SetDefault(m.cfg.Editor.SyntaxTheme)
 	m.initPanes()
@@ -498,9 +725,17 @@ func (m *Model) jumpTab(n int) {
 }
 
 func (m *Model) closeTab() tea.Cmd {
-	idx := m.activeTabIndex()
+	return m.closeTabAt(m.activeTabIndex())
+}
+
+// closeTabAt closes the tab at the given index (used by middle-click on the
+// tab bar, which targets a specific tab rather than the active one).
+func (m *Model) closeTabAt(idx int) tea.Cmd {
 	if len(m.tabs) == 1 {
 		return tea.Quit
+	}
+	if idx < 0 || idx >= len(m.tabs) {
+		return nil
 	}
 	if m.layout != splitNone {
 		// Closing a tab in a split also collapses the split.
@@ -522,13 +757,36 @@ func (m *Model) startPrompt() {
 func (m *Model) startNewFilePrompt() {
 	m.promptOpen = true
 	m.promptNewFile = true
+	m.promptRenameRel = ""
 	m.promptIn = nil
 }
 
 func (m *Model) startNewFolderPrompt() {
 	m.promptOpen = true
 	m.promptNewFolder = true
+	m.promptRenameRel = ""
 	m.promptIn = nil
+}
+
+func (m *Model) startTreeNewFilePrompt() {
+	m.promptOpen = true
+	m.promptNewFile = true
+	m.promptRenameRel = ""
+	m.promptIn = []rune(m.treeTargetDir())
+}
+
+func (m *Model) startTreeNewFolderPrompt() {
+	m.promptOpen = true
+	m.promptNewFolder = true
+	m.promptRenameRel = ""
+	m.promptIn = []rune(m.treeTargetDir())
+}
+
+func (m *Model) startTreeRenamePrompt(rel string) {
+	m.promptOpen = true
+	m.promptRename = true
+	m.promptRenameRel = rel
+	m.promptIn = []rune(relName(rel))
 }
 
 func (m *Model) startSavePrompt() {
@@ -565,13 +823,23 @@ func (m *Model) openConfigFile() {
 			"# model =\n" +
 			"# ollama_url = http://localhost:11434\n" +
 			"# api_key =  # for OpenAI-compatible providers\n" +
-			"# context_max = 6000\n\n" +
+			"# context_max = 6000\n" +
+			"# temperature = 0  # tenths (7 => 0.7); 0 = provider default\n" +
+			"# num_ctx = 0  # Ollama context window tokens; 0 = default\n" +
+			"# num_predict = 0  # max output tokens; 0 = provider default\n" +
+			"# tool_rounds = 0  # chat tool-loop cap; 0 = built-in (6)\n" +
+			"# allow_run = always  # always | never\n" +
+			"# restrict_to_root = false  # true = keep READ/EDIT/REPLACE inside the project\n\n" +
 			"[agent]\n" +
 			"# system_prompt =  # optional override for background agent tasks\n" +
 			"# context_max = 262144  # bytes of file context sent to the agent\n\n" +
 			"[ui]\n" +
 			"# tree_width = 25\n" +
-			"# chat_width_pct = 40\n"
+			"# chat_width_pct = 40\n\n" +
+			"[plugins]\n" +
+			"# repo = dedomorozoff/dmed  # GitHub store for the plugin store\n" +
+			"# dir = plugins\n" +
+			"# branch = main\n"
 		os.WriteFile(path, []byte(content), 0o644)
 	}
 	m.openPath(path)
@@ -586,6 +854,52 @@ func (m *Model) refind() {
 	if m.finderSel < 0 {
 		m.finderSel = 0
 	}
+}
+
+// pasteInput inserts pasted text into the active field, mirroring where typed
+// keys land (see handleKey routing), and falls back to the editor buffer.
+func (m *Model) pasteInput(text string) {
+	switch {
+	case m.aiCfgEdit:
+		m.aiCfgIn = append(m.aiCfgIn, []rune(text)...)
+		return
+	case m.aiInlineOpen:
+		m.aiInlineInput = append(m.aiInlineInput, []rune(text)...)
+		return
+	case m.agentPrompt:
+		m.agentPromptIn = append(m.agentPromptIn, []rune(text)...)
+		return
+	case m.chatOpen && m.chatFocus:
+		m.chatIn = append(m.chatIn, []rune(text)...)
+		return
+	case m.promptSave:
+		m.promptSaveIn = append(m.promptSaveIn, []rune(text)...)
+		return
+	case m.promptOpen:
+		m.promptIn = append(m.promptIn, []rune(text)...)
+		return
+	case m.searchOpen:
+		if m.replaceOpen && !m.replaceFocusFind {
+			m.replaceWith = append(m.replaceWith, []rune(text)...)
+		} else {
+			m.searchQuery = append(m.searchQuery, []rune(text)...)
+			m.updateSearchMatches(false)
+		}
+		return
+	case m.finderOpen:
+		m.finderQ = append(m.finderQ, []rune(text)...)
+		m.refind()
+		return
+	case m.paletteOpen:
+		m.paletteQ = append(m.paletteQ, []rune(text)...)
+		return
+	}
+	if m.cur().buf.HasMultipleCursors() {
+		m.cur().buf.MultiInsertText(text)
+	} else {
+		m.cur().buf.InsertText(text)
+	}
+	m.msg = m.t("msg.pasted")
 }
 
 func (m *Model) handleFinder(msg tea.KeyPressMsg) tea.Cmd {
@@ -647,19 +961,36 @@ func (m *Model) handlePrompt(msg tea.KeyPressMsg) tea.Cmd {
 		m.promptOpen = false
 		m.promptNewFile = false
 		m.promptNewFolder = false
+		m.promptRename = false
+		m.promptRenameRel = ""
 	case "enter":
 		path := strings.TrimSpace(string(m.promptIn))
 		newFolder := m.promptNewFolder
+		renameRel := m.promptRenameRel
 		m.promptOpen = false
 		m.promptNewFile = false
 		m.promptNewFolder = false
-		if path != "" {
-			if newFolder {
-				_ = os.MkdirAll(path, 0o755)
-				m.msg = m.t("msg.created_folder", path)
+		m.promptRename = false
+		m.promptRenameRel = ""
+		if path == "" {
+			break
+		}
+		switch {
+		case renameRel != "":
+			m.renameTreeEntry(renameRel, path)
+		case newFolder:
+			full := normalizePath(m.baseDir(), path)
+			if err := os.MkdirAll(full, 0o755); err != nil {
+				m.msg = m.t("msg.create_folder_fail", err.Error())
 			} else {
-				m.openPath(path)
+				m.msg = m.t("msg.created_folder", filepath.Base(full))
 			}
+			m.rebuildTree()
+			m.refreshGitFiles()
+		default:
+			m.openPath(path)
+			m.rebuildTree()
+			m.refreshGitFiles()
 		}
 	case "backspace":
 		if n := len(m.promptIn); n > 0 {
@@ -726,7 +1057,9 @@ func (m Model) hasDirty() bool {
 }
 
 func (m *Model) handleQuitConfirm(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+	// gitKeyName maps the physical Y/N keys to y/n in any keyboard layout, so
+	// the confirmation works in Cyrillic too (н/т are the Y/N keys there).
+	switch gitKeyName(msg) {
 	case "esc":
 		m.quitConfirm = false
 		m.pendingQuit = false
@@ -801,7 +1134,7 @@ func waitForFileEvent(ch <-chan string) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh), waitForInlineOutput(m.aiInlineCh), waitForLSPDiag(m.diagCh))
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -818,6 +1151,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Hot-reload a changed plugin without restarting the editor.
 		if m.plugins != nil && m.isPluginPath(path) {
+			// Skip events for plugins the store just removed itself.
+			if m.pendingPluginRemovals[path] {
+				delete(m.pendingPluginRemovals, path)
+				return m, waitForFileEvent(m.fileEvents)
+			}
 			m.reloadPlugin(path)
 			return m, waitForFileEvent(m.fileEvents)
 		}
@@ -885,30 +1223,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, waitForTermOutput(m.termCh)
 	case ChatOutputMsg:
+		if msg.Gen != m.chatGen {
+			return m, nil // stale event from a cancelled/cleared conversation
+		}
 		switch {
 		case msg.Err != nil:
 			m.chatBusy = false
 			m.chatErr = msg.Err.Error()
+			if m.chatCancel != nil {
+				m.chatCancel()
+				m.chatCancel = nil
+			}
+			m.rebuildChatRows()
+			return m, nil
 		case msg.Done:
 			m.chatBusy = false
+			if m.chatCancel != nil {
+				m.chatCancel()
+				m.chatCancel = nil
+			}
+			if len(msg.Tools) > 0 {
+				// The model invoked tools; execute them, review any edits, and
+				// continue the conversation.
+				cmd := m.handleChatToolsDone(m.chatReply, msg.Tools)
+				m.chatReply = ""
+				m.msg = "tool: " + msg.Tools[0].Name
+				m.rebuildChatRows()
+				return m, cmd
+			}
 			if m.chatReply != "" {
 				m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "assistant", Content: m.chatReply})
 				m.chatReply = ""
 			}
+			m.saveChatThread()
+			m.rebuildChatRows()
+			return m, nil
 		default:
 			m.chatReply += msg.Delta
 		}
 		m.rebuildChatRows()
 		if !msg.Done && msg.Err == nil {
-			return m, waitForChatOutput(m.chatCh)
+			return m, waitForChatOutput(m.chatCh, m.chatGen)
 		}
-		if m.chatCancel != nil {
-			m.chatCancel()
-			m.chatCancel = nil
-		}
+	case AITestResultMsg:
+		m.handleAITestResult(msg)
 		return m, nil
 	case InlineOutputMsg:
 		cmd := m.handleInlineOutput(msg)
+		return m, cmd
+	case FixOutputMsg:
+		cmd := m.handleFixOutput(msg)
+		return m, cmd
+	case GhostOutputMsg:
+		cmd := m.handleGhostOutput(msg)
 		return m, cmd
 	case AgentRefreshMsg:
 		return m, waitForAgentRefresh(m.agentCh)
@@ -926,14 +1293,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case tea.PasteMsg:
-		text := msg.String()
-		if text != "" {
-			if m.cur().buf.HasMultipleCursors() {
-				m.cur().buf.MultiInsertText(text)
-			} else {
-				m.cur().buf.InsertText(text)
-			}
-			m.msg = m.t("msg.pasted")
+		if text := msg.String(); text != "" {
+			m.pasteInput(text)
 		}
 	case tea.KeyPressMsg:
 		if debugKeys {
@@ -954,6 +1315,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		abs, _ := filepath.Abs(msg.path)
 		m.diags[abs] = msg.diags
 		return m, waitForLSPDiag(m.diagCh)
+	case pluginStoreMsg:
+		m.storeLoading = false
+		if msg.err != nil {
+			m.storeErr = msg.err.Error()
+		} else {
+			for _, it := range msg.items {
+				exists := false
+				for _, e := range m.storeItems {
+					if e.File == it.File {
+						exists = true
+						break
+					}
+				}
+				if !exists {
+					m.storeItems = append(m.storeItems, it)
+				}
+			}
+		}
+	case pluginSourceMsg:
+		m.pendingStoreInstall = ""
+		if msg.err != nil {
+			m.msg = "plugin download error: " + msg.err.Error()
+		} else if m.plugins != nil {
+			m.installFromSource(msg.file, msg.src)
+		}
 	}
 	m.clampScroll()
 	return m, nil
@@ -961,23 +1347,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// Some terminal stacks send bare control bytes (Ctrl+O as 0x0f, Ctrl+C as
-	// 0x03, bare Ctrl as NUL). Normalize them into proper ctrl+key messages so
-	// keybindings work and stray control bytes never reach the buffer.
+	// 0x03, Ctrl+Space as NUL, bare Ctrl as NUL). Normalize them into proper
+	// ctrl+key messages so keybindings work and stray control bytes never reach
+	// the buffer. Keep any modifiers already reported (e.g. Ctrl+Alt+letter
+	// arrives as ESC + a control byte on some terminals) instead of dropping
+	// them as before.
 	if len(msg.Text) == 1 {
-		if r := rune(msg.Text[0]); r < 32 && r != '\t' {
-			msg = tea.KeyPressMsg{Code: r + 96, Mod: tea.ModCtrl}
+		if r := rune(msg.Text[0]); r < 32 && !c0Special(r) {
+			msg = controlByteKey(r, msg.Mod)
 		}
+	} else if msg.Text == "" && msg.Code < 32 && !c0Special(msg.Code) {
+		msg = controlByteKey(msg.Code, msg.Mod)
 	}
 	// Normalize Russian ЙЦУКЕН → English QWERTY for layout-independent keys.
 	// Use []rune so multi-byte UTF-8 (Cyrillic) inputs don't leave trailing NULs.
+	origText := msg.Text
 	if src := []rune(msg.Text); len(src) > 0 {
 		nr := make([]rune, len(src))
 		for i, r := range src {
 			nr[i] = normalizeKey(r)
 		}
 		msg = tea.KeyPressMsg{Code: nr[0], Text: string(nr), Mod: msg.Mod}
+	} else if msg.Code != 0 {
+		// Key combos (Ctrl/Alt+letter) arrive with empty Text on many
+		// terminals; map their Cyrillic code to the physical QWERTY key too so
+		// "ctrl+в" (Russian layout) still matches "ctrl+d".
+		msg.Code = normalizeKey(msg.Code)
 	}
 	s := msg.String()
+	// Restore original text so text-input handlers (chat, search, prompt,
+	// etc.) receive the actual typed characters instead of the normalized
+	// English equivalents used only for keybinding matching.
+	msg.Text = origText
 
 	// While the completion popup is open, navigation keys control it.
 	if m.complOpen && m.handleCompletionKey(s) {
@@ -1021,10 +1422,16 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.toggleChat()
 		return nil
 	case "alt+l":
-		return m.openAgentPanel()
+		return m.toggleAgentPanel()
 	case "alt+i":
 		m.startInlineRequest()
 		return nil
+	case "alt+f":
+		m.startFixRequest()
+		return nil
+	case "alt+g":
+		m.dismissGhost()
+		return m.ghostTrigger()
 	case "ctrl+o":
 		m.startFinder()
 		return nil
@@ -1043,6 +1450,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+g":
 		if m.gitOpen {
 			m.gitOpen = false
+			m.gitFocus = false
 			m.msg = ""
 		} else {
 			m.openGitPanel()
@@ -1127,13 +1535,16 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.agentPrompt {
 		return m.handleAgentPrompt(msg)
 	}
-	if m.agentOpen {
+	if m.agentOpen && m.agentFocus {
 		return m.handleAgent(msg)
 	}
-	if m.chatOpen {
+	if m.chatReviewMode {
+		return m.handleChatReview(msg)
+	}
+	if m.chatOpen && m.chatFocus {
 		return m.handleChat(msg)
 	}
-	if m.gitOpen {
+	if m.gitOpen && m.gitFocus {
 		return m.handleGit(msg)
 	}
 	if m.paletteOpen {
@@ -1147,6 +1558,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.langChooserOpen {
 		return m.handleLangChooser(msg)
+	}
+	if m.pluginStoreOpen {
+		return m.handlePluginStore(msg)
 	}
 	if m.promptOpen {
 		return m.handlePrompt(msg)
@@ -1166,12 +1580,37 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return m.handleSearch(msg)
 	}
+	if m.gotoOpen {
+		return m.handleGoto(msg)
+	}
 	if m.aiReviewMode {
 		return m.handleInlineReview(msg)
+	}
+	if m.aiFixReviewMode {
+		return m.handleFixReview(msg)
+	}
+	if m.aiFixOpen {
+		return m.handleFixRequest(msg)
 	}
 	if m.aiInlineOpen {
 		return m.handleInlineRequest(msg)
 	}
+	// While the inline AI streams a rewrite, swallow all keys; Esc/Ctrl+C
+	// abort the request.
+	if m.aiInlineBusy {
+		if s == "esc" || s == "ctrl+c" {
+			m.cancelInlineRequest()
+		}
+		return nil
+	}
+	// While the fix AI streams, swallow all keys; Esc aborts.
+	if m.aiFixBusy {
+		if s == "esc" || s == "ctrl+c" {
+			m.cancelFixRequest()
+		}
+		return nil
+	}
+
 	if m.quitConfirm {
 		return m.handleQuitConfirm(msg)
 	}
@@ -1183,6 +1622,20 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.plugins != nil && m.plugins.HasBinding(s) {
 		if m.plugins.RunBinding(m, s) {
 			return nil
+		}
+	}
+	// Ghost text overlay: Tab accepts, Esc dismisses; any other key dismisses
+	// and falls through to normal editing.
+	if m.ghostVisible && !m.chatOpen && !m.complOpen {
+		switch s {
+		case "tab":
+			m.applyGhost()
+			return nil
+		case "esc", "ctrl+c":
+			m.dismissGhost()
+			return nil
+		default:
+			m.dismissGhost()
 		}
 	}
 	switch s {
@@ -1207,6 +1660,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		} else {
 			m.saveActive()
 		}
+	case "ctrl+l":
+		m.startGotoPrompt()
+	case "ctrl+/", "ctrl+_":
+		m.toggleComment()
+	case "alt+z":
+		m.toggleWordWrap()
 	case "ctrl+z":
 		if m.cur().buf.Undo() {
 			m.msg = ""
@@ -1217,6 +1676,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+d":
 		m.cur().buf.DuplicateLine()
 		m.msg = ""
+	case "ctrl+u":
+		m.uppercaseActive()
+		return nil
 	case "ctrl+r":
 		if m.cur().buf.Redo() {
 			m.msg = ""
@@ -1226,9 +1688,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "alt+]":
 		m.jumpHunk(1)
 	case "ctrl+\\", "f6":
-		m.splitVert()
+		m.toggleSplitVert()
 	case "ctrl+alt+h", "f7":
-		m.splitHoriz()
+		m.toggleSplitHoriz()
 	case "ctrl+alt+p", "f8":
 		m.focusOtherPane()
 	case "ctrl+alt+w":
@@ -1254,6 +1716,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.cur().buf.MoveLineUp()
 	case "alt+down":
 		m.cur().buf.MoveLineDown()
+	case "alt+shift+down":
+		m.cur().buf.DuplicateLine()
+	case "alt+shift+up":
+		m.cur().buf.DuplicateLineUp()
 	case "shift+up":
 		m.cur().buf.MoveUpWithSelect()
 	case "shift+down":
@@ -1311,6 +1777,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.cur().buf.InsertNewline()
 		}
 		m.msg = ""
+		if m.ai != nil {
+			return m.ghostTrigger()
+		}
 	case "backspace":
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MultiBackspace()
@@ -1446,6 +1915,29 @@ func (m *Model) clampScroll() {
 	}
 	h := m.paneViewHeight(m.activePane)
 	cur := t.buf.CurLine()
+	tabW := m.cfg.Editor.TabWidth
+	if p.wordWrap {
+		w := m.paneContentWidth(m.activePane)
+		if w > 0 && h > 0 {
+			segs := t.tabWrap(w, tabW)
+			expCol := visCol(t.buf.LineAt(cur), t.buf.Col(), tabW)
+			row, _ := segRowForCol(segs, cur, expCol)
+			if row < p.offsetY {
+				p.offsetY = row
+			}
+			if row >= p.offsetY+h {
+				p.offsetY = row - h + 1
+			}
+			if maxOff := len(segs) - h; p.offsetY > maxOff {
+				p.offsetY = maxOff
+			}
+			if p.offsetY < 0 {
+				p.offsetY = 0
+			}
+		}
+		p.offsetX = 0
+		return
+	}
 	if h > 0 {
 		if cur < p.offsetY {
 			p.offsetY = cur
@@ -1458,7 +1950,7 @@ func (m *Model) clampScroll() {
 	if w <= 0 {
 		return
 	}
-	x := visCol(t.buf.LineAt(cur), t.buf.Col(), m.cfg.Editor.TabWidth)
+	x := visCol(t.buf.LineAt(cur), t.buf.Col(), tabW)
 	if x < p.offsetX {
 		p.offsetX = x
 	}
@@ -1562,6 +2054,128 @@ func (m *Model) handleReplace(msg tea.KeyPressMsg) tea.Cmd {
 type searchMatch struct {
 	line int
 	col  int
+}
+
+// startGotoPrompt opens the "Go to Line" input (empty; type N, N:C, or +N/-N).
+func (m *Model) startGotoPrompt() {
+	m.gotoOpen = true
+	m.gotoIn = nil
+}
+
+// handleGoto handles input in the "Go to Line" prompt. Accepts absolute
+// (N, or N:C) and relative (+N/-N, or +N:C/-N:C) line specs.
+func (m *Model) handleGoto(msg tea.KeyPressMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc":
+		m.gotoOpen = false
+		m.msg = ""
+	case "enter":
+		s := strings.TrimSpace(string(m.gotoIn))
+		m.gotoOpen = false
+		m.msg = ""
+		if s != "" {
+			m.applyGoto(s)
+		}
+	case "backspace":
+		if n := len(m.gotoIn); n > 0 {
+			m.gotoIn = m.gotoIn[:n-1]
+		}
+	case "ctrl+l":
+		m.gotoIn = nil
+	default:
+		if len(msg.Text) > 0 {
+			for _, r := range msg.Text {
+				if (r >= '0' && r <= '9') || r == ':' || r == '+' || r == '-' {
+					m.gotoIn = append(m.gotoIn, r)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// applyGoto jumps the active buffer's cursor to the parsed line spec.
+func (m *Model) applyGoto(s string) {
+	t := m.cur()
+	cur := t.buf.CurLine()
+
+	rel := false
+	sign := 1
+	rest := s
+	switch rest[0] {
+	case '+':
+		rel = true
+		rest = rest[1:]
+	case '-':
+		rel = true
+		sign = -1
+		rest = rest[1:]
+	}
+
+	col := 0
+	if i := strings.IndexByte(rest, ':'); i >= 0 {
+		col, _ = strconv.Atoi(rest[i+1:])
+		if col < 0 {
+			col = 0
+		}
+		rest = rest[:i]
+	}
+	if len(rest) == 0 {
+		return
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil {
+		return
+	}
+	line := n - 1
+	if rel {
+		line = cur + sign*n
+	}
+	if line < 0 {
+		line = 0
+	}
+	if line >= t.buf.LineCount() {
+		line = t.buf.LineCount() - 1
+	}
+	t.buf.SetCursor(line, 0)
+	if col > 0 {
+		if col > t.buf.LineLen(line) {
+			col = t.buf.LineLen(line)
+		}
+		t.buf.SetCursor(line, col)
+	}
+	m.clampScroll()
+	m.msg = fmt.Sprintf("line %d", line+1)
+}
+
+// toggleComment comments or uncomments the current line(s) using the comment
+// syntax of the active file type (from the syntax highlighter's lexer), then
+// moves the cursor to the next line.
+func (m *Model) toggleComment() {
+	t := m.cur()
+	prefix, suffix := syntax.CommentTokens(t.path, t.buf.Text())
+	if prefix == "" {
+		m.msg = m.t("msg.no_comment")
+		return
+	}
+	t.buf.ToggleComment(prefix, suffix)
+	m.msg = ""
+	t.buf.MoveDown()
+	m.clampScroll()
+}
+
+func (m *Model) toggleWordWrap() {
+	p := m.curPane()
+	p.wordWrap = !p.wordWrap
+	if p.wordWrap {
+		p.offsetX = 0
+	}
+	m.clampScroll()
+	if p.wordWrap {
+		m.msg = m.t("msg.word_wrap_on")
+	} else {
+		m.msg = m.t("msg.word_wrap_off")
+	}
 }
 
 func findMatchesInRunes(line []rune, query []rune) []int {
@@ -1724,6 +2338,12 @@ func (m *Model) startPalette() {
 	m.paletteQ = nil
 	m.paletteSel = 0
 	m.paletteOffset = 0
+	// Unfocus all panels so the palette receives keystrokes (the palette
+	// is lower priority than chat/agent/git in the mode-guard chain).
+	m.chatFocus = false
+	m.agentFocus = false
+	m.gitFocus = false
+	m.treeFocus = false
 }
 
 // setLang switches the interface language, rebuilding the translator and
@@ -1802,107 +2422,6 @@ func (m *Model) saveSession() {
 	_ = session.Save(session.DefaultPath(m.root), sess)
 }
 
-func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
-	y := msg.Y
-	x := msg.X
-
-	// Ignore clicks on the tab bar (row 0), status bar (row viewHeight+1),
-	// finder/palette/terminal panels.  Only handle the editor area.
-	h := m.viewHeight()
-	if y < 1 || y > h {
-		return nil
-	}
-
-	// When git panel is open with inline diff, clicks in the diff area
-	// toggle focus to the diff panel.
-	if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0 {
-		leftW := m.leftRailWidth()
-		if x >= leftW {
-			m.gitDiffFocused = true
-			return nil
-		}
-		// Click on the file list — unfocus diff, don't try to set buffer cursor
-		m.gitDiffFocused = false
-		return nil
-	}
-
-	// Map y to a buffer line via the active pane's scroll offset.
-	editorRow := y - 1
-	p := m.curPane()
-	t := &m.tabs[p.tabIdx]
-	ln := editorRow + p.offsetY
-
-	// Clamp line before accessing buffer.
-	if ln >= t.buf.LineCount() {
-		ln = t.buf.LineCount() - 1
-	}
-	if ln < 0 {
-		ln = 0
-	}
-
-	// Map x to a column, accounting for the left rail, gutter, and scroll.
-	leftW := m.leftRailWidth()
-	gw := m.gutterWidthForTab(t)
-
-	clickX := x - leftW - gw + p.offsetX
-	if clickX < 0 {
-		clickX = 0
-	}
-
-	// Convert expanded column back to raw column (accounting for tabs).
-	rawCol := expandedToRawCol(t.buf.LineAt(ln), clickX, m.cfg.Editor.TabWidth)
-
-	lineLen := t.buf.LineLen(ln)
-	if rawCol > lineLen {
-		rawCol = lineLen
-	}
-
-	// Alt+Click adds a secondary cursor instead of moving the main one.
-	if msg.Mod&tea.ModAlt != 0 {
-		if t.buf.AddCursor(ln, rawCol, rawCol, rawCol) {
-			m.msg = m.t("msg.added_cursor")
-		}
-		return nil
-	}
-
-	t.buf.SetCursor(ln, rawCol)
-	t.buf.Deselect()
-
-	// Start mouse drag for potential selection.
-	m.mouseDown = true
-
-	return nil
-}
-
-func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
-	// When git diff is focused, scroll the diff instead of the editor.
-	if m.gitDiffFocused {
-		if msg.Button == tea.MouseWheelUp {
-			m.diffOffsetY--
-		} else if msg.Button == tea.MouseWheelDown {
-			m.diffOffsetY++
-		}
-		m.clampDiffScroll(m.viewHeight())
-		return nil
-	}
-	p := m.curPane()
-	if msg.Button == tea.MouseWheelUp {
-		if p.offsetY > 0 {
-			p.offsetY--
-		}
-	} else if msg.Button == tea.MouseWheelDown {
-		t := &m.tabs[p.tabIdx]
-		maxOff := t.buf.LineCount() - m.paneViewHeight(m.activePane)
-		if maxOff < 0 {
-			maxOff = 0
-		}
-		if p.offsetY < maxOff {
-			p.offsetY++
-		}
-	}
-	return nil
-}
-
 func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
 	if !m.mouseDown {
 		return nil
@@ -1918,33 +2437,10 @@ func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
 		y = h
 	}
 
-	p := m.curPane()
-	t := &m.tabs[p.tabIdx]
 	editorRow := y - 1
-	ln := editorRow + p.offsetY
+	ln, rawCol := m.clickPosToLineCol(m.activePane, editorRow, x)
 
-	// Clamp line before accessing buffer.
-	if ln >= t.buf.LineCount() {
-		ln = t.buf.LineCount() - 1
-	}
-	if ln < 0 {
-		ln = 0
-	}
-
-	leftW := m.leftRailWidth()
-	gw := m.gutterWidthForTab(t)
-	clickX := x - leftW - gw + p.offsetX
-	if clickX < 0 {
-		clickX = 0
-	}
-	rawCol := expandedToRawCol(t.buf.LineAt(ln), clickX, m.cfg.Editor.TabWidth)
-
-	lineLen := t.buf.LineLen(ln)
-	if rawCol > lineLen {
-		rawCol = lineLen
-	}
-
-	t.buf.DragSelect(ln, rawCol)
+	m.cur().buf.DragSelect(ln, rawCol)
 	return nil
 }
 
@@ -1975,7 +2471,7 @@ func expandedToRaw(line []rune, expCol, tabWidth int) int {
 
 // cursorScreenPos returns the (x, y) position of the editor cursor in
 // the terminal content, accounting for the tab bar, left rail, gutter,
-// scroll offsets, and split layout.
+// scroll offsets, word wrap, and split layout.
 func (m Model) cursorScreenPos() (int, int) {
 	p := m.curPane()
 	t := &m.tabs[p.tabIdx]
@@ -1996,8 +2492,20 @@ func (m Model) cursorScreenPos() (int, int) {
 	gw := m.gutterWidthForTab(t)
 	leftW := m.leftRailWidth()
 
+	screenRow := curLine
+	segStart := 0
+	if p.wordWrap {
+		w := m.paneContentWidth(m.activePane)
+		if w > 0 {
+			segs := t.tabWrap(w, m.cfg.Editor.TabWidth)
+			row, es := segRowForCol(segs, curLine, expCol)
+			screenRow = row
+			segStart = es
+		}
+	}
+
 	// X position within the pane content area.
-	paneX := gw + (expCol - p.offsetX)
+	paneX := gw + (expCol - (p.offsetX + segStart))
 
 	// Determine the screen X based on which pane we're in.
 	var screenX int
@@ -2013,7 +2521,7 @@ func (m Model) cursorScreenPos() (int, int) {
 	}
 
 	// Y position: tab bar (1 row) + line offset within the pane.
-	screenY := 1 + (curLine - p.offsetY)
+	screenY := 1 + (screenRow - p.offsetY)
 
 	// For horizontal split, the second pane starts lower.
 	if m.layout == splitHoriz && m.activePane == 1 {

@@ -31,10 +31,13 @@ var (
 	diagErrStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
 	diagWarnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	diagInfoStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
+	okTestStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
+	errTestStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	diffAddBg       = lipgloss.NewStyle().Background(lipgloss.Color("22"))
 	diffDelBg       = lipgloss.NewStyle().Background(lipgloss.Color("52"))
 	diffModBg       = lipgloss.NewStyle().Background(lipgloss.Color("58"))
 	selectionStyle  = lipgloss.NewStyle().Background(lipgloss.Color("60")).Foreground(lipgloss.Color("255"))
+	ghostStyle      = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("243"))
 )
 
 type helpEntry struct {
@@ -51,6 +54,8 @@ var helpEntries = []helpEntry{
 	{"", ""},
 	{"Ctrl+F", "help.search"},
 	{"Ctrl+H", "help.replace"},
+	{"Ctrl+L", "help.goto_line"},
+	{"Alt+Z", "help.word_wrap"},
 	{"Ctrl+G", "help.git_panel"},
 	{"D (in Git panel)", "help.git_diff"},
 	{"Alt+[ / Alt+]", "help.hunk"},
@@ -59,6 +64,7 @@ var helpEntries = []helpEntry{
 	{"Alt+T", "help.terminal"},
 	{"Alt+A", "help.chat"},
 	{"Alt+I", "help.inline"},
+	{"Alt+G", "help.ghost"},
 	{"Alt+L", "help.agent"},
 	{"Ctrl+B / F9", "help.tree"},
 	{"↑↓/Enter/←→ in tree", "help.tree_nav"},
@@ -74,6 +80,7 @@ var helpEntries = []helpEntry{
 	{"Enter/Backspace/Delete/Tab", "help.edit"},
 	{"Ctrl+Z / Ctrl+R", "help.undo"},
 	{"Ctrl+Y / Ctrl+D", "help.lines"},
+	{"Ctrl+U", "help.uppercase"},
 	{"Alt+D", "help.multicursor_word"},
 	{"Alt+Click", "help.multicursor_click"},
 	{"Esc", "help.multicursor_esc"},
@@ -126,8 +133,19 @@ func (m Model) langChooserExtraRows() int {
 	return len(i18n.Supported()) + 1
 }
 
+func (m Model) pluginStoreExtraRows() int {
+	if !m.pluginStoreOpen {
+		return 0
+	}
+	n := len(m.storeItems)
+	if m.storeLoading {
+		n++
+	}
+	return n + 1
+}
+
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.complExtraRows() - m.termExtraRows()
+	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -160,8 +178,12 @@ func (m Model) View() tea.View {
 		rows = append(rows, m.composeSidebar(diffRows)...)
 	} else if m.aiReviewMode {
 		rows = append(rows, renderSideBySide(m.aiReviewLeft, m.aiReviewRight, m.aiReviewRows, m.aiReviewOffY, m.aiReviewOffX, m.width, h, nil, nil)...)
+	} else if m.aiFixReviewMode {
+		rows = append(rows, renderSideBySide(m.aiFixReviewLeft, m.aiFixReviewRight, m.aiFixReviewRows, m.aiFixReviewOffY, m.aiFixReviewOffX, m.width, h, nil, nil)...)
 	} else if m.agentReviewMode {
 		rows = append(rows, renderSideBySide(m.agentReviewLeft, m.agentReviewRight, m.agentReviewRows, m.agentReviewOffY, m.agentReviewOffX, m.width, h, nil, nil)...)
+	} else if m.chatReviewMode {
+		rows = append(rows, renderSideBySide(m.chatReviewLeft, m.chatReviewRight, m.chatReviewRows, m.chatReviewOffY, m.chatReviewOffX, m.width, h, nil, nil)...)
 	} else if m.conflictOpen && len(m.conflictRows) > 0 {
 		rows = append(rows, renderSideBySide(m.conflictLeftLines, m.conflictRightLines, m.conflictRows, m.conflictOffY, m.conflictOffX, m.width, h, nil, nil)...)
 	} else if m.aiCfgOpen {
@@ -180,14 +202,24 @@ func (m Model) View() tea.View {
 		bottom = m.aiReviewBottom()
 	} else if m.agentReviewMode {
 		bottom = m.agentReviewBottom()
+	} else if m.chatReviewMode {
+		bottom = m.chatReviewBottom()
 	} else if m.agentPrompt {
 		bottom = m.agentPromptLine()
 	} else if m.aiInlineOpen {
 		bottom = m.aiInlinePrompt()
 	} else if m.aiInlineBusy {
 		bottom = m.aiInlineBusyLine()
+	} else if m.aiFixOpen {
+		bottom = m.aiFixPrompt()
+	} else if m.aiFixBusy {
+		bottom = m.aiFixBusyLine()
+	} else if m.aiFixReviewMode {
+		bottom = m.aiFixReviewBottom()
 	} else if m.conflictOpen {
 		bottom = m.conflictLine()
+	} else if m.treeConfirm != "" {
+		bottom = m.treeConfirmLine()
 	} else if m.quitConfirm {
 		bottom = m.quitLine()
 	} else if m.aiCfgOpen {
@@ -216,8 +248,22 @@ func (m Model) View() tea.View {
 		} else {
 			bottom = m.searchLine()
 		}
+	} else if m.gotoOpen {
+		bottom = m.gotoLine()
 	}
 	rows = append(rows, bottom)
+	if m.gitOpen && m.gitMode == gitModeCommit {
+		rows = append(rows, m.gitCommitInputRender()...)
+	}
+	if m.aiInlineOpen {
+		rows = append(rows, m.aiInlineInputRender()...)
+	}
+	if m.aiFixOpen {
+		rows = append(rows, m.aiFixInputRender()...)
+	}
+	if m.agentPrompt {
+		rows = append(rows, m.agentPromptInputRender()...)
+	}
 	if m.finderOpen {
 		rows = append(rows, m.finderPanel()...)
 	}
@@ -227,12 +273,15 @@ func (m Model) View() tea.View {
 	if m.langChooserOpen {
 		rows = append(rows, m.langChooserPanel()...)
 	}
-	if m.complOpen && len(m.complItems) > 0 {
-		rows = append(rows, m.complPanel()...)
+	if m.pluginStoreOpen {
+		rows = append(rows, m.pluginStorePanel()...)
 	}
 	if m.termOpen {
 		rows = append(rows, m.terminalPanel()...)
 	}
+	// The completion popup floats under the edit line instead of being pinned
+	// to the bottom of the screen.
+	rows = m.overlayCompletion(rows)
 	var v tea.View
 	v.SetContent(lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n")))
 	v.AltScreen = true
@@ -240,7 +289,7 @@ func (m Model) View() tea.View {
 	v.MouseMode = tea.MouseModeCellMotion
 
 	// Terminal cursor: positioned at the editor cursor location.
-	if !m.gitOpen && !m.agentOpen && !m.agentReviewMode && !m.paletteOpen && !m.langChooserOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
+	if !m.gitOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode && !m.paletteOpen && !m.langChooserOpen && !m.pluginStoreOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.gotoOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
 		cx, cy := m.cursorScreenPos()
 		v.Cursor = tea.NewCursor(cx, cy)
 	}
@@ -354,8 +403,36 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	diagPath, _ := filepath.Abs(t.path)
 	tabDiags := m.diags[diagPath]
 
+	wrap := p.wordWrap && contentW > 0
+	var segs []wrapSeg
+	if wrap {
+		segs = t.tabWrap(contentW, m.cfg.Editor.TabWidth)
+	}
+
 	for row := 0; row < h; row++ {
 		ln := p.offsetY + row
+		segStart, segEnd := 0, 0
+		continuation := false
+		if wrap {
+			si := p.offsetY + row
+			if si >= len(segs) {
+				if gw > 0 {
+					rows[row] = strings.Repeat(" ", gw)
+				}
+				continue
+			}
+			ln = segs[si].line
+			segStart = segs[si].expStart
+			segEnd = segs[si].expEnd
+			continuation = segStart > 0
+		}
+
+		if continuation {
+			// Wrapped continuation row: blank gutter, content segment only.
+			rows[row] = strings.Repeat(" ", gw) + m.renderLineWrap(p, t, ln, segStart, segEnd, active, syntaxLines)
+			continue
+		}
+
 		num := strconv.Itoa(ln + 1)
 		gitMark := " "
 		gitMarkStyle := gutterStyle
@@ -403,13 +480,45 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 		gutStr += diagMarkStyle.Render(diagMark)
 		gutStr += gitMarkStyle.Render(gitMark)
 
-		if ln < t.buf.LineCount() {
-			rows[row] = gutStr + m.renderLine(p, t, ln, contentW, active, syntaxLines)
+		if active && !wrap && m.ghostVisible && len(m.ghostLines) > 1 && ln > m.ghostRow {
+			// Multi-line ghost: subsequent ghost lines appear on their own rows.
+			gidx := ln - m.ghostRow
+			if gidx < len(m.ghostLines) {
+				ghost := m.ghostLines[gidx]
+				if ghost == "" {
+					rows[row] = gutStr + ghostStyle.Render(strings.Repeat(" ", contentW))
+				} else if ln >= t.buf.LineCount() || strings.TrimSpace(string(t.buf.LineAt(ln))) == "" {
+					// Only overlay ghost on blank/gap rows to avoid obscuring real code.
+					rows[row] = gutStr + ghostStyle.Render(ghost)
+				} else {
+					rows[row] = gutStr + m.renderLine(p, t, ln, contentW, active, syntaxLines)
+				}
+				continue
+			}
+		}
+
+		if ln >= t.buf.LineCount() {
+			rows[row] = gutStr
+			continue
+		}
+		if wrap {
+			rows[row] = gutStr + m.renderLineWrap(p, t, ln, segStart, segEnd, active, syntaxLines)
 		} else {
 			rows[row] = gutStr + m.renderLine(p, t, ln, contentW, active, syntaxLines)
 		}
 	}
 	return rows
+}
+
+// renderLineWrap renders one wrap segment (expanded rune range [segStart,
+// segEnd)) of a buffer line as its own screen row.
+func (m Model) renderLineWrap(p *pane, t *tab, ln, segStart, segEnd int, activePane bool, syntaxLines []syntax.HighlightedLine) string {
+	if ln < 0 || ln >= t.buf.LineCount() || segEnd <= segStart {
+		return ""
+	}
+	pp := *p
+	pp.offsetX = segStart
+	return m.renderLine(&pp, t, ln, segEnd-segStart, activePane, syntaxLines)
 }
 
 // diagMarkFor returns the gutter marker for a line given the file's
@@ -452,16 +561,22 @@ func (m Model) leftRailWidth() int {
 	return m.sidebarWidth()
 }
 
+// tabLabel is the text of one tab in the tab bar, shared by the renderer and
+// the mouse hit-test so that clicks line up with painted tabs.
+func (m Model) tabLabel(i int) string {
+	t := &m.tabs[i]
+	name := fmt.Sprintf(" %d:%s ", i+1, t.name(m.baseDir()))
+	if t.buf.Dirty() {
+		name += "* "
+	}
+	return name
+}
+
 func (m Model) tabBar() string {
 	var parts []string
 	activeTab := m.activeTabIndex()
-	base := m.baseDir()
 	for i := range m.tabs {
-		t := &m.tabs[i]
-		name := fmt.Sprintf(" %d:%s ", i+1, t.name(base))
-		if t.buf.Dirty() {
-			name += "* "
-		}
+		name := m.tabLabel(i)
 		if i == activeTab {
 			parts = append(parts, statusHiStyle.Render(name))
 		} else {
@@ -478,8 +593,13 @@ func (m Model) tabBar() string {
 
 func (m Model) treePanel(h int) []string {
 	inner := m.cfg.UI.TreeWidth - 2
+	hint := m.treeHint(inner)
+	if len(hint) > h {
+		hint = hint[:h]
+	}
+	entryRows := h - len(hint)
 	rows := make([]string, 0, h)
-	for row := 0; row < h; row++ {
+	for row := 0; row < entryRows; row++ {
 		i := m.treeOffset + row
 		var cell string
 		if i < len(m.treeRows) {
@@ -514,7 +634,59 @@ func (m Model) treePanel(h int) []string {
 		}
 		rows = append(rows, cell+" ")
 	}
+	for _, line := range hint {
+		fill := inner - lipgloss.Width(line)
+		if fill < 0 {
+			fill = 0
+		}
+		rows = append(rows, hintStyle.Render(line+strings.Repeat(" ", fill))+" ")
+	}
 	return rows
+}
+
+// treeHint wraps the project-panel key hint to the panel width. It is always
+// rendered (even when the tree is visible but unfocused) so the file
+// operations are discoverable.
+func (m Model) treeHint(inner int) []string {
+	if inner < 8 {
+		return []string{m.t("tree.hint")[:maxInt(1, inner)]}
+	}
+	return wrapHint(m.t("tree.hint"), inner)
+}
+
+// wrapHint wraps words from s to at most w runes per line.
+func wrapHint(s string, w int) []string {
+	var lines []string
+	var cur []rune
+	for _, word := range strings.Fields(s) {
+		ww := []rune(word)
+		add := len(cur) > 0
+		if add {
+			add = len(cur)+1+len(ww) <= w
+		} else if len(ww) > w {
+			ww = ww[:w]
+		}
+		if add {
+			cur = append(cur, ' ')
+			cur = append(cur, ww...)
+		} else {
+			if len(cur) > 0 {
+				lines = append(lines, string(cur))
+			}
+			cur = append([]rune{}, ww...)
+		}
+		if len(cur) == w {
+			lines = append(lines, string(cur))
+			cur = nil
+		}
+	}
+	if len(cur) > 0 {
+		lines = append(lines, string(cur))
+	}
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	return lines
 }
 
 func maxInt(a, b int) int {
@@ -550,7 +722,9 @@ func (m Model) helpPanel(h int) []string {
 
 func (m Model) promptLine() string {
 	label := m.t("prompt.open_file")
-	if m.promptNewFile {
+	if m.promptRename {
+		label = m.t("prompt.rename")
+	} else if m.promptNewFile {
 		label = m.t("prompt.new_file")
 	} else if m.promptNewFolder {
 		label = m.t("prompt.new_folder")
@@ -581,12 +755,27 @@ func (m Model) quitLine() string {
 	return line
 }
 
+// treeConfirmLine renders the pending delete/trash confirmation at the bottom
+// of the screen while the tree panel awaits Y/N/Esc.
+func (m Model) treeConfirmLine() string {
+	label := m.t("prompt.delete_q", m.treeConfirmRel)
+	if m.treeConfirm == "trash" {
+		label = m.t("prompt.trash_q", m.treeConfirmRel)
+	}
+	line := statusHiStyle.Render(label)
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
 func (m Model) gitLine() string {
-	line := statusHiStyle.Render(m.t("git.commit_line")) + statusStyle.Render(string(m.gitCommitIn)) + cursorStyle.Render(" ")
+	line := statusHiStyle.Render(m.t("git.commit_line")) + cursorStyle.Render(" ")
 	if m.repo != nil {
 		branch := m.repo.Branch()
 		if branch != "" {
-			line += hintStyle.Render(fmt.Sprintf(" (%s: %s)", branch, m.repo.StatusSummary()))
+			line += hintStyle.Render(fmt.Sprintf("(%s: %s)", branch, m.repo.StatusSummary()))
 		}
 	}
 	line += hintStyle.Render("  " + m.t("git.commit_hint"))
@@ -595,6 +784,57 @@ func (m Model) gitLine() string {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	return line
+}
+
+// gitCommitInputRows returns the word-wrapped lines of the commit input.
+func (m Model) gitCommitInputRows() []string {
+	w := m.width - 4 // "Commit: " (8 but styled) + cursor (1) — approximate
+	if w < 1 {
+		w = 1
+	}
+	lines := wrapRunes(string(m.gitCommitIn), w)
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	return lines
+}
+
+// gitCommitExtraRows returns the number of rows the commit input occupies
+// (the status-bar line remains; the input renders below it).
+func (m Model) gitCommitExtraRows() int {
+	if !m.gitOpen || m.gitMode != gitModeCommit {
+		return 0
+	}
+	n := len(m.gitCommitInputRows())
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// gitCommitInputRows renders returns the multi-line commit input rows.
+func (m Model) gitCommitInputRender() []string {
+	w := m.width
+	inputTextW := w - 8 // "Commit: " is 8 chars
+	if inputTextW < 1 {
+		inputTextW = 1
+	}
+	lines := wrapRunes(string(m.gitCommitIn), inputTextW)
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	var out []string
+	for i, line := range lines {
+		row := statusHiStyle.Render("Commit: ") + statusStyle.Render(line)
+		if i == len(lines)-1 {
+			row += cursorStyle.Render(" ")
+		}
+		if fill := w - lipgloss.Width(row); fill > 0 {
+			row += statusStyle.Render(strings.Repeat(" ", fill))
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 func (m Model) gitStatusLine() string {
@@ -984,7 +1224,7 @@ func (m Model) terminalPanel() []string {
 }
 
 // chatPanel renders the right-side AI chat rail: header with the model
-// name, scrolling transcript, input line at the bottom.
+// name, scrolling transcript, key hint and input line at the bottom.
 func (m Model) chatPanel(h int) []string {
 	w := m.chatPanelWidth()
 	rows := make([]string, 0, h)
@@ -997,12 +1237,27 @@ func (m Model) chatPanel(h int) []string {
 	if m.chatBusy {
 		header += statusStyle.Render(m.t("ai.streaming"))
 	}
+	if n := len(m.chatThreads); n > 0 {
+		pos := "new"
+		if m.chatThreadPos >= 0 {
+			pos = fmt.Sprintf("%d", m.chatThreadPos+1)
+		}
+		header += statusStyle.Render(fmt.Sprintf(" %s/%d", pos, n))
+	}
 	if fill := w - lipgloss.Width(header); fill > 0 {
 		header += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	rows = append(rows, header)
 
-	bodyH := h - 2 // header + input line
+	inputH := m.chatInputHeight()
+	bodyH := h - 1 - inputH // header + multi-line input
+	showHint := h >= 5
+	if showHint {
+		bodyH = h - 2 - inputH // also reserve room for the hint bar
+	}
+	if bodyH < 1 {
+		bodyH = 1
+	}
 	total := len(m.chatRows)
 	start := total - bodyH + m.chatScroll
 	if start > total-bodyH {
@@ -1024,6 +1279,10 @@ func (m Model) chatPanel(h int) []string {
 				st = chatAILabelStyle
 			case "ai":
 				st = chatAITextStyle
+			case "label-tool":
+				st = chatToolLabelStyle
+			case "tool":
+				st = chatToolTextStyle
 			case "err":
 				st = gitDelStyle
 			default:
@@ -1035,14 +1294,46 @@ func (m Model) chatPanel(h int) []string {
 		rows = append(rows, cell)
 	}
 
-	input := statusHiStyle.Render(" ❯ ") + statusStyle.Render(string(m.chatIn)) + cursorStyle.Render(" ")
-	if m.chatBusy {
-		input += hintStyle.Render("⋯")
+	if showHint {
+		hintText := m.t("chat.hint")
+		r := []rune(hintText)
+		if len(r) > w {
+			hintText = string(r[:w])
+		}
+		hint := statusStyle.Render(hintText)
+		if fill := w - lipgloss.Width(hint); fill > 0 {
+			hint += statusStyle.Render(strings.Repeat(" ", fill))
+		}
+		rows = append(rows, hint)
 	}
-	if fill := w - lipgloss.Width(input); fill > 0 {
-		input += statusStyle.Render(strings.Repeat(" ", fill))
+
+	inputTextW := w - 4 // " ❯ " (3) + cursor (1)
+	if inputTextW < 1 {
+		inputTextW = 1
 	}
-	rows = append(rows, input)
+	inputLines := wrapRunes(string(m.chatIn), inputTextW)
+	if len(inputLines) == 0 {
+		inputLines = []string{""}
+	}
+	for i, line := range inputLines {
+		var input string
+		if i == 0 {
+			input = statusHiStyle.Render(" ❯ ")
+		} else {
+			input = statusHiStyle.Render("   ")
+		}
+		input += statusStyle.Render(line)
+		if i == len(inputLines)-1 {
+			input += cursorStyle.Render(" ")
+			if m.chatBusy {
+				input += hintStyle.Render("⋯")
+			}
+		}
+		if fill := w - lipgloss.Width(input); fill > 0 {
+			input += statusStyle.Render(strings.Repeat(" ", fill))
+		}
+		rows = append(rows, input)
+	}
 	return rows
 }
 
@@ -1088,6 +1379,16 @@ func (m Model) searchLine() string {
 	return line
 }
 
+func (m Model) gotoLine() string {
+	line := statusHiStyle.Render(m.t("goto.label")) + statusStyle.Render(string(m.gotoIn)) + cursorStyle.Render(" ")
+	line += hintStyle.Render(m.t("goto.hint"))
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
 func (m Model) replaceLine() string {
 	findPart := statusHiStyle.Render(m.t("replace.find")) + statusStyle.Render(string(m.searchQuery))
 	if m.replaceFocusFind {
@@ -1120,8 +1421,147 @@ func (m Model) replaceLine() string {
 }
 
 func (m Model) aiInlinePrompt() string {
-	line := statusHiStyle.Render(m.t("ai.instr")) + statusStyle.Render(string(m.aiInlineInput)) + cursorStyle.Render(" ")
-	line += hintStyle.Render(m.t("ai.instr_hint"))
+	label := m.t("ai.instr")
+	line := statusHiStyle.Render(label) + hintStyle.Render(m.t("ai.instr_hint"))
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+func (m Model) aiInlineExtraRows() int {
+	if !m.aiInlineOpen {
+		return 0
+	}
+	w := m.width - lipgloss.Width(m.t("ai.instr")) - 1
+	if w < 1 {
+		w = 1
+	}
+	n := len(wrapRunes(string(m.aiInlineInput), w))
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+func (m Model) aiInlineInputRender() []string {
+	labelW := lipgloss.Width(m.t("ai.instr"))
+	inputTextW := m.width - labelW - 1
+	if inputTextW < 1 {
+		inputTextW = 1
+	}
+	lines := wrapRunes(string(m.aiInlineInput), inputTextW)
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	var out []string
+	for i, line := range lines {
+		var row string
+		if i == 0 {
+			row = statusHiStyle.Render(m.t("ai.instr"))
+		} else {
+			row = statusHiStyle.Render(strings.Repeat(" ", labelW))
+		}
+		row += statusStyle.Render(line)
+		if i == len(lines)-1 {
+			row += cursorStyle.Render(" ")
+		}
+		if fill := m.width - lipgloss.Width(row); fill > 0 {
+			row += statusStyle.Render(strings.Repeat(" ", fill))
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+// aiFixPrompt renders the input bar for the LSP/AI fix instruction prompt.
+func (m Model) aiFixPrompt() string {
+	line := statusHiStyle.Render(m.t("ai.fix_instr")) + hintStyle.Render(m.t("ai.fix_instr_hint"))
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+func (m Model) aiFixExtraRows() int {
+	if !m.aiFixOpen {
+		return 0
+	}
+	w := m.width - lipgloss.Width(m.t("ai.fix_instr")) - 1
+	if w < 1 {
+		w = 1
+	}
+	n := len(wrapRunes(string(m.aiFixInput), w))
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+func (m Model) aiFixInputRender() []string {
+	labelW := lipgloss.Width(m.t("ai.fix_instr"))
+	inputTextW := m.width - labelW - 1
+	if inputTextW < 1 {
+		inputTextW = 1
+	}
+	lines := wrapRunes(string(m.aiFixInput), inputTextW)
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	var out []string
+	for i, line := range lines {
+		var row string
+		if i == 0 {
+			row = statusHiStyle.Render(m.t("ai.fix_instr"))
+		} else {
+			row = statusHiStyle.Render(strings.Repeat(" ", labelW))
+		}
+		row += statusStyle.Render(line)
+		if i == len(lines)-1 {
+			row += cursorStyle.Render(" ")
+		}
+		if fill := m.width - lipgloss.Width(row); fill > 0 {
+			row += statusStyle.Render(strings.Repeat(" ", fill))
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+// aiFixBusyLine renders the streaming status while the AI is fixing the file.
+func (m Model) aiFixBusyLine() string {
+	preview := m.aiFixProposal
+	if len(preview) > 60 {
+		preview = preview[:60] + "..."
+	}
+	line := statusHiStyle.Render(m.t("ai.fix_streaming")) + hintStyle.Render(preview)
+	hint := "  (Esc to cancel)"
+	line += hintStyle.Render(hint)
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+// aiFixReviewBottom renders the diff-review hint bar for the AI fix.
+func (m Model) aiFixReviewBottom() string {
+	added, modified, deleted := 0, 0, 0
+	for _, dr := range m.aiFixReviewRows {
+		switch dr.Type {
+		case vcs.DiffAdded:
+			added++
+		case vcs.DiffModified:
+			modified++
+		case vcs.DiffDeleted:
+			deleted++
+		}
+	}
+	line := statusHiStyle.Render(m.t("ai.diff")) +
+		hintStyle.Render(fmt.Sprintf("  +%d ~%d -%d", added, modified, deleted)) +
+		hintStyle.Render(m.t("ai.fix_review_hint"))
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -1342,6 +1782,22 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 		}
 	}
 
+	// Ghost text that continues the *current* line: the first ghost line is a
+	// continuation of the ghost start line and renders right after its content.
+	if m.ghostVisible && activePane && ln == m.ghostRow && len(m.ghostLines) > 0 {
+		g0 := m.ghostLines[0]
+		// Strip the part of the ghost that duplicates the already-typed prefix.
+		prefixLen := len(raw)
+		rem := g0
+		if m.ghostCol <= prefixLen && m.ghostCol <= len(g0) {
+			rem = g0[m.ghostCol:]
+		}
+		// Show ghost only when the cursor is at the end of the ghost start line.
+		if t.buf.CurLine() == ln && t.buf.Col() == prefixLen && rem != "" {
+			out.WriteString(ghostStyle.Render(rem))
+		}
+	}
+
 	return out.String()
 }
 
@@ -1365,6 +1821,38 @@ func (m Model) langChooserPanel() []string {
 		} else {
 			rows = append(rows, statusStyle.Render(label))
 		}
+	}
+	return rows
+}
+
+func (m Model) pluginStorePanel() []string {
+	rows := make([]string, 0, len(m.storeItems)+2)
+	rows = append(rows, statusHiStyle.Render(m.t("plugin.store_title")))
+	for i, p := range m.storeItems {
+		status := m.t("plugin.not_installed")
+		if m.pluginInstalled(p.File) {
+			status = m.t("plugin.installed")
+		}
+		src := ""
+		if p.Remote {
+			src = " [github]"
+		}
+		label := fmt.Sprintf(" %s — %s%s [%s] ", p.Name, p.Desc, src, status)
+		pad := m.width - lipgloss.Width(label)
+		if pad < 0 {
+			pad = 0
+		}
+		label += strings.Repeat(" ", pad)
+		if i == m.pluginStoreSel {
+			rows = append(rows, statusHiStyle.Render(label))
+		} else {
+			rows = append(rows, statusStyle.Render(label))
+		}
+	}
+	if m.storeLoading {
+		rows = append(rows, statusStyle.Render(m.t("plugin.loading")))
+	} else if m.storeErr != "" {
+		rows = append(rows, statusStyle.Render("plugin store: "+m.storeErr))
 	}
 	return rows
 }
@@ -1432,7 +1920,7 @@ func (m Model) statusBar() string {
 		fileInfo = fmt.Sprintf("%s %s ", endings[t.lineEnding], enc)
 	}
 	hint := ""
-	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiCfgOpen && !m.helpOpen && !m.agentOpen && !m.agentReviewMode {
+	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gotoOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
 		hint = m.t("status.f1_help")
 		if m.layout != splitNone {
 			hint += m.t("status.f8_pane")

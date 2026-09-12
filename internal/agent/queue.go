@@ -8,11 +8,13 @@ import (
 )
 
 // Queue is a thread-safe FIFO of agent Tasks. Every mutation publishes an
-// EventAgentUpdated on the provided bus so the TUI can repaint.
+// EventAgentUpdated on the provided bus so the TUI can repaint, and Enqueue
+// wakes the worker channel so it does not poll.
 type Queue struct {
 	mu    sync.Mutex
 	tasks []*Task // sorted oldest -> newest, includes finished tasks
 	bus   publisher
+	wake  chan struct{} // buffered(1); signaled when a task is enqueued
 	order uint64
 }
 
@@ -24,7 +26,19 @@ type publisher interface {
 
 // NewQueue creates an empty queue. bus may be nil (publishing becomes a no-op).
 func NewQueue(bus publisher) *Queue {
-	return &Queue{bus: bus}
+	return &Queue{bus: bus, wake: make(chan struct{}, 1)}
+}
+
+// Wake returns the channel that is signaled whenever a task is enqueued.
+// A blocked worker drains it and re-checks the queue; a buffered(1) channel is
+// enough for a single worker because the wake is only a hint to call Next.
+func (q *Queue) Wake() <-chan struct{} { return q.wake }
+
+func (q *Queue) notify() {
+	select {
+	case q.wake <- struct{}{}:
+	default:
+	}
 }
 
 func (q *Queue) publish(id string) {
@@ -51,6 +65,7 @@ func (q *Queue) Enqueue(prompt string) *Task {
 	}
 	q.tasks = append(q.tasks, t)
 	q.publish(t.ID)
+	q.notify()
 	return t
 }
 

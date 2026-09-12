@@ -530,7 +530,50 @@ func TestEditorGitPanelStageToggle(t *testing.T) {
 	}
 }
 
-func TestGitKeyNameCyrillicLayout(t *testing.T) {
+func TestEditorGitCommitPanelRealTerminalEnter(t *testing.T) {
+	dir, f := initTestGitRepo(t)
+
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	m.cur().buf.Insert('!')
+	m.saveActive()
+
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	m = press(m, tea.KeyPressMsg{Text: string('a')})
+	m = press(m, tea.KeyPressMsg{Text: string('c')})
+	if m.gitMode != gitModeCommit {
+		t.Fatalf("expected commit mode after 'c', got %d", m.gitMode)
+	}
+	m = typeStr(m, "real terminal commit")
+
+	// Real terminals deliver Enter as Code=KeyEnter with Text="\r" (or "\n").
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter, Text: "\r"})
+
+	if m.gitOpen {
+		t.Fatal("gitOpen should close after commit (Enter with CR text)")
+	}
+	if !strings.Contains(m.msg, "committed:") {
+		t.Fatalf("status message should confirm commit, got: %s", m.msg)
+	}
+	r, err := git.PlainOpen(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := r.Head()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := r.CommitObject(head.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Message != "real terminal commit\n" && c.Message != "real terminal commit" {
+		t.Fatalf("HEAD commit message = %q", c.Message)
+	}
+}
+
+func TestEditorGitKeyNameCyrillicLayout(t *testing.T) {
 	// 'и' is the Cyrillic letter that physically occupies the 'b' key (ЙЦУКЕН).
 	if got := gitKeyName(tea.KeyPressMsg{Text: "и"}); got != "b" {
 		t.Fatalf("Cyrillic 'и' must map to 'b', got %q", got)
@@ -548,8 +591,17 @@ func TestGitKeyNameCyrillicLayout(t *testing.T) {
 	if got := gitKeyName(tea.KeyPressMsg{Code: tea.KeyEnter}); got != "enter" {
 		t.Fatalf("Enter must stay 'enter', got %q", got)
 	}
+	if got := gitKeyName(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "\r"}); got != "enter" {
+		t.Fatalf("Enter with Text CR must still be 'enter', got %q", got)
+	}
+	if got := gitKeyName(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "\n"}); got != "enter" {
+		t.Fatalf("Enter with Text LF must still be 'enter', got %q", got)
+	}
 	if got := gitKeyName(tea.KeyPressMsg{Code: tea.KeyEsc}); got != "esc" {
 		t.Fatalf("Esc must stay 'esc', got %q", got)
+	}
+	if got := gitKeyName(tea.KeyPressMsg{Code: tea.KeyBackspace}); got != "backspace" {
+		t.Fatalf("Backspace must stay 'backspace', got %q", got)
 	}
 	// BaseCode wins when present (Windows Console API).
 	if got := gitKeyName(tea.KeyPressMsg{Text: "и", BaseCode: 'b'}); got != "b" {
