@@ -8,8 +8,16 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"dmed/internal/buffer"
+)
+
+var (
+	treeConnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	treeIconStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("208"))
+	treeDirStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true)
+	treeFileStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("253"))
 )
 
 const (
@@ -22,6 +30,8 @@ type treeEntry struct {
 	name  string
 	depth int
 	isDir bool
+	anc   []bool // 'last sibling' flag of each ancestor, nearest parent last
+	last  bool   // true when this entry is the last child of its parent
 }
 
 func (m Model) sidebarOn() bool {
@@ -67,8 +77,8 @@ func (m *Model) rebuildTree() {
 func (m *Model) buildTree() []treeEntry {
 	base := m.baseDir()
 	var rows []treeEntry
-	var walk func(rel string, depth int)
-	walk = func(rel string, depth int) {
+	var walk func(rel string, depth int, anc []bool)
+	walk = func(rel string, depth int, anc []bool) {
 		dir := filepath.Join(base, filepath.FromSlash(rel))
 		dents, err := os.ReadDir(dir)
 		if err != nil {
@@ -81,7 +91,7 @@ func (m *Model) buildTree() []treeEntry {
 			}
 			return dents[i].Name() < dents[j].Name()
 		})
-		for _, d := range dents {
+		for i, d := range dents {
 			name := d.Name()
 			skip := false
 			for _, s := range m.cfg.Editor.SkippedDirs {
@@ -97,38 +107,85 @@ func (m *Model) buildTree() []treeEntry {
 			if rel != "" {
 				childRel = rel + "/" + name
 			}
-			rows = append(rows, treeEntry{rel: childRel, name: name, depth: depth, isDir: d.IsDir()})
+			rows = append(rows, treeEntry{
+				rel:   childRel,
+				name:  name,
+				depth: depth,
+				isDir: d.IsDir(),
+				anc:   anc,
+				last:  i == len(dents)-1,
+			})
 			if len(rows) >= treeMaxRows {
 				return
 			}
 			if d.IsDir() && m.expanded[childRel] {
-				walk(childRel, depth+1)
+				childAnc := make([]bool, len(anc)+1)
+				copy(childAnc, anc)
+				childAnc[len(anc)] = i == len(dents)-1
+				walk(childRel, depth+1, childAnc)
 				if len(rows) >= treeMaxRows {
 					return
 				}
 			}
 		}
 	}
-	walk("", 1)
+	walk("", 1, nil)
 	return rows
+}
+
+// treeEntryRows is the number of tree rows that fit in a panel of height h
+// before the key-hint lines.
+func (m Model) treeEntryRows(h int) int {
+	if h <= 0 {
+		return 0
+	}
+	inner := m.cfg.UI.TreeWidth - 2
+	if inner < 1 {
+		inner = 1
+	}
+	er := h - len(m.treeHint(inner))
+	if er < 0 {
+		er = 0
+	}
+	return er
 }
 
 func (m *Model) clampTreeScroll(h int) {
 	if h <= 0 {
 		return
 	}
+	n := len(m.treeRows)
 	if m.treeSel < m.treeOffset {
 		m.treeOffset = m.treeSel
 	}
 	if m.treeSel >= m.treeOffset+h {
 		m.treeOffset = m.treeSel - h + 1
 	}
-	if m.treeOffset > len(m.treeRows)-h {
-		m.treeOffset = len(m.treeRows) - h
+	if m.treeOffset > n-h {
+		m.treeOffset = n - h
 	}
 	if m.treeOffset < 0 {
 		m.treeOffset = 0
 	}
+}
+
+// clampedTreeOffset returns the scroll offset clamped to the visible window,
+// so a stale offset (e.g. after a resize) never blanks the start of the tree.
+func (m Model) clampedTreeOffset(h int) int {
+	if h <= 0 {
+		return 0
+	}
+	n := len(m.treeRows)
+	if n <= h {
+		return 0
+	}
+	if m.treeOffset < 0 {
+		return 0
+	}
+	if m.treeOffset > n-h {
+		return n - h
+	}
+	return m.treeOffset
 }
 
 func (m *Model) handleTree(msg tea.KeyPressMsg) tea.Cmd {
@@ -238,7 +295,7 @@ func (m *Model) handleTree(msg tea.KeyPressMsg) tea.Cmd {
 	default:
 		return nil
 	}
-	m.clampTreeScroll(m.viewHeight())
+	m.clampTreeScroll(m.treeEntryRows(m.viewHeight()))
 	return nil
 }
 

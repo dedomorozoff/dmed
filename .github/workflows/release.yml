@@ -75,9 +75,9 @@ jobs:
       - name: Install build deps
         run: ${{ matrix.install }}
 
-      # Distro Go is older than go.mod requires; install the pinned 1.25
-      # toolchain via setup-go so builds don't fall back to a broken
-      # toolchain download inside the container.
+      # Distro Go is older than go.mod requires; install the pinned toolchain
+      # via setup-go so builds don't fall back to a broken toolchain download
+      # inside the container.
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -127,6 +127,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Delete any previous release for this tag so re-tagging rebuilds cleanly.
+          gh release delete "$GITHUB_REF_NAME" --yes 2>/dev/null || true
           # Upload every file under dist/ (some packages land in nested dirs,
           # e.g. dist/rpm/RPMS/...), skipping directories.
           mapfile -t assets < <(find dist -type f)

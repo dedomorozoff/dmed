@@ -123,7 +123,7 @@ deb: build-linux-amd64 ## Build .deb package (amd64)
 
 # Fedora/RHEL (.rpm)
 rpm: build-linux-amd64 ## Build .rpm package (x86_64)
-	@mkdir -p dist/rpm/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+	@mkdir -p dist/rpm/BUILD dist/rpm/RPMS dist/rpm/SOURCES dist/rpm/SPECS dist/rpm/SRPMS
 	cp dist/dmed-linux-amd64 dist/rpm/SOURCES/dmed
 	cp docs/dmed.1 dist/rpm/SOURCES/dmed.1
 	echo 'Name:           dmed' > dist/rpm/SPECS/dmed.spec

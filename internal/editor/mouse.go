@@ -627,7 +627,7 @@ func (m *Model) wheelLeftRail(dir int) tea.Cmd {
 			m.treeFocus = true
 			m.gitFocus = false
 			m.chatFocus = false
-			m.clampTreeScroll(m.viewHeight())
+			m.clampTreeScroll(m.treeEntryRows(m.viewHeight()))
 		}
 	}
 	return nil
