@@ -10,11 +10,21 @@ env:
   GOSUMDB: sum.golang.org
 
 jobs:
-  publish:
-    name: build + publish release
+  build:
+    name: cross-compile (${{ matrix.platform }})
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux-amd64
+          - linux-arm64
+          - freebsd-amd64
+          - openbsd-amd64
+          - netbsd-amd64
+          - darwin-amd64
+          - darwin-arm64
+          - windows-amd64
     steps:
       - uses: actions/checkout@v4
 
@@ -24,30 +34,104 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build all platforms
-        run: make dist VERSION=${GITHUB_REF_NAME#v}
+      - name: Build ${{ matrix.platform }}
+        run: make build-${{ matrix.platform }} VERSION="${GITHUB_REF_NAME#v}"
 
-      - name: Build Windows zip
-        run: make win-zip VERSION=${GITHUB_REF_NAME#v}
-
-      - name: Install packaging tools
-        run: sudo apt-get update && sudo apt-get install -y rpm
-
-      - name: Build .deb package
-        run: make deb VERSION=${GITHUB_REF_NAME#v}
-
-      - name: Build .rpm package
-        run: make rpm VERSION=${GITHUB_REF_NAME#v}
-
-      - name: Build Termux .deb
-        run: make termux VERSION=${GITHUB_REF_NAME#v}
-
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            dist/dmed-*
-            dist/*.zip
+          name: dmed-${{ matrix.platform }}
+          path: dist/dmed-${{ matrix.platform }}*
+          if-no-files-found: error
+
+  packages:
+    name: package (${{ matrix.target }})
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: deb
+            image: ubuntu:24.04
+            install: apt-get update && apt-get install -y --no-install-recommends make dpkg-dev ca-certificates
+          - target: termux
+            image: ubuntu:24.04
+            install: apt-get update && apt-get install -y --no-install-recommends make dpkg-dev ca-certificates
+          - target: win-zip
+            image: ubuntu:24.04
+            install: apt-get update && apt-get install -y --no-install-recommends make zip ca-certificates
+          - target: rpm
+            image: fedora:40
+            install: dnf install -y make rpm-build ca-certificates
+          - target: pkg
+            image: archlinux:latest
+            install: pacman -Syu --noconfirm --needed make base-devel ca-certificates
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: ${{ matrix.install }}
+
+      # Distro Go is older than go.mod requires; install the pinned toolchain
+      # via setup-go so builds don't fall back to a broken toolchain download
+      # inside the container.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build package
+        if: matrix.target != 'pkg'
+        run: make ${{ matrix.target }} VERSION="${GITHUB_REF_NAME#v}"
+
+      # makepkg refuses to run as root; build the Arch package as a regular user.
+      - name: Build pacman package (non-root)
+        if: matrix.target == 'pkg'
+        run: |
+          useradd -m builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          su builder -c "make pkg VERSION=\"${GITHUB_REF_NAME#v}\""
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.target }}
+          path: |
             dist/*.deb
-            dist/rpm/RPMS/x86_64/*.rpm
-          generate_release_notes: true
+            dist/*.rpm
+            dist/rpm/RPMS/**/*.rpm
+            dist/*.pkg.tar.zst
+            dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [build, packages]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download binaries and packages
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Delete any previous release for this tag so re-tagging rebuilds cleanly.
+          gh release delete "$GITHUB_REF_NAME" --yes 2>/dev/null || true
+          # Upload every file under dist/ (some packages land in nested dirs,
+          # e.g. dist/rpm/RPMS/...), skipping directories.
+          mapfile -t assets < <(find dist -type f)
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
