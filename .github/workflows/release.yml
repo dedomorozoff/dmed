@@ -25,10 +25,10 @@ jobs:
           cache: true
 
       - name: Build all platforms
-        run: make dist
+        run: make dist VERSION=${GITHUB_REF_NAME#v}
 
       - name: Build Windows zip
-        run: make win-zip
+        run: make win-zip VERSION=${GITHUB_REF_NAME#v}
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
