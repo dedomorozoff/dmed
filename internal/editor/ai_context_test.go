@@ -490,6 +490,7 @@ func TestAIFixReviewCyrillicKeys(t *testing.T) {
 // on Ctrl+U, and that Esc cancels without submitting.
 func TestAIFixPromptTyping(t *testing.T) {
 	m := New()
+	m.cfg.AI.Model = "test-model"
 	m.cur().buf = buffer.Load("x\n")
 	m.cur().path = "fixture.go"
 	m.startFixRequest()
