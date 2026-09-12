@@ -30,10 +30,24 @@ jobs:
       - name: Build Windows zip
         run: make win-zip VERSION=${GITHUB_REF_NAME#v}
 
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Build .deb package
+        run: make deb VERSION=${GITHUB_REF_NAME#v}
+
+      - name: Build .rpm package
+        run: make rpm VERSION=${GITHUB_REF_NAME#v}
+
+      - name: Build Termux .deb
+        run: make termux VERSION=${GITHUB_REF_NAME#v}
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/dmed-*
             dist/*.zip
+            dist/*.deb
+            dist/rpm/RPMS/x86_64/*.rpm
           generate_release_notes: true
