@@ -114,6 +114,26 @@ func (m *Model) focusOtherPane() {
 	m.msg = ""
 }
 
+// toggleSplitVert opens a vertical split, or collapses the current split when
+// one is already open.
+func (m *Model) toggleSplitVert() {
+	if m.layout != splitNone {
+		m.closePane()
+		return
+	}
+	m.splitVert()
+}
+
+// toggleSplitHoriz opens a horizontal split, or collapses the current split
+// when one is already open.
+func (m *Model) toggleSplitHoriz() {
+	if m.layout != splitNone {
+		m.closePane()
+		return
+	}
+	m.splitHoriz()
+}
+
 func (m *Model) closePane() tea.Cmd {
 	if m.layout == splitNone {
 		return nil

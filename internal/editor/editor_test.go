@@ -615,17 +615,19 @@ func TestMouseClick(t *testing.T) {
 
 func TestToggleCommentKey(t *testing.T) {
 	dir := t.TempDir()
-	f := writeTemp(t, dir, "main.go", "func main() {}\n")
+	f := writeTemp(t, dir, "main.go", "func main() {}\n// x\n")
 	m := New(f)
 	m.width, m.height = 80, 24
 
 	m = press(m, tea.KeyPressMsg{Code: '/', Mod: tea.ModCtrl})
-	got := m.cur().buf.Text()
-	if got != "// func main() {}\n" {
-		t.Fatalf("ctrl+/ comment: got %q", got)
+	if m.cur().buf.Text() != "// func main() {}\n// x\n" {
+		t.Fatalf("ctrl+/ comment: got %q", m.cur().buf.Text())
+	}
+	if m.cur().buf.CurLine() != 1 {
+		t.Fatalf("ctrl+/ cursor line = %d, want 1 (jump to next line)", m.cur().buf.CurLine())
 	}
 	m = press(m, tea.KeyPressMsg{Code: '/', Mod: tea.ModCtrl})
-	if m.cur().buf.Text() != "func main() {}\n" {
+	if m.cur().buf.Text() != "// func main() {}\nx\n" {
 		t.Fatalf("ctrl+/ uncomment: got %q", m.cur().buf.Text())
 	}
 }

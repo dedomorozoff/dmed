@@ -1688,9 +1688,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "alt+]":
 		m.jumpHunk(1)
 	case "ctrl+\\", "f6":
-		m.splitVert()
+		m.toggleSplitVert()
 	case "ctrl+alt+h", "f7":
-		m.splitHoriz()
+		m.toggleSplitHoriz()
 	case "ctrl+alt+p", "f8":
 		m.focusOtherPane()
 	case "ctrl+alt+w":
@@ -2149,7 +2149,8 @@ func (m *Model) applyGoto(s string) {
 }
 
 // toggleComment comments or uncomments the current line(s) using the comment
-// syntax of the active file type (from the syntax highlighter's lexer).
+// syntax of the active file type (from the syntax highlighter's lexer), then
+// moves the cursor to the next line.
 func (m *Model) toggleComment() {
 	t := m.cur()
 	prefix, suffix := syntax.CommentTokens(t.path, t.buf.Text())
@@ -2159,6 +2160,7 @@ func (m *Model) toggleComment() {
 	}
 	t.buf.ToggleComment(prefix, suffix)
 	m.msg = ""
+	t.buf.MoveDown()
 	m.clampScroll()
 }
 
