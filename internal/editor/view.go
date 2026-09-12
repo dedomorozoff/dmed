@@ -598,36 +598,59 @@ func (m Model) treePanel(h int) []string {
 		hint = hint[:h]
 	}
 	entryRows := h - len(hint)
+	off := m.clampedTreeOffset(entryRows)
 	rows := make([]string, 0, h)
 	for row := 0; row < entryRows; row++ {
-		i := m.treeOffset + row
+		i := off + row
 		var cell string
 		if i < len(m.treeRows) {
 			e := m.treeRows[i]
-			indent := strings.Repeat("  ", e.depth-1)
-			label := e.name
-			if e.isDir {
-				if m.expanded[e.rel] {
-					label = "- " + label
-				} else {
-					label = "+ " + label
+			var plain strings.Builder
+			var styled strings.Builder
+			if e.depth > 1 {
+				for _, isLast := range e.anc {
+					seg := "    "
+					if !isLast {
+						seg = "│   "
+					}
+					plain.WriteString(seg)
+					styled.WriteString(treeConnStyle.Render(seg))
 				}
-			} else {
-				label = "  " + label
+				seg := "├── "
+				if e.last {
+					seg = "└── "
+				}
+				plain.WriteString(seg)
+				styled.WriteString(treeConnStyle.Render(seg))
 			}
-			pad := inner - lipgloss.Width(indent) - lipgloss.Width(label)
+			if e.isDir {
+				icon := "▸ "
+				if m.expanded[e.rel] {
+					icon = "▾ "
+				}
+				plain.WriteString(icon)
+				styled.WriteString(treeIconStyle.Render(icon))
+				plain.WriteString(e.name)
+				styled.WriteString(treeDirStyle.Render(e.name))
+			} else {
+				plain.WriteString(e.name)
+				styled.WriteString(treeFileStyle.Render(e.name))
+			}
+			line := styled.String()
+			pad := inner - lipgloss.Width(line)
 			if pad < 0 {
-				runes := []rune(label)
-				label = string(runes[:maxInt(0, len(runes)+pad)])
+				// Truncate to the available width.
+				runes := []rune(plain.String())
+				line = string(runes[:maxInt(0, len(runes)+pad)])
 				pad = 0
 			}
-			line := indent + label + strings.Repeat(" ", pad)
+			fill := strings.Repeat(" ", pad)
 			if i == m.treeSel && m.treeFocus {
-				cell = statusHiStyle.Render(line)
+				cell = statusHiStyle.Render(plain.String() + fill)
 			} else if i == m.treeSel {
-				cell = statusStyle.Render(line)
+				cell = statusStyle.Render(plain.String() + fill)
 			} else {
-				cell = line
+				cell = line + fill
 			}
 		} else {
 			cell = strings.Repeat(" ", inner)
