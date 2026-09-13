@@ -13,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"dmed/internal/debug"
 )
 
 // Diagnostic represents a compiler error, warning, or hint.
@@ -106,8 +108,8 @@ func Start(serverCmd string, args []string, rootDir string, onDiag func(path str
 		onDiag:      onDiag,
 	}
 
-	go c.readLoop()
-	go c.initialize()
+	go debug.CapturePanicReport(c.readLoop)
+	go debug.CapturePanicReport(c.initialize)
 
 	return c, nil
 }

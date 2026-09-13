@@ -173,6 +173,9 @@
 - [x] Перенос по словам (`Alt+Z` / палитра «Toggle Word Wrap»): длинные строки
       рендерятся сегментами по ширине панели, разрыв по словам; настройка
       `[editor] word_wrap`; wrap-aware скролл, каретка, клик/драг/колесо мыши.
+- [x] Crash-безопасность гороутин (`internal/debug.CapturePanicReport`):
+      каждая спавнящаяся goroutine обёрнута так, что паника логируется в
+      stderr, а не роняет весь процесс (Windows exit status 2).
 
 ### M6 — AI onboarding
 - [x] Пресеты провайдеров в wizard AI: Preferences (`←`/`→`): Ollama (local),

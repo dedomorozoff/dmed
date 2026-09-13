@@ -103,6 +103,9 @@ Conventions:
   holds no editable state of its own.
 - No global mutable state; models are values, mutations happen through
   pointer receivers on small, named methods.
+- Every goroutine spawned by the app runs its body under
+  `debug.CapturePanicReport` (`internal/debug`), so a panic is logged to
+  stderr instead of terminating the whole process with a Windows exit code 2.
 - Files are stored with a trailing newline; dirty check compares against the
   normalized saved snapshot (`MarkSaved`/`Dirty`).
 - Agent edits go through `internal/agent.Applier`: validate all

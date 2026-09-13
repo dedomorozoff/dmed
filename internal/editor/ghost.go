@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"dmed/internal/ai"
+	"dmed/internal/debug"
 )
 
 // GhostOutputMsg delivers a streaming delta for the ghost text suggestion.
@@ -83,7 +84,7 @@ func (m *Model) ghostTrigger() tea.Cmd {
 	m.ghostRow = curLine
 	m.ghostCol = col
 
-	go func() {
+	go debug.CapturePanicReport(func() {
 		defer close(ch)
 		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs, Options: m.aiRequestOptions()}, ai.Handler{
 			Delta: func(delta string) {
@@ -104,7 +105,7 @@ func (m *Model) ghostTrigger() tea.Cmd {
 			case <-ctx.Done():
 			}
 		}
-	}()
+	})
 
 	return waitForGhostOutput(ch)
 }
@@ -154,10 +155,10 @@ func (m *Model) dismissGhost() {
 	m.ghostText = ""
 	if m.ghostCh != nil {
 		// Drain channel to avoid goroutine leak
-		go func() {
+		go debug.CapturePanicReport(func() {
 			for range m.ghostCh {
 			}
-		}()
+		})
 		m.ghostCh = nil
 	}
 }

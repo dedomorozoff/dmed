@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
+	"dmed/internal/debug"
 )
 
 // Watcher monitors file changes using fsnotify and delivers debounced change notifications.
@@ -33,7 +35,7 @@ func New(callback func(path string)) (*Watcher, error) {
 		done:    make(chan struct{}),
 	}
 
-	go w.loop()
+	go debug.CapturePanicReport(w.loop)
 	return w, nil
 }
 

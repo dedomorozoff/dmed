@@ -13,6 +13,7 @@ import (
 	"dmed/internal/agent"
 	"dmed/internal/ai"
 	"dmed/internal/buffer"
+	"dmed/internal/debug"
 	"dmed/internal/events"
 	"dmed/internal/vcs"
 )
@@ -85,7 +86,7 @@ func (m *Model) ensureAgent() tea.Cmd {
 		}
 	})
 
-	go m.agentWorker()
+	go debug.CapturePanicReport(m.agentWorker)
 
 	return waitForAgentRefresh(m.agentCh)
 }

@@ -15,6 +15,7 @@ import (
 
 	"dmed/internal/agent"
 	"dmed/internal/ai"
+	"dmed/internal/debug"
 	"dmed/internal/vcs"
 
 	"github.com/atotto/clipboard"
@@ -368,7 +369,7 @@ func (m *Model) startChatTurn() tea.Cmd {
 
 	ch := make(chan chatEvent, 64)
 	m.chatCh = ch
-	go func() {
+	go debug.CapturePanicReport(func() {
 		defer close(ch)
 		var tools []ai.ToolCall
 		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs, Tools: chatToolDefs(), Options: m.aiRequestOptions()}, ai.Handler{
@@ -393,7 +394,7 @@ func (m *Model) startChatTurn() tea.Cmd {
 		case ch <- chatEvent{done: true, tools: tools}:
 		case <-ctx.Done():
 		}
-	}()
+	})
 	return waitForChatOutput(ch, gen)
 }
 

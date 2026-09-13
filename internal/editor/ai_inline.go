@@ -8,6 +8,7 @@ import (
 
 	"dmed/internal/ai"
 	"dmed/internal/buffer"
+	"dmed/internal/debug"
 	"dmed/internal/vcs"
 )
 
@@ -140,7 +141,7 @@ func (m *Model) submitInlineRequest() tea.Cmd {
 
 	ch := make(chan chatEvent, 64)
 	m.aiInlineCh = ch
-	go func() {
+	go debug.CapturePanicReport(func() {
 		defer close(ch)
 		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs, Options: m.aiRequestOptions()}, ai.Handler{
 			Delta: func(d string) {
@@ -156,7 +157,7 @@ func (m *Model) submitInlineRequest() tea.Cmd {
 			case <-ctx.Done():
 			}
 		}
-	}()
+	})
 	return waitForInlineOutput(ch)
 }
 
