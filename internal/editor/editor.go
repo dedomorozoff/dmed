@@ -519,6 +519,12 @@ type Model struct {
 	lastClickY     int
 	lastClickTime  time.Time
 	lastClickValid bool
+
+	// Double-Shift detection (JetBrains-style "search everywhere"): the time of
+	// the previous bare Shift press so two rapid taps open the palette. Only
+	// terminals with the Kitty protocol / Windows Console API report bare
+	// modifier presses, so this degrades gracefully elsewhere.
+	lastShiftTime time.Time
 }
 
 var debugKeys = os.Getenv("DMED_DEBUG_KEYS") != ""
@@ -1315,6 +1321,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		abs, _ := filepath.Abs(msg.path)
 		m.diags[abs] = msg.diags
 		return m, waitForLSPDiag(m.diagCh)
+	case lspDefinitionMsg:
+		if msg.err != nil {
+			m.msg = "goto def: " + msg.err.Error()
+		} else if msg.loc == nil {
+			m.msg = m.t("msg.no_definition")
+		} else {
+			m.focusOrOpen(msg.loc.Path)
+			if t := m.cur(); t != nil {
+				t.buf.SetCursor(msg.loc.Line, msg.loc.Col)
+				t.buf.Deselect()
+			}
+			m.clampScroll()
+		}
 	case pluginStoreMsg:
 		m.storeLoading = false
 		if msg.err != nil {
@@ -1379,6 +1398,20 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// etc.) receive the actual typed characters instead of the normalized
 	// English equivalents used only for keybinding matching.
 	msg.Text = origText
+
+	// JetBrains-style double Shift opens the palette ("search everywhere").
+	// Bare modifier presses are only reported by terminals with the Kitty
+	// keyboard protocol / Windows Console API; elsewhere this is a no-op.
+	if !msg.IsRepeat && (msg.Code == tea.KeyLeftShift || msg.Code == tea.KeyRightShift) {
+		now := time.Now()
+		if now.Sub(m.lastShiftTime) <= doubleShiftInterval && !m.lastShiftTime.IsZero() {
+			m.lastShiftTime = time.Time{}
+			m.startPalette()
+			return nil
+		}
+		m.lastShiftTime = now
+		return nil
+	}
 
 	// While the completion popup is open, navigation keys control it.
 	if m.complOpen && m.handleCompletionKey(s) {
@@ -1462,6 +1495,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+b", "f9":
 		m.toggleTree()
 		return nil
+	case "f12":
+		return m.gotoDefinition()
 	}
 	if m.conflictOpen {
 		switch s {

@@ -25,6 +25,14 @@ type lspDiagMsg struct {
 	diags []lsp.Diagnostic
 }
 
+// lspDefinitionMsg carries an async Go-to-Definition result back into the
+// editor model. loc is nil when the server found no target.
+type lspDefinitionMsg struct {
+	path string
+	loc  *lsp.Location
+	err  error
+}
+
 // waitForLSPDiag blocks until diagnostics arrive and forwards them as a Msg.
 func waitForLSPDiag(ch chan lspDiagMsg) tea.Cmd {
 	return func() tea.Msg {
@@ -177,6 +185,42 @@ func (m *Model) lspCompletionCmd() tea.Cmd {
 			return lspCompletionMsg{path: path, err: err}
 		}
 		return lspCompletionMsg{path: path, items: items}
+	}
+}
+
+// gotoDefinition fires an async Go-to-Definition request for the current
+// cursor and returns a command that delivers an lspDefinitionMsg when the
+// result arrives. It is used by F12.
+func (m *Model) gotoDefinition() tea.Cmd {
+	t := m.cur()
+	if t == nil {
+		return nil
+	}
+	return m.gotoDefinitionAt(t.path, t.buf.CurLine(), t.buf.Col())
+}
+
+// gotoDefinitionAt is like gotoDefinition but targets an explicit buffer
+// position; it backs both the F12 binding and Ctrl+Click navigation.
+func (m *Model) gotoDefinitionAt(path string, line, col int) tea.Cmd {
+	if path == "" {
+		return nil
+	}
+	cmd, _, _ := lspServerFor(strings.ToLower(filepath.Ext(path)))
+	if cmd == "" {
+		return nil
+	}
+	if m.lspClient == nil {
+		m.ensureLSP()
+	}
+	if m.lspClient == nil {
+		return nil
+	}
+	text := m.cur().buf.Text()
+	c := m.lspClient
+	return func() tea.Msg {
+		c.DidChange(path, text, 1)
+		loc, err := c.Definition(path, line, col)
+		return lspDefinitionMsg{path: path, loc: loc, err: err}
 	}
 }
 

@@ -48,7 +48,7 @@ type helpEntry struct {
 var helpEntries = []helpEntry{
 	{"Ctrl+S", "help.save"},
 	{"", ""},
-	{"Ctrl+P / F2", "help.palette"},
+	{"Ctrl+P / F2 / Shift+Shift", "help.palette"},
 	{"Shift+Arrows", "help.select"},
 	{"Ctrl+C / Ctrl+X / Ctrl+V", "help.clipboard"},
 	{"", ""},
@@ -57,6 +57,7 @@ var helpEntries = []helpEntry{
 	{"Ctrl+L", "help.goto_line"},
 	{"Alt+Z", "help.word_wrap"},
 	{"Ctrl+G", "help.git_panel"},
+	{"F12 / Ctrl+Click", "help.goto_def"},
 	{"D (in Git panel)", "help.git_diff"},
 	{"Alt+[ / Alt+]", "help.hunk"},
 	{"Ctrl+O", "help.finder"},
@@ -287,6 +288,12 @@ func (m Model) View() tea.View {
 	v.AltScreen = true
 	v.WindowTitle = "dmed — " + m.activeTab().name(m.baseDir())
 	v.MouseMode = tea.MouseModeCellMotion
+
+	// Request the Kitty keyboard protocol so the terminal reports bare
+	// modifier presses and every physical key as an escape code. This is what
+	// makes double-Shift (JetBrains-style palette) possible. Terminals without
+	// support ignore the request, so this degrades gracefully.
+	v.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
 
 	// Terminal cursor: positioned at the editor cursor location.
 	if !m.gitOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode && !m.paletteOpen && !m.langChooserOpen && !m.pluginStoreOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.gotoOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {

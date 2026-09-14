@@ -141,6 +141,10 @@
 - [x] Сессии: автосохранение и восстановление открытых файлов при перезапуске
 - [x] LSP клиент (`internal/lsp`): JSON-RPC 2.0 over stdin/stdout, диагностика,
       `Definition`, `DidOpen`/`DidChange` (интеграция с `gopls`/`pyright`)
+- [x] Навигация «перейти к определению»: `F12` и `Ctrl+Click` по идентификатору
+      через LSP `textDocument/definition` (открывает файл и ставит курсор)
+- [x] Палитра команд открывается по двойному `Shift` (как в JetBrains), помимо
+      `Ctrl+P`/`F2`; на терминалах с Kitty-протоколом / Windows Console API
 - [x] Автодополнение: попап (`Ctrl+Space`, авто-триггер), источники — слова из
       буфера + LSP (gopls/pyright/typescript/rust-analyzer/clangd/lua/ruby/php/
       zls/json/yaml/css/html), асинхронно, с fallback на слова. Доки в
