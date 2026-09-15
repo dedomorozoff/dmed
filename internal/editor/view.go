@@ -637,18 +637,20 @@ func (m Model) treePanel(h int) []string {
 				styled.WriteString(treeFileStyle.Render(e.name))
 			}
 			line := styled.String()
+			plainS := plain.String()
 			pad := inner - lipgloss.Width(line)
 			if pad < 0 {
 				// Truncate to the available width.
-				runes := []rune(plain.String())
-				line = string(runes[:maxInt(0, len(runes)+pad)])
+				runes := []rune(plainS)
+				plainS = string(runes[:maxInt(0, len(runes)+pad)])
+				line = plainS
 				pad = 0
 			}
 			fill := strings.Repeat(" ", pad)
 			if i == m.treeSel && m.treeFocus {
-				cell = statusHiStyle.Render(plain.String() + fill)
+				cell = statusHiStyle.Render(plainS + fill)
 			} else if i == m.treeSel {
-				cell = statusStyle.Render(plain.String() + fill)
+				cell = statusStyle.Render(plainS + fill)
 			} else {
 				cell = line + fill
 			}
@@ -1799,9 +1801,13 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 	}
 
 	// Cursor(s) at end of line
+	drawn := false
 	for _, cc := range carets {
 		if cc == len(exp) && cc >= start && cc < start+w {
-			out.WriteString(cursorStyle.Render(" "))
+			if !drawn {
+				out.WriteString(cursorStyle.Render(" "))
+			}
+			drawn = true
 		}
 	}
 
