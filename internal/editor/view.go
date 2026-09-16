@@ -295,11 +295,11 @@ func (m Model) View() tea.View {
 	// support ignore the request, so this degrades gracefully.
 	v.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
 
-	// Terminal cursor: positioned at the editor cursor location.
-	if !m.gitOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode && !m.paletteOpen && !m.langChooserOpen && !m.pluginStoreOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.gotoOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
-		cx, cy := m.cursorScreenPos()
-		v.Cursor = tea.NewCursor(cx, cy)
-	}
+	// The editor draws its own static reverse-video cursor at every caret
+	// (including the main one), so the terminal cursor must be hidden. Otherwise
+	// the blinking terminal block overlaps the static reverse cell and looks
+	// like two cursors stacked on the same position.
+	v.Cursor = nil
 
 	return v
 }
