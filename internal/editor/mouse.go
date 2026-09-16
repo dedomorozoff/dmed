@@ -52,6 +52,10 @@ func (m Model) termStartRow() int { return m.storeStartRow() + m.pluginStoreExtr
 // count as a double click.
 const doubleClickInterval = 400 * time.Millisecond
 
+// doubleShiftInterval is the window within which two bare Shift presses count
+// as the JetBrains-style "double Shift" palette shortcut.
+const doubleShiftInterval = 500 * time.Millisecond
+
 func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 	x, y := msg.X, msg.Y
 
@@ -331,6 +335,12 @@ func (m *Model) clickBuffer(x, y int, mod tea.KeyMod) tea.Cmd {
 	p := m.curPane()
 	t := &m.tabs[p.tabIdx]
 	ln, rawCol := m.clickPosToLineCol(m.activePane, editorRow, x)
+
+	// Ctrl+Click navigates to the definition under the pointer (like Zed /
+	// VS Code), instead of moving the cursor.
+	if mod&tea.ModCtrl != 0 {
+		return m.gotoDefinitionAt(t.path, ln, rawCol)
+	}
 
 	if mod&tea.ModAlt != 0 {
 		if t.buf.AddCursor(ln, rawCol, rawCol, rawCol) {

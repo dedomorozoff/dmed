@@ -747,3 +747,43 @@ func TestToggleWordWrapResetsOffsetX(t *testing.T) {
 		t.Fatalf("offsetX after wrap toggle: %d, want 0", m.panes[0].offsetX)
 	}
 }
+
+func TestDoubleShiftOpensPalette(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "a.txt", "hi\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	// A single Shift tap must not open the palette.
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyLeftShift})
+	if m.paletteOpen {
+		t.Fatal("single shift must not open the palette")
+	}
+
+	// A second Shift tap within the interval opens it (JetBrains-style).
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyRightShift})
+	if !m.paletteOpen {
+		t.Fatal("double shift must open the palette")
+	}
+}
+
+func TestDoubleShiftIgnoresHeldRepeat(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "a.txt", "hi\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	// First tap records the time; a held (auto-repeat) Shift is ignored and
+	// must not trigger the palette on its own.
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyLeftShift})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyLeftShift, IsRepeat: true})
+	if m.paletteOpen {
+		t.Fatal("held repeat shift must not open the palette")
+	}
+
+	// A real second tap after the (ignored) repeat still works.
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyRightShift})
+	if !m.paletteOpen {
+		t.Fatal("double shift after held repeat must open the palette")
+	}
+}

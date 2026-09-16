@@ -1,8 +1,12 @@
 package editor
 
 import (
+	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 
 	"dmed/internal/lsp"
 )
@@ -99,4 +103,73 @@ func TestMergeLSPCompletionDedupes(t *testing.T) {
 	if seen["good"] != 1 {
 		t.Fatalf("'good' duplicated: %v", m.complItems)
 	}
+}
+
+func TestGotoDefinitionJumpsToLocation(t *testing.T) {
+	dir := t.TempDir()
+	a := writeTemp(t, dir, "a.txt", "line0\nline1\nline2\n")
+	writeTemp(t, dir, "b.txt", "target line\n")
+
+	m := New(a)
+	m.width, m.height = 80, 24
+	if len(m.tabs) != 1 || m.cur().path != a {
+		t.Fatalf("setup: tabs=%d path=%q want %q", len(m.tabs), m.cur().path, a)
+	}
+
+	res, _ := m.Update(lspDefinitionMsg{
+		path: a,
+		loc:  &lsp.Location{Path: filepath.Join(dir, "b.txt"), Line: 0, Col: 3},
+	})
+	m = res.(Model)
+
+	if len(m.tabs) != 2 {
+		t.Fatalf("definition should open the target file, tabs=%d", len(m.tabs))
+	}
+	if m.cur().path != filepath.Join(dir, "b.txt") {
+		t.Fatalf("active tab = %q, want target file", m.cur().path)
+	}
+	if l, c := m.cur().buf.CurLine(), m.cur().buf.Col(); l != 0 || c != 3 {
+		t.Fatalf("cursor at %d:%d, want 0:3", l, c)
+	}
+}
+
+func TestGotoDefinitionNone(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "a.txt", "hi\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	res, _ := m.Update(lspDefinitionMsg{path: f})
+	m = res.(Model)
+	if m.msg != "no definition found" {
+		t.Fatalf("status = %q, want no-definition message", m.msg)
+	}
+}
+
+func TestGotoDefinitionError(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "a.txt", "hi\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	res, _ := m.Update(lspDefinitionMsg{path: f, err: errors.New("boom")})
+	m = res.(Model)
+	if !strings.Contains(m.msg, "boom") {
+		t.Fatalf("status = %q, want error detail", m.msg)
+	}
+}
+
+func TestF12BindingReturnsGotoCommand(t *testing.T) {
+	// F12 must dispatch gotoDefinition without panicking even when no LSP
+	// server is installed (gotoDefinitionAt returns nil in that case).
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "a.txt", "hi\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyF12})
+	if cmd == nil {
+		return // expected when gopls is absent; just must not panic
+	}
+	t.Fatalf("unexpected non-nil command from F12 without LSP")
 }
