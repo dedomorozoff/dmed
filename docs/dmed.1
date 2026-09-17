@@ -1,4 +1,4 @@
-.Dd August 24, 2026
+.Dd September 18, 2026
 .Dt DMED 1
 .Os
 .Sh NAME
@@ -6,11 +6,13 @@
 .Nd terminal code editor with AI agents
 .Sh SYNOPSIS
 .Nm
-.Op Fl h
+.Op Fl h | Fl v
 .Op Ar file ...
 .Nm
-.Op Fl h
+.Op Fl h | Fl v
 .Op Ar directory
+.Nm
+.Ic setup-ai
 .Sh DESCRIPTION
 .Nm
 is a terminal-native code editor with AI agents as first-class participants.
@@ -28,10 +30,20 @@ within that directory.
 If no arguments are given,
 .Nm
 opens an empty buffer.
+.Pp
+With the
+.Ic setup-ai
+subcommand,
+.Nm
+runs an interactive wizard that walks through the built-in AI provider
+presets, tests the connection, and writes the result to
+.Pa ~/.dmed.conf .
 .Sh OPTIONS
 .Bl -tag -width Ds
 .It Fl h , -help
 Show help message and exit.
+.It Fl v , -version
+Print the version and exit.
 .El
 .Sh KEYBINDINGS
 .Ss Navigation
@@ -44,6 +56,8 @@ Line start / line end
 Page up / page down
 .It Sy Ctrl+Up/Down
 Scroll without moving cursor
+.It Sy Ctrl+L
+Go to line (N, N:C, or +N/-N relative)
 .El
 .Ss Editing
 .Bl -tag -width "Alt+Up/Down"
@@ -53,11 +67,15 @@ Select text
 Copy / cut / paste
 .It Sy Ctrl+Z / Ctrl+R
 Undo / redo
-.It Sy Ctrl+Y
-Delete line
+.It Sy Ctrl+Y / Ctrl+D
+Delete line / duplicate line
+.It Sy Ctrl+Slash
+Toggle comment
+.It Sy Alt+Z
+Toggle word wrap
 .It Sy Alt+Up / Alt+Down
 Move line up / down
-.It Sy Enter / Backspace / Delete
+.It Sy Enter / Backspace / Delete / Tab
 Standard editing
 .El
 .Ss Files and Tabs
@@ -92,12 +110,36 @@ Git panel
 .It Sy Alt+T
 Toggle terminal
 .El
+.Ss Mouse
+The bottom-left status-bar icons (tree, git, AI, debug, terminal) are
+clickable; hovering one shows a callout with its keyboard shortcut.
+.Ss Debug
+.Bl -tag -width "Shift+F11"
+.It Sy Ctrl+Alt+D
+Toggle debug panel
+.It Sy F4
+Toggle breakpoint at cursor line
+.It Sy F5
+Run / continue
+.It Sy Shift+F5
+Stop session
+.It Sy F10
+Step over
+.It Sy F11
+Step in
+.It Sy Shift+F11
+Step out
+.El
 .Ss AI
 .Bl -tag -width "Alt+I"
 .It Sy Alt+A
 Toggle AI chat panel
 .It Sy Alt+I
 Inline rewrite (select text first)
+.It Sy Alt+G
+Inline ghost suggestion (Tab accept, Esc dismiss)
+.It Sy Alt+L
+Agent panel: background task queue, progress, cancel
 .It Sy Ctrl+U
 Clear chat history
 .El
@@ -119,7 +161,9 @@ Previous / next hunk
 .El
 .Ss General
 .Bl -tag -width "Ctrl+P"
-.It Sy Ctrl+P / F2
+.It Sy F12 / Ctrl+Click
+Go to definition (LSP)
+.It Sy Ctrl+P / F2 / double Shift
 Command palette
 .It Sy F1 / Ctrl+E
 Help overlay
@@ -144,6 +188,8 @@ Tab display width (default: 4).
 Chroma syntax theme name (default: monokai).
 .It Sy line_numbers Ns = Ns Ar bool
 Show line numbers (default: true).
+.It Sy word_wrap Ns = Ns Ar bool
+Wrap long lines to the pane width (default: false; Alt+Z toggles).
 .It Sy skipped_dirs Ns = Ns Ar list
 Comma-separated directories to skip in tree/finder
 (default: .git,node_modules).
@@ -151,7 +197,9 @@ Comma-separated directories to skip in tree/finder
 .Ss [ai]
 .Bl -tag -width "ollama_url"
 .It Sy provider Ns = Ns Ar type
-AI backend: ollama or openai (default: ollama).
+AI backend (default: ollama). Wizard presets: Ollama (local), OpenAI,
+DeepSeek, Groq, LM Studio (local), vLLM (local), Custom; the legacy values
+ollama / openai still work.
 .It Sy model Ns = Ns Ar name
 Model tag (e.g. gpt-4, qwen2.5-coder:7b).
 .It Sy ollama_url Ns = Ns Ar url
@@ -161,7 +209,55 @@ API key for OpenAI-compatible providers.
 .It Sy system_prompt Ns = Ns Ar text
 System prompt for AI conversations.
 .It Sy context_max Ns = Ns Ar N
-Max lines sent as file context (default: 6000).
+Max runes sent as file context (default: 6000).
+.It Sy temperature Ns = Ns Ar N
+Generation temperature in tenths (7 means 0.7); 0 uses the provider default.
+.It Sy num_ctx Ns = Ns Ar N
+Context window in tokens for Ollama (num_ctx); 0 uses the default.
+.It Sy num_predict Ns = Ns Ar N
+Maximum output tokens; 0 uses the provider default.
+.It Sy tool_rounds Ns = Ns Ar N
+Cap on the chat tool-calling loop depth; 0 uses the built-in cap (6).
+.It Sy allow_run Ns = Ns Ar value
+Whether the model may run shell commands (RUN tool): always, never or ask
+(default: always).
+.It Sy restrict_to_root Ns = Ns Ar bool
+Bound READ/EDIT/REPLACE paths to the project root (default: false).
+.El
+.Ss [agent]
+.Bl -tag -width "system_prompt"
+.It Sy system_prompt Ns = Ns Ar text
+Instruction override for background agents producing edits; empty uses the
+built-in prompt.
+.It Sy context_max Ns = Ns Ar N
+Total size budget in bytes of file context gathered for an agent task
+(default: 262144).
+.El
+.Ss [debug]
+.Bl -tag -width "adapter_mode"
+.It Sy mode Ns = Ns Ar type
+Launch mode passed to the adapter (Delve: debug, test or exec; default: debug).
+.It Sy program Ns = Ns Ar path
+Package directory, executable or module entry; empty derives the active
+file's directory.
+.It Sy args Ns = Ns Ar string
+Whitespace-separated arguments for the debuggee.
+.It Sy stop_on_entry Ns = Ns Ar bool
+Pause at program start (default: false).
+.It Sy adapter_cmd Ns = Ns Ar path
+DAP adapter binary (default: dlv); the legacy dlv_path key is an alias.
+.It Sy adapter_mode Ns = Ns Ar mode
+reverse (the adapter dials us back) or stdio (stdin/stdout DAP);
+default: reverse.
+.It Sy adapter_args Ns = Ns Ar string
+Extra CLI arguments for the adapter process.
+.It Sy launch_type Ns = Ns Ar name
+DAP launch "type" field (default: go).
+.It Sy launch_request Ns = Ns Ar kind
+launch or attach (default: launch).
+.It Sy launch_json Ns = Ns Ar json
+Raw JSON merged into the launch body; adapter-specific keys override the
+built-in ones.
 .El
 .Ss [ui]
 .Bl -tag -width "chat_width_pct"
@@ -169,6 +265,8 @@ Max lines sent as file context (default: 6000).
 Project tree sidebar width in columns (default: 25).
 .It Sy chat_width_pct Ns = Ns Ar N
 Chat panel width as percentage of screen (default: 40).
+.It Sy lang Ns = Ns Ar code
+UI language: en or ru (default: en).
 .El
 .Sh FILES
 .Bl -tag -width "~/.dmed.conf"
@@ -180,11 +278,33 @@ Project-level configuration (overrides global).
 Session state (open tabs, cursor positions).
 .El
 .Sh ENVIRONMENT
-.Bl -tag -width "DMED_MODEL"
+.Bl -tag -width "DMED_DEBUG_KEYS"
+.It Ev DMED_PROVIDER
+Override the AI provider.
 .It Ev DMED_MODEL
 Override the default AI model.
 .It Ev DMED_OLLAMA_URL
 Override the Ollama server URL.
+.It Ev DMED_API_KEY
+Override the API key for OpenAI-compatible providers.
+.It Ev DMED_LANG
+UI language: en or ru.
+.It Ev DMED_SHELL
+Shell used by the terminal panel.
+.It Ev DMED_PLUGIN_REPO
+Override the plugin store repository (owner/repo).
+.It Ev DMED_TEMPERATURE
+Override the generation temperature (in tenths).
+.It Ev DMED_NUM_CTX
+Override the Ollama context window (num_ctx).
+.It Ev DMED_NUM_PREDICT
+Override the maximum output tokens.
+.It Ev DMED_TOOL_ROUNDS
+Override the chat tool-calling loop cap.
+.It Ev DMED_ALLOW_RUN
+Override RUN-tool policy: always, never or ask.
+.It Ev DMED_DEBUG_KEYS
+When set, recognized keys are echoed into the status bar (debugging aid).
 .El
 .Sh EXIT STATUS
 .Ex -std
@@ -200,6 +320,10 @@ Open a project directory:
 Open multiple files:
 .Pp
 .Dl $ dmed src/*.go
+.Pp
+Configure AI interactively:
+.Pp
+.Dl $ dmed setup-ai
 .Pp
 With AI configured for OpenAI:
 .Bd -literal -offset indent
