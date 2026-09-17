@@ -325,17 +325,60 @@ dlv_path = C:\tools\dlv.exe
 	if !cfg.Debug.StopOnEntry {
 		t.Error("stop_on_entry = false, want true")
 	}
-	if cfg.Debug.DlvPath != `C:\tools\dlv.exe` {
-		t.Errorf("dlv_path = %q, want C:\\tools\\dlv.exe", cfg.Debug.DlvPath)
+	// Legacy dlv_path aliases adapter_cmd.
+	if cfg.Debug.AdapterCmd != `C:\tools\dlv.exe` {
+		t.Errorf("adapter_cmd = %q, want C:\\tools\\dlv.exe", cfg.Debug.AdapterCmd)
 	}
 
-	// Invalid mode falls back to the default.
+	// Arbitrary modes pass through (non-Delve adapters use their own modes).
 	if err := os.WriteFile(path, []byte("[debug]\nmode = bogus\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg = Load(dir)
-	if cfg.Debug.Mode != "debug" {
-		t.Errorf("mode = %q, want default debug", cfg.Debug.Mode)
+	if cfg.Debug.Mode != "bogus" {
+		t.Errorf("mode = %q, want pass-through bogus", cfg.Debug.Mode)
+	}
+}
+
+func TestLoadDebugGenericAdapter(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[debug]
+adapter_cmd = debugpy-adapter
+adapter_mode = stdio
+adapter_args = --log-dir /tmp/dap
+launch_type = python
+launch_request = attach
+launch_json = {"justMyCode": false, "console": "integratedTerminal"}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if cfg.Debug.AdapterCmd != "debugpy-adapter" {
+		t.Errorf("adapter_cmd = %q, want debugpy-adapter", cfg.Debug.AdapterCmd)
+	}
+	if cfg.Debug.AdapterMode != "stdio" {
+		t.Errorf("adapter_mode = %q, want stdio", cfg.Debug.AdapterMode)
+	}
+	if cfg.Debug.AdapterArgs != "--log-dir /tmp/dap" {
+		t.Errorf("adapter_args = %q", cfg.Debug.AdapterArgs)
+	}
+	if cfg.Debug.LaunchType != "python" {
+		t.Errorf("launch_type = %q, want python", cfg.Debug.LaunchType)
+	}
+	if cfg.Debug.LaunchRequest != "attach" {
+		t.Errorf("launch_request = %q, want attach", cfg.Debug.LaunchRequest)
+	}
+	if cfg.Debug.LaunchJSON != `{"justMyCode": false, "console": "integratedTerminal"}` {
+		t.Errorf("launch_json = %q", cfg.Debug.LaunchJSON)
+	}
+	if err := os.WriteFile(path, []byte("[debug]\nadapter_mode = bogus\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg = Load(dir)
+	if cfg.Debug.AdapterMode != "reverse" {
+		t.Errorf("adapter_mode = %q, want default reverse for invalid value", cfg.Debug.AdapterMode)
 	}
 }
 

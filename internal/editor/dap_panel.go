@@ -50,7 +50,7 @@ func (m Model) dapHeader(w int) string {
 		loc := filepath.Base(m.dapCurPath) + fmt.Sprintf(":%d", m.dapCurLine)
 		line += statusStyle.Render(" " + loc)
 	}
-	hint := " [F4 bp] [F5 run] [F10 step] [F11 in] [S+F11 out] [S+F5 stop] [Tab lists] [l console]"
+	hint := " [F4 bp] [F5 run] [F10 step] [F11 in] [S+F11 out] [S+F5 stop] [Tab focus] [l console]"
 	line += dapDimStyle.Render(hint)
 	if fill := w - lipgloss.Width(line); fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -64,9 +64,18 @@ func (m Model) dapColumns(h, w int) []string {
 	threadW := 18
 	frameW := 34
 	sep := dapColSepStyle.Render("│")
-	varW := w - threadW - frameW - lipgloss.Width(sep)*2
+	seps := lipgloss.Width(sep) * 2
+	varW := w - threadW - frameW - seps
 	if varW < 12 {
-		varW = 12
+		// Narrow terminal: shrink the middle column before overflowing.
+		frameW = w - threadW - seps - 12
+		if frameW < 10 {
+			frameW = 10
+		}
+		varW = w - threadW - frameW - seps
+		if varW < 1 {
+			varW = 1
+		}
 	}
 	left := m.dapThreadsCol(h, threadW)
 	middle := m.dapFramesCol(h, frameW)
@@ -182,9 +191,15 @@ func (m Model) dapVarsCol(h, w int) []string {
 	return rows
 }
 
-// dapInputRow is the evaluator/console-command input line.
+// dapInputRow is the evaluator/console-command input line. The prompt widens
+// to ">>" when the input row itself is focused (Tab cycles to it); typing a
+// plain character jumps here automatically.
 func (m Model) dapInputRow(w int) string {
-	line := statusHiStyle.Render(" > ") + statusStyle.Render(string(m.dapIn)) + cursorStyle.Render(" ")
+	prompt := " > "
+	if m.dapFocus == 3 {
+		prompt = ">> "
+	}
+	line := statusHiStyle.Render(prompt) + statusStyle.Render(string(m.dapIn)) + cursorStyle.Render(" ")
 	if fill := w - lipgloss.Width(line); fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}

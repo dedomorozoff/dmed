@@ -169,8 +169,9 @@ func (s *StdioConn) Close() error {
 }
 
 // StartStdio launches an adapter as a child process speaking DAP over stdin/
-// stdout (the classic LSP-style layout used by most adapters). rootDir is the
-// working directory of the adapter process.
+// stdout (the classic LSP-style layout used by most adapters: debugpy,
+// lldb-dap, codelldb, ...). rootDir is the working directory of the adapter
+// process. Adapter stderr is surfaced as "console" output events.
 func StartStdio(adapter string, args []string, rootDir string, onEvent OnEvent) (*Client, error) {
 	cmd := exec.Command(adapter, args...)
 	cmd.Dir = rootDir
@@ -183,11 +184,28 @@ func StartStdio(adapter string, args []string, rootDir string, onEvent OnEvent) 
 		_ = stdin.Close()
 		return nil, err
 	}
-	if err := cmd.Start(); err != nil {
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
 		return nil, err
 	}
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stderr.Close()
+		return nil, err
+	}
+	go debug.CapturePanicReport(func() {
+		// Surface adapter diagnostics as console lines so the user sees them
+		// without leaving the editor. stdout is DAP traffic, so only scrape
+		// stderr here.
+		_ = outputScanner(stderr, func(line string) {
+			if onEvent != nil {
+				onEvent(Event{Kind: EventOutput, OutputCat: "console", Output: line})
+			}
+		})
+	})
 	c := NewClient(&StdioConn{Stdin: stdin, Stdout: stdout}, onEvent)
 	c.adapter = cmd
 	return c, nil
@@ -549,19 +567,12 @@ func (c *Client) Initialize() (supportsConfigDone bool, err error) {
 	return caps.SupportsConfigurationDoneRequest, nil
 }
 
-// Launch starts a debug session: for Delve mode "debug" builds and runs the
-// package, "test" runs its tests, and "exec" runs a prebuilt binary at program.
-func (c *Client) Launch(mode, name, program, cwd string, args []string, stopOnEntry bool) error {
-	_, err := c.call("launch", map[string]interface{}{
-		"request":     "launch",
-		"type":        "go",
-		"name":        name,
-		"mode":        mode,
-		"program":     program,
-		"args":        args,
-		"cwd":         cwd,
-		"stopOnEntry": stopOnEntry,
-	})
+// Launch starts (or attaches to) a debuggee. The arguments body is entirely
+// adapter-specific — for Delve it is the classic `type: "go", mode, program,
+// args, cwd, stopOnEntry` shape; other adapters use their own keys. The
+// editor composes the body from [debug] config (see internal/config).
+func (c *Client) Launch(args map[string]interface{}) error {
+	_, err := c.call("launch", args)
 	return err
 }
 

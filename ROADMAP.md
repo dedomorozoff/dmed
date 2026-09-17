@@ -214,6 +214,11 @@
       остановки.
 - [x] Конфиг `[debug]`: mode (debug/test/exec), program, args, stop_on_entry,
       dlv_path; палитра «Debug: Toggle Debug Panel»; i18n en/ru.
+- [x] Универсальные адаптеры: `adapter_cmd`/`adapter_mode` (reverse|stdio)/
+      `adapter_args`/`launch_type`/`launch_request`/`launch_json` — любой
+      DAP-адаптер (debugpy, lldb-dap, node, ...); Go/Delve — дефолт. Асинхронный
+      запуск адаптера без блокировки UI, перезапуск после завершения сессии,
+      eval-строка с фокусом (Tab), неподтверждённые брейкпоинты `○`.
 
 ## Инфраструктура: CI и релизы
 

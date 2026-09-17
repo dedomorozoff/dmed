@@ -19,20 +19,39 @@ type Config struct {
 	Debug   DebugConfig
 }
 
-// DebugConfig holds DAP (Delve) debugger settings (M7).
+// DebugConfig holds DAP debugger settings (M7). Go/Delve is the default
+// adapter; any other DAP adapter (debugpy, lldb-dap, node, ...) can be wired
+// in through the Adapter*/Launch* fields.
 type DebugConfig struct {
-	// Mode is the DAP launch mode: "debug" (build+run), "test" (go test) or
-	// "exec" (attach to a prebuilt binary via Program).
+	// Mode is the DAP launch mode passed through to the adapter ("debug" for
+	// Delve: build+run, "test": go test, "exec": run a prebuilt binary).
 	Mode string
-	// Program is the package directory, test package or executable to debug.
-	// Empty derives it from the active file's directory.
+	// Program is the package directory, test package, executable or module
+	// entrypoint to debug. Empty derives it from the active file's directory.
 	Program string
 	// Args are whitespace-separated arguments passed to the debuggee.
 	Args string
 	// StopOnEntry pauses at the first instruction after launch.
 	StopOnEntry bool
-	// DlvPath overrides the `dlv` binary looked up on PATH.
-	DlvPath string
+
+	// AdapterCmd is the DAP adapter executable ("dlv", "debugpy-adapter",
+	// "node", ...). Defaults to "dlv"; the legacy `dlv_path` key is an alias.
+	AdapterCmd string
+	// AdapterMode is how the adapter transports DAP: "reverse" (the adapter
+	// dials us back, Delve-style) or "stdio" (the adapter speaks DAP on
+	// stdin/stdout — the common layout for debugpy, lldb-dap, etc.).
+	AdapterMode string
+	// AdapterArgs are extra whitespace-separated CLI arguments for the
+	// adapter process itself (e.g. `--host 127.0.0.1`).
+	AdapterArgs string
+
+	// LaunchType is the launch request "type" field (default "go").
+	LaunchType string
+	// LaunchRequest is the launch request kind: "launch" (default) or "attach".
+	LaunchRequest string
+	// LaunchJSON is an optional raw JSON object merged into the launch/attach
+	// arguments; adapter-specific keys override the built-in ones.
+	LaunchJSON string
 }
 
 // AgentConfig holds settings for background agent tasks (M4).
@@ -134,11 +153,16 @@ func Defaults() Config {
 			Branch: "main",
 		},
 		Debug: DebugConfig{
-			Mode:        "debug",
-			Program:     "",
-			Args:        "",
-			StopOnEntry: false,
-			DlvPath:     "",
+			Mode:          "debug",
+			Program:       "",
+			Args:          "",
+			StopOnEntry:   false,
+			AdapterCmd:    "dlv",
+			AdapterMode:   "reverse",
+			AdapterArgs:   "",
+			LaunchType:    "go",
+			LaunchRequest: "launch",
+			LaunchJSON:    "",
 		},
 	}
 }
@@ -411,10 +435,8 @@ func loadFile(path string, cfg *Config) {
 
 	// [debug]
 	if s, ok := sections["debug"]; ok {
-		if v, ok := s["mode"]; ok {
-			if v == "debug" || v == "test" || v == "exec" {
-				cfg.Debug.Mode = v
-			}
+		if v, ok := s["mode"]; ok && v != "" {
+			cfg.Debug.Mode = v
 		}
 		if v, ok := s["program"]; ok {
 			cfg.Debug.Program = v
@@ -425,8 +447,30 @@ func loadFile(path string, cfg *Config) {
 		if v, ok := s["stop_on_entry"]; ok {
 			cfg.Debug.StopOnEntry = parseBool(v)
 		}
-		if v, ok := s["dlv_path"]; ok {
-			cfg.Debug.DlvPath = v
+		// `dlv_path` is the legacy alias for `adapter_cmd`.
+		if v, ok := s["adapter_cmd"]; ok {
+			cfg.Debug.AdapterCmd = v
+		} else if v, ok := s["dlv_path"]; ok {
+			cfg.Debug.AdapterCmd = v
+		}
+		if v, ok := s["adapter_mode"]; ok {
+			if v == "reverse" || v == "stdio" {
+				cfg.Debug.AdapterMode = v
+			}
+		}
+		if v, ok := s["adapter_args"]; ok {
+			cfg.Debug.AdapterArgs = v
+		}
+		if v, ok := s["launch_type"]; ok {
+			cfg.Debug.LaunchType = v
+		}
+		if v, ok := s["launch_request"]; ok {
+			if v == "launch" || v == "attach" {
+				cfg.Debug.LaunchRequest = v
+			}
+		}
+		if v, ok := s["launch_json"]; ok {
+			cfg.Debug.LaunchJSON = v
 		}
 	}
 }

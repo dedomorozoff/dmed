@@ -32,6 +32,7 @@ var (
 	diagWarnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	diagInfoStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
 	bpStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	bpDimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	stopStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	okTestStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
 	errTestStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
@@ -59,6 +60,8 @@ var helpEntries = []helpEntry{
 	{"Ctrl+L", "help.goto_line"},
 	{"Alt+Z", "help.word_wrap"},
 	{"Ctrl+G", "help.git_panel"},
+	{"Ctrl+Alt+D", "help.debug"},
+	{"F4 / F5 / F10 / F11 / S+F5 / S+F11", "help.debug_keys"},
 	{"F12 / Ctrl+Click", "help.goto_def"},
 	{"D (in Git panel)", "help.git_diff"},
 	{"Alt+[ / Alt+]", "help.hunk"},
@@ -433,6 +436,7 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	diagPath, _ := filepath.Abs(t.path)
 	tabDiags := m.diags[diagPath]
 	bpSet := m.dapBreak[diagPath]
+	bpVerifSet := m.dapBPVerif[diagPath]
 	dapStoppedHere := m.dapRunState == dapStopped && m.dapCurPath == diagPath
 
 	wrap := p.wordWrap && contentW > 0
@@ -501,14 +505,22 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 		bpMark := " "
 		if bpSet[ln+1] {
 			bpMark = "●"
+			// The adapter explicitly rejected this line after a session ran:
+			// show it unverified instead of a solid breakpoint.
+			if v, ok := bpVerifSet[ln+1]; ok && !v {
+				bpMark = "○"
+			}
 		}
 		if dapStoppedHere && m.dapCurLine == ln+1 {
 			bpMark = "▶"
 		}
 		bpMarkStyle := gutterStyle
-		if bpMark == "●" {
+		switch bpMark {
+		case "●":
 			bpMarkStyle = bpStyle
-		} else if bpMark == "▶" {
+		case "○":
+			bpMarkStyle = bpDimStyle
+		case "▶":
 			bpMarkStyle = stopStyle
 		}
 

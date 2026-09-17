@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,14 +15,27 @@ import (
 )
 
 // dapEventMsg carries a decoded DAP server event from the adapter's read loop
-// into the model (Mirror of lspDiagMsg).
+// into the model (Mirror of lspDiagMsg). gen stamps the session that produced
+// it so stale events from a superseded session are dropped.
 type dapEventMsg struct {
-	ev dap.Event
+	ev  dap.Event
+	gen int
 }
 
 // dapLaunchMsg reports the outcome of the async launch sequence.
 type dapLaunchMsg struct {
 	err error
+	gen int
+}
+
+// dapStartMsg reports the outcome of the async adapter start (spawn +
+// initialize handshake). gen lets the UI drop results from a session that was
+// already superseded by stop/restart.
+type dapStartMsg struct {
+	cl       *dap.Client
+	gen      int
+	supports bool
+	err      error
 }
 
 // dapStepMsg reports the outcome of continue/next/stepIn/stepOut.
@@ -87,39 +101,52 @@ const (
 	dapEnded   = "end"    // process exited, session still alive
 )
 
-// ensureDAP lazily spawns the Delve DAP adapter in reverse-connect mode and
-// completes the initialize handshake. It is fast (adapter connects on
-// startup) and is called synchronously from the key handler so the launch
-// itself can then run in the background.
-func (m *Model) ensureDAP() error {
-	if m.dapClient != nil {
-		return nil
+// dapStartCmd spawns the DAP adapter and completes the initialize handshake
+// in the background so the UI never blocks on adapter startup. The outcome
+// arrives as a dapStartMsg stamped with the session generation; results from
+// superseded sessions are dropped by the Update handler.
+func (m *Model) dapStartCmd() tea.Cmd {
+	adapter := m.cfg.Debug.AdapterCmd
+	if adapter == "" {
+		adapter = "dlv"
 	}
-	dlv := m.cfg.Debug.DlvPath
-	if dlv == "" {
-		dlv = "dlv"
+	mode := m.cfg.Debug.AdapterMode
+	if mode == "" {
+		mode = "reverse"
 	}
-	if _, err := exec.LookPath(dlv); err != nil {
-		return fmt.Errorf("debug: %s not found — go install github.com/go-delve/delve/cmd/dlv@latest", dlv)
-	}
+	adapterArgs := strings.Fields(m.cfg.Debug.AdapterArgs)
 	root := m.baseDir()
-	cl, err := dap.StartReverse(dlv, nil, root, func(e dap.Event) {
-		select {
-		case m.dapCh <- dapEventMsg{ev: e}:
-		default: // drop if the UI is backed up
+	ch := m.dapCh
+	gen := m.dapGen
+	return func() tea.Msg {
+		if _, err := exec.LookPath(adapter); err != nil {
+			return dapStartMsg{gen: gen, err: fmt.Errorf("debug: %s not found — install it or set [debug] adapter_cmd", adapter)}
 		}
-	})
-	if err != nil {
-		return err
+		onEvent := func(e dap.Event) {
+			select {
+			case ch <- dapEventMsg{ev: e, gen: gen}:
+			default: // drop if the UI is backed up
+			}
+		}
+		var (
+			cl  *dap.Client
+			err error
+		)
+		if mode == "stdio" {
+			cl, err = dap.StartStdio(adapter, adapterArgs, root, onEvent)
+		} else {
+			cl, err = dap.StartReverse(adapter, adapterArgs, root, onEvent)
+		}
+		if err != nil {
+			return dapStartMsg{gen: gen, err: err}
+		}
+		supports, err := cl.Initialize()
+		if err != nil {
+			cl.Close()
+			return dapStartMsg{gen: gen, err: fmt.Errorf("debug adapter initialize: %w", err)}
+		}
+		return dapStartMsg{cl: cl, gen: gen, supports: supports}
 	}
-	supports, err := cl.Initialize()
-	if err != nil {
-		cl.Close()
-		return fmt.Errorf("debug adapter initialize: %w", err)
-	}
-	m.dapClient = cl
-	m.dapSupportsConfigDone = supports
-	return nil
 }
 
 // dapLaunchCmd starts the debuggee: it pushes the currently set breakpoints,
@@ -129,29 +156,68 @@ func (m *Model) dapLaunchCmd() tea.Cmd {
 	if cl == nil {
 		return nil
 	}
-	mode := m.cfg.Debug.Mode
-	program := m.dapProgram()
-	cwd := m.dapCwd()
-	args := strings.Fields(m.cfg.Debug.Args)
-	stopOnEntry := m.cfg.Debug.StopOnEntry
-	supports := m.dapSupportsConfigDone
 	bps := m.dapBreakSnapshot()
+	supports := m.dapSupportsConfigDone
+	launchArgs, err := m.dapLaunchArgs()
+	gen := m.dapGen
 	return func() tea.Msg {
-		for path, lines := range bps {
-			_, _ = cl.SetBreakpoints(path, lines)
+		if err != nil {
+			return dapLaunchMsg{err: err, gen: gen}
 		}
-		if err := cl.Launch(mode, "dmed session", program, cwd, args, stopOnEntry); err != nil {
-			return dapLaunchMsg{err: err}
+		for path, lines := range bps {
+			if _, err := cl.SetBreakpoints(path, lines); err != nil {
+				return dapLaunchMsg{err: fmt.Errorf("breakpoints: %w", err), gen: gen}
+			}
+		}
+		if err := cl.Launch(launchArgs); err != nil {
+			return dapLaunchMsg{err: err, gen: gen}
 		}
 		if supports {
 			_ = cl.ConfigureDone()
 		}
-		return dapLaunchMsg{}
+		return dapLaunchMsg{gen: gen}
 	}
 }
 
+// dapLaunchArgs composes the adapter-specific launch/attach body from the
+// [debug] config. Adapter-specific keys from launch_json override the
+// built-in ones, so any DAP adapter can be driven from config.
+func (m Model) dapLaunchArgs() (map[string]interface{}, error) {
+	args := map[string]interface{}{
+		"request": m.cfg.Debug.LaunchRequest,
+		"type":    m.cfg.Debug.LaunchType,
+	}
+	if m.cfg.Debug.Mode != "" {
+		args["mode"] = m.cfg.Debug.Mode
+	}
+	if p := m.dapProgram(); p != "" {
+		args["program"] = p
+	}
+	if c := m.dapCwd(); c != "" {
+		args["cwd"] = c
+	}
+	if m.cfg.Debug.StopOnEntry {
+		args["stopOnEntry"] = true
+	}
+	if a := strings.Fields(m.cfg.Debug.Args); len(a) > 0 {
+		args["args"] = a
+	}
+	if m.cfg.Debug.LaunchJSON == "" {
+		return args, nil
+	}
+	var extra map[string]interface{}
+	if err := json.Unmarshal([]byte(m.cfg.Debug.LaunchJSON), &extra); err != nil {
+		return nil, fmt.Errorf("debug launch_json: %w", err)
+	}
+	for k, v := range extra {
+		args[k] = v
+	}
+	return args, nil
+}
+
 // dapProgram resolves what to debug: the [debug] program setting, else the
-// directory of the active file (Delve builds packages by directory), else ".".
+// directory of the active file (a sensible default for package-oriented
+// adapters like Delve), else ".".
 func (m Model) dapProgram() string {
 	if p := m.cfg.Debug.Program; p != "" {
 		return p
@@ -376,42 +442,95 @@ func (m *Model) toggleDebugBreakpoint() tea.Cmd {
 }
 
 // startDebugging launches (or, when a session is already live and paused,
-// continues) the current program. F5.
+// continues) the current program. F5. An ended session is torn down and
+// restarted from scratch.
 func (m *Model) startDebugging() tea.Cmd {
 	if m.dapRunState == dapStopped {
 		return m.dapStepCmd("continue")
 	}
-	if m.dapClient != nil {
-		return nil // already running/launching
+	if m.dapBusy || (m.dapClient != nil && m.dapRunState != dapEnded) {
+		return nil // already launching/running
 	}
-	if err := m.ensureDAP(); err != nil {
-		m.msg = err.Error()
-		return nil
-	}
+	m.dapGen++
 	m.dapRunState = dapLaunch
 	m.dapBusy = true
-	return tea.Batch(m.dapLaunchCmd())
+	var cmds []tea.Cmd
+	if m.dapClient != nil {
+		cl := m.dapClient
+		m.dapClient = nil
+		m.dapThreads = nil
+		m.dapFrames = nil
+		m.dapVarStack = nil
+		m.dapBPVerif = map[string]map[int]bool{}
+		cmds = append(cmds, func() tea.Msg { cl.Close(); return nil })
+	}
+	cmds = append(cmds, m.dapStartCmd())
+	return tea.Batch(cmds...)
 }
 
 // stopDebugging disconnects the session and tears the adapter down. Shift+F5.
 func (m *Model) stopDebugging() tea.Cmd {
 	cl := m.dapClient
-	if cl == nil {
-		return nil
-	}
+	m.dapGen++
 	m.dapRunState = dapIdle
 	m.dapClient = nil
 	m.dapThreads = nil
 	m.dapFrames = nil
+	m.dapVarStack = nil
+	m.dapScopes = nil
+	m.dapCurPath = ""
+	m.dapCurLine = 0
+	m.dapReason = ""
+	m.dapBusy = false
+	m.dapBPVerif = map[string]map[int]bool{}
+	if cl == nil {
+		return nil
+	}
 	return func() tea.Msg {
 		cl.Close()
 		return nil
 	}
 }
 
-// handleDap routes keys while the debug panel is open.
+// handleDap routes keys while the debug panel is open. F4/F5/F10/F11/Shift+F5
+// are handled globally in handleKey, so only panel-local keys land here.
+// dapFocus 0-2 select the threads/stack/variables lists; focus 3 is the
+// evaluator input row where every printable key is typed literally.
 func (m *Model) handleDap(msg tea.KeyPressMsg) tea.Cmd {
 	s := msg.String()
+
+	if m.dapFocus == 3 {
+		switch s {
+		case "esc":
+			if len(m.dapIn) > 0 {
+				m.dapIn = nil
+			} else {
+				m.dapFocus = 0
+			}
+		case "backspace":
+			if len(m.dapIn) > 0 {
+				m.dapIn = m.dapIn[:len(m.dapIn)-1]
+			}
+		case "enter":
+			if len(m.dapIn) > 0 {
+				expr := string(m.dapIn)
+				m.dapIn = nil
+				return m.dapEvalCmd(expr)
+			}
+		case "tab":
+			m.dapFocus = (m.dapFocus + 1) % 4
+		case "shift+tab":
+			m.dapFocus = (m.dapFocus + 3) % 4
+		case "ctrl+l":
+			m.dapConsole = nil
+		default:
+			if len(msg.Text) > 0 {
+				m.dapIn = append(m.dapIn, []rune(msg.Text)...)
+			}
+		}
+		return nil
+	}
+
 	switch s {
 	case "esc":
 		if len(m.dapIn) > 0 {
@@ -429,47 +548,22 @@ func (m *Model) handleDap(msg tea.KeyPressMsg) tea.Cmd {
 			m.dapIn = m.dapIn[:len(m.dapIn)-1]
 		}
 		return nil
-	case "f4":
-		return m.toggleDebugBreakpoint()
-	case "f5":
-		return m.startDebugging()
-	case "shift+f5":
-		return m.stopDebugging()
-	case "f10":
-		if m.dapRunState == dapStopped {
-			return m.dapStepCmd("next")
-		}
-	case "f11":
-		if m.dapRunState == dapStopped {
-			return m.dapStepCmd("stepIn")
-		}
-	case "shift+f11":
-		if m.dapRunState == dapStopped {
-			return m.dapStepCmd("stepOut")
-		}
 	case "l":
 		m.dapConsolePeek = !m.dapConsolePeek
 		return nil
 	case "enter":
-		var cmds []tea.Cmd
 		if m.dapFocus == 2 {
 			if v := m.dapSelectedVar(); v != nil && v.ref > 0 {
-				cmds = append(cmds, m.dapExpandVarsCmd(v.ref))
+				return m.dapExpandVarsCmd(v.ref)
 			}
 		}
-		if len(m.dapIn) > 0 {
-			expr := string(m.dapIn)
-			m.dapIn = nil
-			cmds = append(cmds, m.dapEvalCmd(expr))
-		}
-		if len(cmds) == 0 {
-			return nil
-		}
-		return tea.Batch(cmds...)
+		return nil
 	case "tab":
-		m.dapFocus = (m.dapFocus + 1) % 3 // threads | frames | variables
+		m.dapFocus = (m.dapFocus + 1) % 4 // 0..3, incl. the input row
+		return nil
 	case "shift+tab":
-		m.dapFocus = (m.dapFocus + 2) % 3
+		m.dapFocus = (m.dapFocus + 3) % 4
+		return nil
 	case "up", "k":
 		m.dapMoveSel(-1)
 	case "down", "j":
@@ -483,7 +577,11 @@ func (m *Model) handleDap(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	default:
 		if len(msg.Text) > 0 {
+			// First typed character jumps to the input row so the rest of the
+			// expression is typed literally (Tab focuses it explicitly when an
+			// expression starts with a reserved navigation key).
 			m.dapIn = append(m.dapIn, []rune(msg.Text)...)
+			m.dapFocus = 3
 		}
 	}
 	return nil
@@ -529,8 +627,12 @@ func (m *Model) dapMoveSel(d int) {
 // ── DAP event handling ─────────────────────────────────────────────────────
 
 // handleDAPEventUpdate routes an adapter event into panel state and re-arms
-// the event channel.
+// the event channel. Events from a superseded session are dropped so a stale
+// disconnect/terminated can never clobber a newer live session.
 func (m *Model) handleDAPEventUpdate(msg dapEventMsg) tea.Cmd {
+	if msg.gen != 0 && msg.gen != m.dapGen {
+		return waitForDAPEvent(m.dapCh)
+	}
 	cmd := m.handleDAPEvent(msg.ev)
 	if cmd != nil {
 		return tea.Batch(cmd, waitForDAPEvent(m.dapCh))
@@ -539,11 +641,11 @@ func (m *Model) handleDAPEventUpdate(msg dapEventMsg) tea.Cmd {
 }
 
 // applyDAPRefresh merges a fetched threads/frames/variables snapshot into the
-// panel state.
+// panel state. The stopped location is always re-derived from the top stack
+// frame so the ▶ marker survives even when scopes/variables requests fail.
 func (m *Model) applyDAPRefresh(msg dapRefreshMsg) {
 	if msg.err != nil {
 		m.msg = "debug refresh: " + msg.err.Error()
-		return
 	}
 	if msg.threads != nil {
 		m.dapThreads = msg.threads
@@ -561,6 +663,7 @@ func (m *Model) applyDAPRefresh(msg dapRefreshMsg) {
 		m.dapScopes = msg.scopes
 	}
 	if msg.vars == nil {
+		m.updateDapCurrentLocation()
 		return
 	}
 	if msg.scopePush {
@@ -569,6 +672,11 @@ func (m *Model) applyDAPRefresh(msg dapRefreshMsg) {
 		m.dapVarStack = [][]dapVarRow{msg.vars}
 	}
 	m.dapVarSel = 0
+	m.updateDapCurrentLocation()
+}
+
+// updateDapCurrentLocation syncs the ▶ marker to the selected stack frame.
+func (m *Model) updateDapCurrentLocation() {
 	if len(m.dapFrames) > 0 && m.dapSelFrame < len(m.dapFrames) {
 		f := m.dapFrames[m.dapSelFrame]
 		if f.Path != "" {
@@ -607,6 +715,9 @@ func (m *Model) handleDAPEvent(ev dap.Event) tea.Cmd {
 		m.dapRunState = dapRunning
 		m.dapCurPath = ""
 		m.dapCurLine = 0
+		// Frames/variables from the previous stop are stale while running.
+		m.dapFrames = nil
+		m.dapVarStack = nil
 	case dap.EventOutput:
 		line := ev.Output
 		if line == "" {
@@ -646,9 +757,11 @@ func (m *Model) handleDAPEvent(ev dap.Event) tea.Cmd {
 		m.dapThreads = nil
 		m.dapFrames = nil
 		m.dapVarStack = nil
+		m.dapScopes = nil
 		m.dapCurPath = ""
 		m.dapCurLine = 0
 		m.dapReason = ""
+		m.dapBPVerif = map[string]map[int]bool{}
 	default:
 		// EventThread, EventProcess, EventInitialized: no UI effect.
 	}

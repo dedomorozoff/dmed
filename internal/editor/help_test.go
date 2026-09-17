@@ -20,7 +20,7 @@ func TestHelpToggle(t *testing.T) {
 		t.Fatal("f1 must open help")
 	}
 	v := m.View()
-	for _, want := range []string{"dmed — keys", "Ctrl+S", "Ctrl+F", "Ctrl+H", "Ctrl+O", "Ctrl+W"} {
+	for _, want := range []string{"dmed — keys", "Ctrl+S", "Ctrl+F", "Ctrl+H", "Ctrl+O", "Ctrl+W", "Ctrl+Alt+D", "F5"} {
 		if !strings.Contains(v.Content, want) {
 			t.Fatalf("help view missing %q", want)
 		}
@@ -73,7 +73,7 @@ func TestHelpRussianLocale(t *testing.T) {
 	m.tr = i18n.New(i18n.Resolve("ru"))
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyF1})
 	v := m.View()
-	for _, want := range []string{"клавиши", "сохранить активную вкладку", "быстрый поиск файлов"} {
+	for _, want := range []string{"клавиши", "сохранить активную вкладку", "быстрый поиск файлов", "брейкпоинт"} {
 		if !strings.Contains(v.Content, want) {
 			t.Fatalf("ru help view missing %q", want)
 		}

@@ -386,6 +386,7 @@ type Model struct {
 	dapCurPath            string
 	dapCurLine            int
 	dapBusy               bool
+	dapGen                int // session generation; drops stale start/launch msgs
 	dapConsolePeek        bool
 	dapSupportsConfigDone bool
 
@@ -1389,7 +1390,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case dapEventMsg:
 		return m, m.handleDAPEventUpdate(msg)
+	case dapStartMsg:
+		if msg.gen != m.dapGen {
+			// A newer stop/restart superseded this start; drop the late adapter.
+			if msg.cl != nil {
+				msg.cl.Close()
+			}
+			return m, nil
+		}
+		m.dapBusy = false
+		if msg.err != nil {
+			m.dapRunState = dapIdle
+			m.msg = msg.err.Error()
+			return m, nil
+		}
+		m.dapClient = msg.cl
+		m.dapSupportsConfigDone = msg.supports
+		return m, m.dapLaunchCmd()
 	case dapLaunchMsg:
+		if msg.gen != m.dapGen {
+			return m, nil // stale launch result from a superseded session
+		}
 		m.dapBusy = false
 		if msg.err != nil {
 			m.dapRunState = dapIdle
