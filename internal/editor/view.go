@@ -31,6 +31,8 @@ var (
 	diagErrStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
 	diagWarnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	diagInfoStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
+	bpStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	stopStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	okTestStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
 	errTestStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	diffAddBg       = lipgloss.NewStyle().Background(lipgloss.Color("22"))
@@ -127,6 +129,24 @@ func (m Model) termExtraRows() int {
 	return m.termPanelHeight()
 }
 
+func (m Model) debugPanelHeight() int {
+	h := m.height / 4
+	if h < 6 {
+		h = 6
+	}
+	if h > 14 {
+		h = 14
+	}
+	return h
+}
+
+func (m Model) debugExtraRows() int {
+	if !m.dapOpen {
+		return 0
+	}
+	return m.debugPanelHeight()
+}
+
 func (m Model) langChooserExtraRows() int {
 	if !m.langChooserOpen {
 		return 0
@@ -146,7 +166,7 @@ func (m Model) pluginStoreExtraRows() int {
 }
 
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows()
+	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -154,9 +174,9 @@ func (m Model) viewHeight() int {
 }
 
 func (m Model) gutterWidthForTab(t *tab) int {
-	w := len(strconv.Itoa(t.buf.LineCount())) + 3
-	if w < 6 {
-		w = 6
+	w := len(strconv.Itoa(t.buf.LineCount())) + 4
+	if w < 7 {
+		w = 7
 	}
 	return w
 }
@@ -279,6 +299,9 @@ func (m Model) View() tea.View {
 	}
 	if m.termOpen {
 		rows = append(rows, m.terminalPanel()...)
+	}
+	if m.dapOpen {
+		rows = append(rows, m.debugPanel()...)
 	}
 	// The completion popup floats under the edit line instead of being pinned
 	// to the bottom of the screen.
@@ -409,6 +432,8 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	diff := t.getDiff(m.repo)
 	diagPath, _ := filepath.Abs(t.path)
 	tabDiags := m.diags[diagPath]
+	bpSet := m.dapBreak[diagPath]
+	dapStoppedHere := m.dapRunState == dapStopped && m.dapCurPath == diagPath
 
 	wrap := p.wordWrap && contentW > 0
 	var segs []wrapSeg
@@ -473,7 +498,21 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 			diagMark = " "
 		}
 
-		numPad := gw - 2 - len(num)
+		bpMark := " "
+		if bpSet[ln+1] {
+			bpMark = "●"
+		}
+		if dapStoppedHere && m.dapCurLine == ln+1 {
+			bpMark = "▶"
+		}
+		bpMarkStyle := gutterStyle
+		if bpMark == "●" {
+			bpMarkStyle = bpStyle
+		} else if bpMark == "▶" {
+			bpMarkStyle = stopStyle
+		}
+
+		numPad := gw - 3 - len(num)
 		if numPad < 0 {
 			numPad = 0
 		}
@@ -486,6 +525,7 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 		}
 		gutStr += diagMarkStyle.Render(diagMark)
 		gutStr += gitMarkStyle.Render(gitMark)
+		gutStr += bpMarkStyle.Render(bpMark)
 
 		if active && !wrap && m.ghostVisible && len(m.ghostLines) > 1 && ln > m.ghostRow {
 			// Multi-line ghost: subsequent ghost lines appear on their own rows.
@@ -599,7 +639,7 @@ func (m Model) tabBar() string {
 }
 
 func (m Model) treePanel(h int) []string {
-	inner := m.cfg.UI.TreeWidth - 2
+	inner := m.cfg.UI.TreeWidth - 1
 	hint := m.treeHint(inner)
 	if len(hint) > h {
 		hint = hint[:h]

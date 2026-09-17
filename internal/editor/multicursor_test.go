@@ -47,14 +47,16 @@ func TestEscClearsMultiCursor(t *testing.T) {
 func TestAltClickAddsCursor(t *testing.T) {
 	m := New()
 	m.tabs[0].buf = buffer.Load("hello world")
-	// Click normally to place the main cursor at (0,2).
-	next, _ := m.Update(tea.MouseClickMsg{X: 8, Y: 1})
+	// Click normally to place the main cursor at (0,2). The gutter is 7 cells
+	// wide for a 1-line buffer (line numbers + diagnostics + git + breakpoint),
+	// so screen X=9 maps to buffer column 2.
+	next, _ := m.Update(tea.MouseClickMsg{X: 9, Y: 1})
 	m = next.(Model)
 	if m.cur().buf.CurLine() != 0 || m.cur().buf.Col() != 2 {
 		t.Fatalf("main cursor not placed: line=%d col=%d", m.cur().buf.CurLine(), m.cur().buf.Col())
 	}
-	// Alt+Click adds a secondary cursor at (0,6) without moving the main one.
-	next, _ = m.Update(tea.MouseClickMsg{X: 11, Y: 1, Mod: tea.ModAlt})
+	// Alt+Click adds a secondary cursor at (0,5) without moving the main one.
+	next, _ = m.Update(tea.MouseClickMsg{X: 12, Y: 1, Mod: tea.ModAlt})
 	m = next.(Model)
 	if !m.cur().buf.HasMultipleCursors() {
 		t.Fatal("expected Alt+Click to add a cursor")

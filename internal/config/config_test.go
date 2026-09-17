@@ -299,6 +299,46 @@ restrict_to_root = true
 	}
 }
 
+func TestLoadDebugSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[debug]
+mode = test
+program = ./pkg
+args = -run TestFoo
+stop_on_entry = true
+dlv_path = C:\tools\dlv.exe
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if cfg.Debug.Mode != "test" {
+		t.Errorf("mode = %q, want test", cfg.Debug.Mode)
+	}
+	if cfg.Debug.Program != "./pkg" {
+		t.Errorf("program = %q, want ./pkg", cfg.Debug.Program)
+	}
+	if cfg.Debug.Args != "-run TestFoo" {
+		t.Errorf("args = %q, want -run TestFoo", cfg.Debug.Args)
+	}
+	if !cfg.Debug.StopOnEntry {
+		t.Error("stop_on_entry = false, want true")
+	}
+	if cfg.Debug.DlvPath != `C:\tools\dlv.exe` {
+		t.Errorf("dlv_path = %q, want C:\\tools\\dlv.exe", cfg.Debug.DlvPath)
+	}
+
+	// Invalid mode falls back to the default.
+	if err := os.WriteFile(path, []byte("[debug]\nmode = bogus\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg = Load(dir)
+	if cfg.Debug.Mode != "debug" {
+		t.Errorf("mode = %q, want default debug", cfg.Debug.Mode)
+	}
+}
+
 func TestWriteLang(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".dmed.conf")

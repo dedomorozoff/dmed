@@ -197,6 +197,24 @@
 - [x] CLI-мастер `dmed setup-ai`: провайдер → ключ → тест → запись в
       `~/.dmed.conf` через `config.WriteAI` (`internal/setup`)
 
+### M7 — отладка (DAP/Delve)
+- [x] Клиент DAP (`internal/dap`): собственный транспорт поверх
+      Content-Length framing (без внешних зависимостей), reverse-connect
+      режим (`dlv dap --client-addr`), initialize/launch/configurationDone,
+      breakpoints, continue/next/stepIn/stepOut, threads/stackTrace/scopes/
+      variables/evaluate, события stopped/continued/output/exited/terminated/
+      breakpoint/disconnected. Юнит-тесты на мл. mock-адаптере через net.Pipe.
+- [x] Панель отладки (`Ctrl+Alt+D`): шапка состояния, колонки
+      threads / stack / variables (дерево с раскрытием по Enter, Esc — назад),
+      консоль процесса (`l` — просмотр, `Ctrl+L` — очистка, eval-строка `> expr`).
+- [x] Брейкпоинты в gutter (`F4`): 4-я колонка гуттера, `●` с подтверждением
+      от адаптера; текущая строка остановки — `▶`.
+- [x] Управление: `F5` run/continue, `Shift+F5` stop, `F10` step over,
+      `F11` step in, `Shift+F11` step out; автодохождение к файлу и строке
+      остановки.
+- [x] Конфиг `[debug]`: mode (debug/test/exec), program, args, stop_on_entry,
+      dlv_path; палитра «Debug: Toggle Debug Panel»; i18n en/ru.
+
 ## Инфраструктура: CI и релизы
 
 - [x] GitHub Actions CI (`ci.yml`): vet + unit-тесты + кросс-сборка 8 платформ

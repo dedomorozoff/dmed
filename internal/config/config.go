@@ -16,6 +16,23 @@ type Config struct {
 	Agent   AgentConfig
 	UI      UIConfig
 	Plugins PluginsConfig
+	Debug   DebugConfig
+}
+
+// DebugConfig holds DAP (Delve) debugger settings (M7).
+type DebugConfig struct {
+	// Mode is the DAP launch mode: "debug" (build+run), "test" (go test) or
+	// "exec" (attach to a prebuilt binary via Program).
+	Mode string
+	// Program is the package directory, test package or executable to debug.
+	// Empty derives it from the active file's directory.
+	Program string
+	// Args are whitespace-separated arguments passed to the debuggee.
+	Args string
+	// StopOnEntry pauses at the first instruction after launch.
+	StopOnEntry bool
+	// DlvPath overrides the `dlv` binary looked up on PATH.
+	DlvPath string
 }
 
 // AgentConfig holds settings for background agent tasks (M4).
@@ -39,12 +56,12 @@ type EditorConfig struct {
 
 // AIConfig holds AI-related settings.
 type AIConfig struct {
-	Provider       string // ollama | openai
-	Model          string
-	OllamaURL      string
-	APIKey         string
-	SystemPrompt   string
-	ContextMax     int
+	Provider     string // ollama | openai
+	Model        string
+	OllamaURL    string
+	APIKey       string
+	SystemPrompt string
+	ContextMax   int
 	// Temperature is in tenths (7 => 0.7); 0 uses the provider default.
 	Temperature int
 	// NumCtx is the model context window in tokens (ollama `num_ctx`); 0 = default.
@@ -96,7 +113,7 @@ func Defaults() Config {
 			ToolRounds:     0,
 			AllowRun:       "always",
 			RestrictToRoot: false,
-			SystemPrompt:   "You are a helpful coding assistant inside the dmed editor. " +
+			SystemPrompt: "You are a helpful coding assistant inside the dmed editor. " +
 				"Answer concisely. You have tools: EDIT creates or rewrites a whole file, " +
 				"READ reads a file, SEARCH finds text, RUN executes a shell command. " +
 				"When the user asks to create, change or fix files, you MUST call EDIT " +
@@ -115,6 +132,13 @@ func Defaults() Config {
 			Repo:   "dedomorozoff/dmed",
 			Dir:    "plugins",
 			Branch: "main",
+		},
+		Debug: DebugConfig{
+			Mode:        "debug",
+			Program:     "",
+			Args:        "",
+			StopOnEntry: false,
+			DlvPath:     "",
 		},
 	}
 }
@@ -382,6 +406,27 @@ func loadFile(path string, cfg *Config) {
 		}
 		if v, ok := s["branch"]; ok {
 			cfg.Plugins.Branch = v
+		}
+	}
+
+	// [debug]
+	if s, ok := sections["debug"]; ok {
+		if v, ok := s["mode"]; ok {
+			if v == "debug" || v == "test" || v == "exec" {
+				cfg.Debug.Mode = v
+			}
+		}
+		if v, ok := s["program"]; ok {
+			cfg.Debug.Program = v
+		}
+		if v, ok := s["args"]; ok {
+			cfg.Debug.Args = v
+		}
+		if v, ok := s["stop_on_entry"]; ok {
+			cfg.Debug.StopOnEntry = parseBool(v)
+		}
+		if v, ok := s["dlv_path"]; ok {
+			cfg.Debug.DlvPath = v
 		}
 	}
 }

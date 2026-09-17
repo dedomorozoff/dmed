@@ -19,6 +19,7 @@ import (
 	"dmed/internal/ai"
 	"dmed/internal/buffer"
 	"dmed/internal/config"
+	"dmed/internal/dap"
 	"dmed/internal/events"
 	"dmed/internal/i18n"
 	"dmed/internal/lsp"
@@ -364,6 +365,30 @@ type Model struct {
 	termStdin   io.WriteCloser
 	termCh      <-chan []string
 
+	// DAP debug panel (Delve)
+	dapClient             *dap.Client
+	dapCh                 chan dapEventMsg
+	dapOpen               bool
+	dapRunState           string
+	dapReason             string
+	dapThreads            []dap.Thread
+	dapFrames             []dap.StackFrame
+	dapSelThread          int
+	dapSelFrame           int
+	dapFocus              int // 0=threads, 1=frames, 2=variables
+	dapVarStack           [][]dapVarRow
+	dapVarSel             int
+	dapScopes             []dap.Scope
+	dapConsole            []string
+	dapIn                 []rune
+	dapBreak              map[string]map[int]bool // abs path → line → true
+	dapBPVerif            map[string]map[int]bool // adapter-verified breakpoints
+	dapCurPath            string
+	dapCurLine            int
+	dapBusy               bool
+	dapConsolePeek        bool
+	dapSupportsConfigDone bool
+
 	// Command palette & Clipboard
 	paletteOpen   bool
 	paletteQ      []rune
@@ -579,6 +604,9 @@ func New(paths ...string) Model {
 		diagCh:                make(chan lspDiagMsg, 64),
 		diags:                 map[string][]lsp.Diagnostic{},
 		pendingPluginRemovals: map[string]bool{},
+		dapCh:                 make(chan dapEventMsg, 64),
+		dapBreak:              map[string]map[int]bool{},
+		dapBPVerif:            map[string]map[int]bool{},
 		chatThreadPos:         -1,
 		chatPromptIdx:         -1,
 	}
@@ -1140,7 +1168,7 @@ func waitForFileEvent(ch <-chan string) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh))
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh), waitForDAPEvent(m.dapCh))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1359,6 +1387,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.plugins != nil {
 			m.installFromSource(msg.file, msg.src)
 		}
+	case dapEventMsg:
+		return m, m.handleDAPEventUpdate(msg)
+	case dapLaunchMsg:
+		m.dapBusy = false
+		if msg.err != nil {
+			m.dapRunState = dapIdle
+			m.msg = "debug launch: " + msg.err.Error()
+		}
+	case dapStepMsg:
+		if msg.err != nil {
+			m.msg = "debug step: " + msg.err.Error()
+		} else {
+			m.dapRunState = dapRunning
+			m.dapCurPath = ""
+			m.dapCurLine = 0
+		}
+	case dapRefreshMsg:
+		m.applyDAPRefresh(msg)
+	case dapEvalMsg:
+		m.dapConsole = append(m.dapConsole, "> "+msg.expr)
+		if msg.err != nil {
+			m.dapConsole = append(m.dapConsole, "! "+msg.err.Error())
+		} else {
+			m.dapConsole = append(m.dapConsole, "= "+msg.out)
+		}
+	case dapBPSyncMsg:
+		if msg.err != nil {
+			m.msg = "debug breakpoints: " + msg.err.Error()
+			return m, nil
+		}
+		if m.dapBPVerif[msg.path] == nil {
+			m.dapBPVerif[msg.path] = map[int]bool{}
+		}
+		for i, l := range msg.lines {
+			m.dapBPVerif[msg.path][l] = msg.verified[i]
+		}
 	}
 	m.clampScroll()
 	return m, nil
@@ -1497,6 +1561,31 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "f12":
 		return m.gotoDefinition()
+	case "f4":
+		return m.toggleDebugBreakpoint()
+	case "f5":
+		return m.startDebugging()
+	case "shift+f5":
+		return m.stopDebugging()
+	case "f10":
+		if m.dapRunState == dapStopped {
+			return m.dapStepCmd("next")
+		}
+	case "f11":
+		if m.dapRunState == dapStopped {
+			return m.dapStepCmd("stepIn")
+		}
+	case "shift+f11":
+		if m.dapRunState == dapStopped {
+			return m.dapStepCmd("stepOut")
+		}
+	case "ctrl+alt+d":
+		m.dapOpen = !m.dapOpen
+		if m.dapOpen {
+			m.termOpen = false
+			m.msg = m.t("msg.debug_panel_opened")
+		}
+		return nil
 	}
 	if m.conflictOpen {
 		switch s {
@@ -1563,6 +1652,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.termOpen {
 		return m.handleTerm(msg)
+	}
+	if m.dapOpen {
+		return m.handleDap(msg)
 	}
 	if m.agentReviewMode {
 		return m.handleAgentReview(msg)
@@ -1877,6 +1969,9 @@ func (m *Model) shutdown() {
 	}
 	if m.lspClient != nil {
 		m.lspClient.Close()
+	}
+	if m.dapClient != nil {
+		m.dapClient.Close()
 	}
 	m.saveSession()
 }

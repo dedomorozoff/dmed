@@ -39,6 +39,13 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "pane_close", title: "cmd.pane_close_t", desc: "cmd.pane_close_d", action: func(m *Model) tea.Cmd { m.closePane(); return nil }},
 		{id: "tree_toggle", title: "cmd.tree_toggle_t", desc: "cmd.tree_toggle_d", action: func(m *Model) tea.Cmd { m.toggleTree(); return nil }},
 		{id: "terminal", title: "cmd.terminal_t", desc: "cmd.terminal_d", action: func(m *Model) tea.Cmd { return m.toggleTerminal() }},
+		{id: "debug", title: "cmd.debug_t", desc: "cmd.debug_d", action: func(m *Model) tea.Cmd {
+			m.dapOpen = !m.dapOpen
+			if m.dapOpen {
+				m.termOpen = false
+			}
+			return nil
+		}},
 		{id: "ai_chat", title: "cmd.ai_chat_t", desc: "cmd.ai_chat_d", action: func(m *Model) tea.Cmd { m.toggleChat(); return nil }},
 		{id: "ai_inline", title: "cmd.ai_inline_t", desc: "cmd.ai_inline_d", action: func(m *Model) tea.Cmd { m.startInlineRequest(); return nil }},
 		{id: "ai_settings", title: "cmd.ai_settings_t", desc: "cmd.ai_settings_d", action: func(m *Model) tea.Cmd { m.startAISettings(); return nil }},
