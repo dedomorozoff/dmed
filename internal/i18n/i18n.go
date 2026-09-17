@@ -298,6 +298,7 @@ var enCatalog = map[string]string{
 	// Help panel
 	"help.title":             "dmed — keys",
 	"help.close_hint":        "(F1/Esc closes)",
+	"help.scroll_hint":       " (j/k/PgUp/PgDn/wheel scroll)",
 	"help.save":              "save active tab (untitled: Save As)",
 	"help.palette":           "Command Palette (Ctrl+P / F2 / double Shift)",
 	"help.select":            "select text range",
@@ -562,6 +563,7 @@ var ruCatalog = map[string]string{
 	// Help panel
 	"help.title":             "dmed — клавиши",
 	"help.close_hint":        "(F1/Esc закрывает)",
+	"help.scroll_hint":       " (j/k/PgUp/PgDn/колесо — прокрутка)",
 	"help.save":              "сохранить активную вкладку (без имени: Сохранить как)",
 	"help.palette":           "Палитра команд (Ctrl+P / F2 / двойной Shift)",
 	"help.select":            "выделить текст",

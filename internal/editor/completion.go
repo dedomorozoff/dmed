@@ -148,7 +148,7 @@ func (m *Model) handleCompletionKey(key string) bool {
 			m.clampCompletion()
 		}
 		return true
-	case "pgdn":
+	case "pgdown":
 		if n > 0 {
 			m.complSel += complVisible
 			if m.complSel > n-1 {

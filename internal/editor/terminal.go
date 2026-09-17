@@ -220,7 +220,7 @@ func (m *Model) handleTerm(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "pgup":
 		m.termScroll += m.termPanelHeight() / 2
-	case "pgdn":
+	case "pgdown":
 		m.termScroll -= m.termPanelHeight() / 2
 		if m.termScroll < 0 {
 			m.termScroll = 0

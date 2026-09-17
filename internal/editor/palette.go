@@ -52,7 +52,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "agent_tasks", title: "cmd.agent_tasks_t", desc: "cmd.agent_tasks_d", action: func(m *Model) tea.Cmd { return m.openAgentPanel() }},
 		{id: "agent_new", title: "cmd.agent_new_t", desc: "cmd.agent_new_d", action: func(m *Model) tea.Cmd { return m.startAgentTaskPrompt() }},
 		{id: "settings", title: "cmd.settings_t", desc: "cmd.settings_d", action: func(m *Model) tea.Cmd { m.openConfigFile(); return nil }},
-		{id: "help", title: "cmd.help_t", desc: "cmd.help_d", action: func(m *Model) tea.Cmd { m.helpOpen = true; return nil }},
+		{id: "help", title: "cmd.help_t", desc: "cmd.help_d", action: func(m *Model) tea.Cmd { m.helpOpen = true; m.helpScroll = 0; return nil }},
 		{id: "quit", title: "cmd.quit_t", desc: "cmd.quit_d", action: func(m *Model) tea.Cmd { return tea.Quit }},
 		{id: "lang_select", title: "cmd.lang_select_t", desc: "cmd.lang_select_d", action: func(m *Model) tea.Cmd { m.openLangChooser(); return nil }},
 		{id: "plugin_store", title: "cmd.plugin_store_t", desc: "cmd.plugin_store_d", action: func(m *Model) tea.Cmd { return m.openPluginStore() }},

@@ -635,7 +635,7 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 			m.diffOffsetY++
 		case "pgup":
 			m.diffOffsetY -= h
-		case "pgdn":
+		case "pgdown":
 			m.diffOffsetY += h
 		case "home", "g":
 			m.diffOffsetY = 0
@@ -846,7 +846,7 @@ func (m *Model) handleGitLog(msg tea.KeyPressMsg) tea.Cmd {
 			m.diffOffsetY++
 		case "pgup":
 			m.diffOffsetY -= h
-		case "pgdn":
+		case "pgdown":
 			m.diffOffsetY += h
 		case "home", "g":
 			m.diffOffsetY = 0
@@ -887,7 +887,7 @@ func (m *Model) handleGitLog(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		m.clampGitLogScroll()
 		m.showLogDiff()
-	case "pgdn":
+	case "pgdown":
 		m.gitLogSel += m.viewHeight()
 		if m.gitLogSel >= len(m.gitLogEntries) {
 			m.gitLogSel = maxInt(0, len(m.gitLogEntries)-1)

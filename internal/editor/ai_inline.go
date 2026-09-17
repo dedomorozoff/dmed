@@ -249,7 +249,7 @@ func (m *Model) handleInlineReview(msg tea.KeyPressMsg) tea.Cmd {
 		if m.aiReviewOffY < 0 {
 			m.aiReviewOffY = 0
 		}
-	case "pgdn":
+	case "pgdown":
 		m.aiReviewOffY += m.paneViewHeight(m.activePane) / 2
 		maxOff := len(m.aiReviewRows) - 1
 		if m.aiReviewOffY > maxOff {

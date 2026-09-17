@@ -249,7 +249,7 @@ func (m *Model) handleFixReview(msg tea.KeyPressMsg) tea.Cmd {
 		if m.aiFixReviewOffY < 0 {
 			m.aiFixReviewOffY = 0
 		}
-	case "pgdn":
+	case "pgdown":
 		m.aiFixReviewOffY += m.paneViewHeight(m.activePane) / 2
 		if maxOff := len(m.aiFixReviewRows) - 1; m.aiFixReviewOffY > maxOff {
 			m.aiFixReviewOffY = maxOff

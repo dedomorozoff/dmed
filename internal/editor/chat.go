@@ -212,7 +212,7 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 	case "pgup":
 		m.chatScroll += m.paneViewHeight(m.activePane) / 2
 		m.clampChatScroll()
-	case "pgdn":
+	case "pgdown":
 		m.chatScroll -= m.paneViewHeight(m.activePane) / 2
 		m.clampChatScroll()
 	case "up": // recall a previously sent prompt
@@ -714,7 +714,7 @@ func (m *Model) handleChatReview(msg tea.KeyPressMsg) tea.Cmd {
 		if m.chatReviewOffY < 0 {
 			m.chatReviewOffY = 0
 		}
-	case "pgdn":
+	case "pgdown":
 		m.chatReviewOffY += m.paneViewHeight(m.activePane) / 2
 		if maxOff := len(m.chatReviewRows) - 1; m.chatReviewOffY > maxOff {
 			m.chatReviewOffY = maxOff

@@ -280,7 +280,8 @@ type Model struct {
 	finderHits  []string
 	finderSel   int
 
-	helpOpen bool
+	helpOpen   bool
+	helpScroll int // help panel scroll offset (the list overflows small screens)
 
 	aiCfgOpen  bool
 	aiCfgField int
@@ -975,8 +976,37 @@ func (m *Model) handleHelp(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc", "f1", "ctrl+e", "q":
 		m.helpOpen = false
+	case "j", "down", "pgdown":
+		m.scrollHelp(1)
+	case "k", "up", "pgup":
+		m.scrollHelp(-1)
+	case "g", "home":
+		m.helpScroll = 0
+	case "G", "end":
+		m.helpScroll = m.helpMaxScroll()
 	}
 	return nil
+}
+
+// scrollHelp moves the help panel by d rows (negative = up) and clamps it.
+func (m *Model) scrollHelp(d int) {
+	m.helpScroll += d
+	if m.helpScroll < 0 {
+		m.helpScroll = 0
+	}
+	if max := m.helpMaxScroll(); m.helpScroll > max {
+		m.helpScroll = max
+	}
+}
+
+// helpMaxScroll is the maximum help scroll offset so the last row stays
+// visible; 0 when everything already fits.
+func (m Model) helpMaxScroll() int {
+	n := len(helpEntries) + 1 // title row + entries
+	if h := m.viewHeight(); n > h {
+		return n - h
+	}
+	return 0
 }
 
 func (m *Model) focusOrOpen(rawPath string) {
@@ -1576,6 +1606,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "f1", "ctrl+e":
 		m.helpOpen = !m.helpOpen
+		if m.helpOpen {
+			m.helpScroll = 0
+		}
 		return nil
 	case "ctrl+b", "f9":
 		m.toggleTree()
@@ -1645,7 +1678,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			if m.conflictOffY < 0 {
 				m.conflictOffY = 0
 			}
-		case "pgdn":
+		case "pgdown":
 			m.conflictOffY += m.paneViewHeight(m.activePane) / 2
 			maxOff := len(m.conflictRows) - 1
 			if m.conflictOffY > maxOff {

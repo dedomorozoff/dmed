@@ -788,18 +788,39 @@ func padTo(s string, w int) string {
 }
 
 func (m Model) helpPanel(h int) []string {
-	rows := make([]string, 0, h)
-	rows = append(rows, statusHiStyle.Render(m.t("help.title"))+" "+hintStyle.Render(m.t("help.close_hint")))
+	all := make([]string, 0, len(helpEntries)+1)
+	title := statusHiStyle.Render(m.t("help.title")) + " " + hintStyle.Render(m.t("help.close_hint"))
+	if m.helpMaxScroll() > 0 {
+		title += hintStyle.Render(m.t("help.scroll_hint"))
+	}
+	all = append(all, title)
 	for _, e := range helpEntries {
 		if e.keys == "" {
-			rows = append(rows, "")
+			all = append(all, "")
 			continue
 		}
 		key := e.keys
 		if len(key) < 26 {
 			key += strings.Repeat(" ", 26-len(key))
 		}
-		rows = append(rows, " "+statusStyle.Render(key)+m.t(e.desc))
+		all = append(all, " "+statusStyle.Render(key)+m.t(e.desc))
+	}
+	// Window the list so it never overflows the terminal; j/k/PgUp/PgDn and
+	// the mouse wheel scroll it.
+	off := m.helpScroll
+	if max := len(all) - h; off > max {
+		off = max
+	}
+	if off < 0 {
+		off = 0
+	}
+	end := off + h
+	if end > len(all) {
+		end = len(all)
+	}
+	rows := all[off:end]
+	for len(rows) < h {
+		rows = append(rows, "")
 	}
 	return rows
 }

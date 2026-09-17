@@ -570,7 +570,7 @@ func (m *Model) handleDap(msg tea.KeyPressMsg) tea.Cmd {
 		m.dapMoveSel(1)
 	case "pgup":
 		m.dapMoveSel(-6)
-	case "pgdn":
+	case "pgdown":
 		m.dapMoveSel(6)
 	case "ctrl+l":
 		m.dapConsole = nil

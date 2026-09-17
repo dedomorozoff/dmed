@@ -527,7 +527,10 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 			m.conflictOffY = maxInt(0, maxOff)
 		}
 		return nil
-	case m.aiCfgOpen, m.helpOpen:
+	case m.helpOpen:
+		m.scrollHelp(dir)
+		return nil
+	case m.aiCfgOpen:
 		return nil
 	}
 
