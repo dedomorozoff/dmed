@@ -309,11 +309,16 @@ func (m Model) View() tea.View {
 	// The completion popup floats under the edit line instead of being pinned
 	// to the bottom of the screen.
 	rows = m.overlayCompletion(rows)
+	// The status-icon hover callout floats just above the status bar.
+	rows = m.overlayStatusTooltip(rows)
 	var v tea.View
 	v.SetContent(lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n")))
 	v.AltScreen = true
 	v.WindowTitle = "dmed — " + m.activeTab().name(m.baseDir())
-	v.MouseMode = tea.MouseModeCellMotion
+	// All-motion mode is required so hover (no button held) reaches the app;
+	// this powers the status-bar icon callout. Terminals without any-event
+	// tracking simply never deliver hover.
+	v.MouseMode = tea.MouseModeAllMotion
 
 	// Request the Kitty keyboard protocol so the terminal reports bare
 	// modifier presses and every physical key as an escape code. This is what
@@ -950,9 +955,9 @@ func (m Model) gitStatusLine() string {
 	} else {
 		hint = m.t("git.hints")
 	}
-	line := ""
+	line := m.statusIconsString()
 	if r == nil {
-		line = statusHiStyle.Render(" git: ") + statusStyle.Render(m.t("git.no_repo"))
+		line += statusHiStyle.Render(" git: ") + statusStyle.Render(m.t("git.no_repo"))
 	} else {
 		summary := r.StatusSummary()
 		staged := 0
@@ -961,7 +966,7 @@ func (m Model) gitStatusLine() string {
 				staged++
 			}
 		}
-		line = statusHiStyle.Render(m.t("git.prefix_status")) +
+		line += statusHiStyle.Render(m.t("git.prefix_status")) +
 			hintStyle.Render("("+r.Branch()+" "+summary+")") +
 			statusStyle.Render(fmt.Sprintf(" %s", m.t("git.status_count", len(m.gitFiles), staged)))
 	}
@@ -1002,11 +1007,11 @@ func fitStatusTail(s string, w int) string {
 }
 
 func (m Model) gitLogStatusLine() string {
-	var line string
+	line := m.statusIconsString()
 	if len(m.gitLogEntries) == 0 {
-		line = statusHiStyle.Render(m.t("git.prefix_log")) + statusStyle.Render(m.t("git.no_commits"))
+		line += statusHiStyle.Render(m.t("git.prefix_log")) + statusStyle.Render(m.t("git.no_commits"))
 	} else {
-		line = statusHiStyle.Render(m.t("git.prefix_log")) + hintStyle.Render(m.t("git.commit_count", len(m.gitLogEntries)))
+		line += statusHiStyle.Render(m.t("git.prefix_log")) + hintStyle.Render(m.t("git.commit_count", len(m.gitLogEntries)))
 	}
 	hint := m.t("git.log_hint")
 	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
@@ -2000,20 +2005,14 @@ func (m Model) palettePanel() []string {
 
 func (m Model) statusBar() string {
 	t := m.activeTab()
-	base := m.baseDir()
-	dirty := ""
-	if t.buf.Dirty() {
-		dirty = " *"
-	}
 	paneMark := ""
 	if m.layout != splitNone {
 		paneMark = fmt.Sprintf("[%d] ", m.activePane+1)
 	}
-	left := statusHiStyle.Render(" " + paneMark + t.name(base) + dirty)
+	branchSuffix := ""
 	if m.repo != nil {
-		b := m.repo.Branch()
-		if b != "" {
-			left += hintStyle.Render(" (" + b + ")")
+		if b := m.repo.Branch(); b != "" {
+			branchSuffix = " (" + b + ")"
 		}
 	}
 
@@ -2036,6 +2035,17 @@ func (m Model) statusBar() string {
 		}
 	}
 	rightBar := hintStyle.Render(hint) + statusStyle.Render(fileInfo) + statusStyle.Render(right)
+
+	// The active file name already lives in the tab bar, so the status line
+	// only carries the icon strip, the split marker and the git branch.
+	left := m.statusIconsString()
+	if paneMark != "" {
+		left += statusHiStyle.Render(" " + paneMark)
+	}
+	if branchSuffix != "" {
+		left += hintStyle.Render(branchSuffix)
+	}
+
 	fill := m.width - lipgloss.Width(left) - lipgloss.Width(mid) - lipgloss.Width(rightBar)
 	if fill > 0 {
 		return left + mid + statusStyle.Render(strings.Repeat(" ", fill)) + rightBar

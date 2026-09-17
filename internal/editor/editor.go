@@ -539,6 +539,7 @@ type Model struct {
 
 	// Mouse state
 	mouseDown bool
+	hoverIcon statusAction // status-bar icon under the cursor (actNone if none)
 
 	// Double-click detection: last click position/time plus a validity flag so
 	// a third quick click starts a fresh pair instead of chaining.
@@ -1357,6 +1358,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.handleMouseMotion(msg)
 			return m, cmd
 		}
+		m.updateStatusHover(msg)
 	case tea.PasteMsg:
 		if text := msg.String(); text != "" {
 			m.pasteInput(text)
@@ -1634,12 +1636,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return m.dapStepCmd("stepOut")
 		}
 	case "ctrl+alt+d":
-		m.dapOpen = !m.dapOpen
-		if m.dapOpen {
-			m.termOpen = false
-			m.msg = m.t("msg.debug_panel_opened")
-		}
-		return nil
+		return m.toggleDebugPanel()
 	}
 	if m.conflictOpen {
 		switch s {
@@ -2625,6 +2622,28 @@ func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
 	ln, rawCol := m.clickPosToLineCol(m.activePane, editorRow, x)
 
 	m.cur().buf.DragSelect(ln, rawCol)
+	return nil
+}
+
+// updateStatusHover tracks which status-bar icon the cursor is over so the
+// hovered cell can highlight and a callout can be drawn. Called for motion
+// events with no button pressed (requires MouseModeAllMotion).
+func (m *Model) updateStatusHover(msg tea.MouseMotionMsg) {
+	if m.statusIconsVisible() && msg.Y == m.viewHeight()+1 {
+		m.hoverIcon = m.statusIconAt(msg.X)
+		return
+	}
+	m.hoverIcon = actNone
+}
+
+// toggleDebugPanel mirrors the Ctrl+Alt+D shortcut so the status-bar icon and
+// the key behave identically.
+func (m *Model) toggleDebugPanel() tea.Cmd {
+	m.dapOpen = !m.dapOpen
+	if m.dapOpen {
+		m.termOpen = false
+		m.msg = m.t("msg.debug_panel_opened")
+	}
 	return nil
 }
 

@@ -117,9 +117,14 @@ var enCatalog = map[string]string{
 	"git.new_branch_label": " new branch: ",
 
 	// Status bar
-	"status.f1_help": "F1 help ",
-	"status.f8_pane": "F8 pane ",
-	"status.lncol":   "Ln %d, Col %d ",
+	"status.f1_help":   "F1 help ",
+	"status.f8_pane":   "F8 pane ",
+	"status.lncol":     "Ln %d, Col %d ",
+	"status.tip_tree":  "Project tree (Ctrl+B)",
+	"status.tip_git":   "Git panel (Ctrl+G)",
+	"status.tip_chat":  "AI chat (Alt+A)",
+	"status.tip_debug": "Debug panel (Ctrl+Alt+D)",
+	"status.tip_term":  "Terminal (Alt+T)",
 
 	// Prompt / commit lines
 	"prompt.open_file":    " open file: ",
@@ -382,9 +387,14 @@ var ruCatalog = map[string]string{
 	"git.new_branch_label": " новая ветка: ",
 
 	// Status bar
-	"status.f1_help": "F1 справка ",
-	"status.f8_pane": "F8 панель ",
-	"status.lncol":   "Стр %d, Кол %d ",
+	"status.f1_help":   "F1 справка ",
+	"status.f8_pane":   "F8 панель ",
+	"status.lncol":     "Стр %d, Кол %d ",
+	"status.tip_tree":  "Дерево проекта (Ctrl+B)",
+	"status.tip_git":   "Панель git (Ctrl+G)",
+	"status.tip_chat":  "AI-чат (Alt+A)",
+	"status.tip_debug": "Панель отладки (Ctrl+Alt+D)",
+	"status.tip_term":  "Терминал (Alt+T)",
 
 	// Prompt / commit lines
 	"prompt.open_file":    " открыть файл: ",

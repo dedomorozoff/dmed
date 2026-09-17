@@ -200,6 +200,7 @@ func TestViewShowsTabNames(t *testing.T) {
 	f2 := writeTemp(t, dir, "bb.txt", "y\n")
 
 	m := New(f1, f2)
+	m.root = dir // basenames in the tab bar, so both fit at width 80
 	m.width, m.height = 80, 24
 	v := m.View()
 	if !strings.Contains(v.Content, "aa.txt") || !strings.Contains(v.Content, "bb.txt") {

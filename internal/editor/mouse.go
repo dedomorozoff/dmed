@@ -94,6 +94,16 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 		return cmd
 	}
 
+	// Status-bar panel icons live on the bottom row (viewHeight()+1).
+	if y == h+1 && m.statusIconsVisible() {
+		if left {
+			if a := m.statusIconAt(x); a != actNone {
+				return m.activateStatusIcon(a)
+			}
+		}
+		return nil
+	}
+
 	// Right AI chat rail.
 	if m.chatOpen && x >= m.width-m.rightRailWidth() && y >= 1 && y <= h {
 		m.chatFocus = true
