@@ -22,6 +22,8 @@ const (
 	actChat
 	actDebug
 	actTerm
+	actSplitV
+	actSplitH
 )
 
 type statusIcon struct {
@@ -73,6 +75,10 @@ func (m Model) statusIconActive(a statusAction) bool {
 		return m.dapOpen
 	case actTerm:
 		return m.termOpen
+	case actSplitV:
+		return m.layout == splitVert
+	case actSplitH:
+		return m.layout == splitHoriz
 	}
 	return false
 }
@@ -126,7 +132,130 @@ func (m Model) statusTip(a statusAction) string {
 			return m.t(d.tip)
 		}
 	}
+	switch a {
+	case actSplitV:
+		return m.t("status.tip_splitv")
+	case actSplitH:
+		return m.t("status.tip_splith")
+	}
 	return ""
+}
+
+// ---- Split icons (top-right corner of the tab bar) -------------------------
+
+// splitIconGlyphs are the two right-aligned clickable cells at the end of the
+// tab bar. ◫ reads as two side-by-side panes (vertical split), ▤ as stacked
+// rows (horizontal split).
+var splitIconGlyphs = []statusIcon{
+	{actSplitV, "◫", "status.tip_splitv"},
+	{actSplitH, "▤", "status.tip_splith"},
+}
+
+func (m Model) splitIconsWidth() int {
+	w := 0
+	for _, d := range splitIconGlyphs {
+		w += lipgloss.Width(" " + d.glyph + " ")
+	}
+	return w
+}
+
+// splitIconsVisible reports whether the split icons fit next to the tabs on
+// the top row. Kept in sync with tabBar so hit-testing never maps a cell the
+// renderer did not draw.
+func (m Model) splitIconsVisible() bool {
+	var lineW int
+	for i := range m.tabs {
+		lineW += lipgloss.Width(m.tabLabel(i))
+	}
+	return m.width-lineW >= m.splitIconsWidth()
+}
+
+func (m Model) splitIconsString() string {
+	if !m.splitIconsVisible() {
+		return ""
+	}
+	var b strings.Builder
+	for _, d := range splitIconGlyphs {
+		st := statusStyle
+		if m.statusIconActive(d.act) || m.hoverSplit == d.act {
+			st = statusHiStyle
+		}
+		b.WriteString(st.Render(" " + d.glyph + " "))
+	}
+	return b.String()
+}
+
+// splitIconAt returns the split action whose painted cell contains column x
+// on the tab bar row, or actNone.
+func (m Model) splitIconAt(x int) statusAction {
+	if !m.splitIconsVisible() {
+		return actNone
+	}
+	start := m.width - m.splitIconsWidth()
+	pos := start
+	for _, d := range splitIconGlyphs {
+		w := lipgloss.Width(" " + d.glyph + " ")
+		if x >= pos && x < pos+w {
+			return d.act
+		}
+		pos += w
+	}
+	return actNone
+}
+
+// activateSplitIcon toggles the split the same way the keyboard does.
+func (m *Model) activateSplitIcon(a statusAction) tea.Cmd {
+	switch a {
+	case actSplitV:
+		m.toggleSplitVert()
+	case actSplitH:
+		m.toggleSplitHoriz()
+	}
+	return nil
+}
+
+// updateSplitHover tracks which top-right split icon the cursor is over.
+func (m *Model) updateSplitHover(msg tea.MouseMotionMsg) {
+	if msg.Y == 0 {
+		m.hoverSplit = m.splitIconAt(msg.X)
+		return
+	}
+	m.hoverSplit = actNone
+}
+
+// overlaySplitTooltip draws a one-row floating callout just under the tab bar,
+// anchored to the hovered split icon (mirroring overlayStatusTooltip).
+func (m Model) overlaySplitTooltip(rows []string) []string {
+	if m.hoverSplit == actNone || !m.splitIconsVisible() {
+		return rows
+	}
+	h := m.viewHeight()
+	if h < 1 || h+1 >= len(rows) {
+		return rows
+	}
+	tip := m.statusTip(m.hoverSplit)
+	if tip == "" {
+		return rows
+	}
+	text := statusHiStyle.Render(" " + tip + " ")
+	w := lipgloss.Width(text)
+	start := m.width - m.splitIconsWidth()
+	x := start + 1 // center the callout under the hovered cell
+	if m.hoverSplit == actSplitH {
+		x = start + 3 + 1
+	}
+	if x+w > m.width {
+		x = m.width - w
+	}
+	if x < 0 {
+		x = 0
+	}
+	fill := m.width - x - w
+	if fill < 0 {
+		fill = 0
+	}
+	rows[1] = strings.Repeat(" ", x) + text + strings.Repeat(" ", fill)
+	return rows
 }
 
 // activateStatusIcon performs the same action as the panel's keyboard

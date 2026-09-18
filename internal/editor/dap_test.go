@@ -23,6 +23,29 @@ func newStubDAPClient() *dap.Client {
 	return dap.NewClient(nopConn{}, func(dap.Event) {})
 }
 
+func TestDapAdapterCommand(t *testing.T) {
+	// Default dlv gets the `dap` subcommand prepended.
+	bin, argv := dapAdapterCommand("dlv", "")
+	if bin != "dlv" || len(argv) != 1 || argv[0] != "dap" {
+		t.Fatalf("dlv default = %s %v, want [dap]", bin, argv)
+	}
+	// Explicit args keep dap first.
+	_, argv = dapAdapterCommand("dlv.exe", "--log-dir /tmp/dap")
+	if len(argv) != 3 || argv[0] != "dap" || argv[1] != "--log-dir" {
+		t.Fatalf("dlv with args = %v, want [dap --log-dir /tmp/dap]", argv)
+	}
+	// A pre-supplied dap subcommand is not duplicated.
+	_, argv = dapAdapterCommand("dlv", "dap --log-dir /tmp/dap")
+	if len(argv) != 3 || argv[0] != "dap" {
+		t.Fatalf("dlv dap ... = %v, want [dap --log-dir /tmp/dap]", argv)
+	}
+	// Generic adapters pass args through untouched.
+	_, argv = dapAdapterCommand("debugpy-adapter", "--log-dir /tmp/x")
+	if len(argv) != 2 || argv[0] != "--log-dir" {
+		t.Fatalf("debugpy args = %v, want passthrough", argv)
+	}
+}
+
 func TestDapLaunchArgs(t *testing.T) {
 	m := New()
 	m.width, m.height = 80, 24

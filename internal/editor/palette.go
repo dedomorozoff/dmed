@@ -19,6 +19,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "save_as", title: "cmd.save_as_t", desc: "cmd.save_as_d", action: func(m *Model) tea.Cmd { m.startSavePrompt(); return nil }},
 		{id: "close_tab", title: "cmd.close_tab_t", desc: "cmd.close_tab_d", action: func(m *Model) tea.Cmd { return m.closeTab() }},
 		{id: "open", title: "cmd.open_t", desc: "cmd.open_d", action: func(m *Model) tea.Cmd { m.startPrompt(); return nil }},
+		{id: "open_folder", title: "cmd.open_folder_t", desc: "cmd.open_folder_d", action: func(m *Model) tea.Cmd { return m.openFolderCmd() }},
 		{id: "new_file", title: "cmd.new_file_t", desc: "cmd.new_file_d", action: func(m *Model) tea.Cmd { m.startNewFilePrompt(); return nil }},
 		{id: "new_folder", title: "cmd.new_folder_t", desc: "cmd.new_folder_d", action: func(m *Model) tea.Cmd { m.startNewFolderPrompt(); return nil }},
 		{id: "finder", title: "cmd.finder_t", desc: "cmd.finder_d", action: func(m *Model) tea.Cmd { m.startFinder(); return nil }},

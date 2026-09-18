@@ -80,6 +80,9 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 
 	// The tab bar is always row 0.
 	if y == 0 {
+		if a := m.splitIconAt(x); a != actNone && msg.Button != tea.MouseMiddle {
+			return m.activateSplitIcon(a)
+		}
 		if idx := m.tabAtX(x); idx >= 0 {
 			if msg.Button == tea.MouseMiddle {
 				return m.closeTabAt(idx)

@@ -117,14 +117,16 @@ var enCatalog = map[string]string{
 	"git.new_branch_label": " new branch: ",
 
 	// Status bar
-	"status.f1_help":   "F1 help ",
-	"status.f8_pane":   "F8 pane ",
-	"status.lncol":     "Ln %d, Col %d ",
-	"status.tip_tree":  "Project tree (Ctrl+B)",
-	"status.tip_git":   "Git panel (Ctrl+G)",
-	"status.tip_chat":  "AI chat (Alt+A)",
-	"status.tip_debug": "Debug panel (Ctrl+Alt+D)",
-	"status.tip_term":  "Terminal (Alt+T)",
+	"status.f1_help":    "F1 help ",
+	"status.f8_pane":    "F8 pane ",
+	"status.lncol":      "Ln %d, Col %d ",
+	"status.tip_tree":   "Project tree (Ctrl+B)",
+	"status.tip_git":    "Git panel (Ctrl+G)",
+	"status.tip_chat":   "AI chat (Alt+A)",
+	"status.tip_debug":  "Debug panel (Ctrl+Alt+D)",
+	"status.tip_term":   "Terminal (Alt+T)",
+	"status.tip_splitv": "Vertical split (Ctrl+\\ / F6)",
+	"status.tip_splith": "Horizontal split (Ctrl+Alt+H / F7)",
 
 	// Prompt / commit lines
 	"prompt.open_file":    " open file: ",
@@ -242,6 +244,7 @@ var enCatalog = map[string]string{
 	"cmd.save_as_t": "File: Save As...", "cmd.save_as_d": "Save active buffer to a new path",
 	"cmd.close_tab_t": "File: Close Tab", "cmd.close_tab_d": "Ctrl+W — Close active tab",
 	"cmd.open_t": "File: Open by Path...", "cmd.open_d": "Ctrl+T — Open file prompt",
+	"cmd.open_folder_t": "File: Open Folder...", "cmd.open_folder_d": "Choose a project folder with the system dialog",
 	"cmd.new_file_t": "File: New File...", "cmd.new_file_d": "Create a new file by path",
 	"cmd.new_folder_t": "File: New Folder...", "cmd.new_folder_d": "Create a directory by path",
 	"cmd.finder_t": "File: Fuzzy Finder...", "cmd.finder_d": "Ctrl+O — Quick file search",
@@ -278,9 +281,6 @@ var enCatalog = map[string]string{
 	// Language chooser
 	"lang.choose":  " Select language: ",
 	"lang.current": " (current)",
-
-	// Completion popup
-	"compl.title": "completion",
 
 	// Misc
 	"msg.lang_set": "language set to %s",
@@ -392,14 +392,16 @@ var ruCatalog = map[string]string{
 	"git.new_branch_label": " новая ветка: ",
 
 	// Status bar
-	"status.f1_help":   "F1 справка ",
-	"status.f8_pane":   "F8 панель ",
-	"status.lncol":     "Стр %d, Кол %d ",
-	"status.tip_tree":  "Дерево проекта (Ctrl+B)",
-	"status.tip_git":   "Панель git (Ctrl+G)",
-	"status.tip_chat":  "AI-чат (Alt+A)",
-	"status.tip_debug": "Панель отладки (Ctrl+Alt+D)",
-	"status.tip_term":  "Терминал (Alt+T)",
+	"status.f1_help":    "F1 справка ",
+	"status.f8_pane":    "F8 панель ",
+	"status.lncol":      "Стр %d, Кол %d ",
+	"status.tip_tree":   "Дерево проекта (Ctrl+B)",
+	"status.tip_git":    "Панель git (Ctrl+G)",
+	"status.tip_chat":   "AI-чат (Alt+A)",
+	"status.tip_debug":  "Панель отладки (Ctrl+Alt+D)",
+	"status.tip_term":   "Терминал (Alt+T)",
+	"status.tip_splitv": "Вертикальный сплит (Ctrl+\\ / F6)",
+	"status.tip_splith": "Горизонтальный сплит (Ctrl+Alt+H / F7)",
 
 	// Prompt / commit lines
 	"prompt.open_file":    " открыть файл: ",
@@ -517,6 +519,7 @@ var ruCatalog = map[string]string{
 	"cmd.save_as_t": "Файл: Сохранить как...", "cmd.save_as_d": "Сохранить активный буфер в новый путь",
 	"cmd.close_tab_t": "Файл: Закрыть вкладку", "cmd.close_tab_d": "Ctrl+W — закрыть активную вкладку",
 	"cmd.open_t": "Файл: Открыть по пути...", "cmd.open_d": "Ctrl+T — открыть файл по промпту",
+	"cmd.open_folder_t": "Файл: Открыть папку...", "cmd.open_folder_d": "Выбрать проект-папку системным диалогом",
 	"cmd.new_file_t": "Файл: Новый файл...", "cmd.new_file_d": "Создать новый файл по пути",
 	"cmd.new_folder_t": "Файл: Новая папка...", "cmd.new_folder_d": "Создать каталог по пути",
 	"cmd.finder_t": "Файл: Быстрый поиск...", "cmd.finder_d": "Ctrl+O — быстрый поиск файлов",
@@ -553,9 +556,6 @@ var ruCatalog = map[string]string{
 	// Language chooser
 	"lang.choose":  " Выберите язык: ",
 	"lang.current": " (текущий)",
-
-	// Completion popup
-	"compl.title": "дополнение",
 
 	// Misc
 	"msg.lang_set": "язык установлен: %s",

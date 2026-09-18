@@ -35,6 +35,7 @@ type dapStartMsg struct {
 	cl       *dap.Client
 	gen      int
 	supports bool
+	adapter  string // resolved adapter base name, for the status bar
 	err      error
 }
 
@@ -101,6 +102,24 @@ const (
 	dapEnded   = "end"    // process exited, session still alive
 )
 
+// dapAdapterCommand resolves the effective adapter binary and argv for a DAP
+// session. Delve exposes the DAP server under its `dap` subcommand, so the
+// default "dlv" is always invoked as `dlv dap ...`; generic adapters
+// (debugpy, lldb-dap, ...) take the given args verbatim.
+func dapAdapterCommand(adapter, args string) (string, []string) {
+	argv := []string{}
+	if args != "" {
+		argv = strings.Fields(args)
+	}
+	base := strings.ToLower(filepath.Base(adapter))
+	if base == "dlv" || base == "dlv.exe" {
+		if len(argv) == 0 || argv[0] != "dap" {
+			argv = append([]string{"dap"}, argv...)
+		}
+	}
+	return adapter, argv
+}
+
 // dapStartCmd spawns the DAP adapter and completes the initialize handshake
 // in the background so the UI never blocks on adapter startup. The outcome
 // arrives as a dapStartMsg stamped with the session generation; results from
@@ -114,8 +133,25 @@ func (m *Model) dapStartCmd() tea.Cmd {
 	if mode == "" {
 		mode = "reverse"
 	}
-	adapterArgs := strings.Fields(m.cfg.Debug.AdapterArgs)
+	adapter, adapterArgs := dapAdapterCommand(adapter, m.cfg.Debug.AdapterArgs)
 	root := m.baseDir()
+	if p := m.dapProgram(); p != "" {
+		// dlv runs `go build <program>` in its own working directory, so the
+		// adapter must be launched from the program's directory: an absolute
+		// program path outside dlv's cwd module fails with "directory ...
+		// outside main module". The debuggee's own cwd is set separately via
+		// the launch `cwd` argument.
+		if st, err := os.Stat(p); err == nil {
+			if st.IsDir() {
+				root = p
+			} else {
+				root = filepath.Dir(p)
+			}
+			if abs, err := filepath.Abs(root); err == nil {
+				root = abs
+			}
+		}
+	}
 	ch := m.dapCh
 	gen := m.dapGen
 	return func() tea.Msg {
@@ -145,7 +181,7 @@ func (m *Model) dapStartCmd() tea.Cmd {
 			cl.Close()
 			return dapStartMsg{gen: gen, err: fmt.Errorf("debug adapter initialize: %w", err)}
 		}
-		return dapStartMsg{cl: cl, gen: gen, supports: supports}
+		return dapStartMsg{cl: cl, gen: gen, supports: supports, adapter: filepath.Base(adapter)}
 	}
 }
 
@@ -217,12 +253,17 @@ func (m Model) dapLaunchArgs() (map[string]interface{}, error) {
 
 // dapProgram resolves what to debug: the [debug] program setting, else the
 // directory of the active file (a sensible default for package-oriented
-// adapters like Delve), else ".".
+// adapters like Delve), else ".". For a Go file outside any module, the file
+// itself is returned: dlv then builds `go build <file>.go`, which works
+// without a go.mod, instead of failing on a module-less package directory.
 func (m Model) dapProgram() string {
 	if p := m.cfg.Debug.Program; p != "" {
 		return p
 	}
 	if t := m.cur(); t != nil && t.path != "" {
+		if filepath.Ext(t.path) == ".go" && !pathInGoModule(filepath.Dir(t.path)) {
+			return t.path
+		}
 		if st, err := os.Stat(t.path); err == nil {
 			if st.IsDir() {
 				return t.path
@@ -231,6 +272,23 @@ func (m Model) dapProgram() string {
 		}
 	}
 	return "."
+}
+
+// pathInGoModule reports whether dir (or any ancestor) carries a go.mod or
+// go.work file, i.e. belongs to a module the Go tool can build as a package.
+func pathInGoModule(dir string) bool {
+	for {
+		for _, name := range []string{"go.mod", "go.work"} {
+			if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+				return true
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
 }
 
 // dapCwd is the working directory for the launched program.
@@ -750,11 +808,13 @@ func (m *Model) handleDAPEvent(ev dap.Event) tea.Cmd {
 		}
 	case dap.EventExited:
 		m.dapConsole = append(m.dapConsole, fmt.Sprintf("process exited with code %d", ev.ExitCode))
+		m.msg = fmt.Sprintf("debug: process exited with code %d", ev.ExitCode)
 	case dap.EventTerminated:
 		m.dapRunState = dapEnded
 		m.dapCurPath = ""
 		m.dapCurLine = 0
 		m.dapConsole = append(m.dapConsole, "debug session terminated")
+		m.msg = "debug: session ended"
 	case dap.EventBreakpoint:
 		if ev.SourcePath != "" {
 			if m.dapBPVerif[ev.SourcePath] == nil {

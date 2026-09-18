@@ -50,7 +50,11 @@ type Client struct {
 	nextID      int64
 	rootURI     string
 	mu          sync.Mutex
+	writeMu     sync.Mutex // serializes ALL writes + the didOpen transition
+	initDone    chan struct{} // closed once the initialize handshake finished
 	pending     map[int64]chan json.RawMessage
+	opened      map[string]bool
+	versions    map[string]int
 	diagnostics map[string][]Diagnostic
 	diagMu      sync.RWMutex
 	onDiag      func(path string, diags []Diagnostic)
@@ -103,7 +107,10 @@ func Start(serverCmd string, args []string, rootDir string, onDiag func(path str
 		stdin:       stdin,
 		stdout:      stdout,
 		rootURI:     rootURI,
+		initDone:    make(chan struct{}),
 		pending:     make(map[int64]chan json.RawMessage),
+		opened:      make(map[string]bool),
+		versions:    make(map[string]int),
 		diagnostics: make(map[string][]Diagnostic),
 		onDiag:      onDiag,
 	}
@@ -150,6 +157,10 @@ func (c *Client) initialize() {
 	}
 	_, _ = c.call("initialize", params)
 	_ = c.notify("initialized", map[string]interface{}{})
+	// Only now may other messages (didOpen/didChange/completion) be written:
+	// gopls accepts them only after the initialize handshake, and messages that
+	// arrive beforehand make the first completion hang until it times out.
+	close(c.initDone)
 }
 
 func (c *Client) Close() error {
@@ -170,6 +181,7 @@ func (c *Client) readLoop() {
 		for {
 			line, err := r.ReadString('\n')
 			if err != nil {
+				c.closePending()
 				return
 			}
 			line = strings.TrimRight(line, "\r\n")
@@ -188,6 +200,7 @@ func (c *Client) readLoop() {
 		}
 		body := make([]byte, contentLength)
 		if _, err := io.ReadFull(r, body); err != nil {
+			c.closePending()
 			return
 		}
 
@@ -262,10 +275,37 @@ func (c *Client) GetDiagnostics(path string) []Diagnostic {
 	return c.diagnostics[abs]
 }
 
-// callTimeout bounds how long call blocks waiting for a server response.
-const callTimeout = 6 * time.Second
+// callTimeout bounds how long call blocks waiting for a server response. It
+// must stay generous: on a cold start gopls indexes the whole module graph
+// before it can answer the first completion, which can take close to a minute
+// on a slow machine. Calls run off the UI thread, so a long cap costs nothing
+// interactively and only turns a genuinely hung server into an error.
+const callTimeout = 60 * time.Second
+
+// closePending unblocks every call still waiting for a response. Called from
+// the read loop once the server process dies, so callers error out promptly
+// instead of draining the full timeout.
+func (c *Client) closePending() {
+	c.mu.Lock()
+	for id, ch := range c.pending {
+		close(ch)
+		delete(c.pending, id)
+	}
+	c.mu.Unlock()
+}
 
 func (c *Client) call(method string, params interface{}) (json.RawMessage, error) {
+	// All requests must wait for the initialize handshake: gopls processes
+	// initialize first and will not answer completion/definition requests that
+	// arrive before it. Without this gate the first completion races the init
+	// goroutine and times out.
+	if method != "initialize" {
+		select {
+		case <-c.initDone:
+		case <-time.After(callTimeout):
+			return nil, fmt.Errorf("lsp: %s timed out before initialize", method)
+		}
+	}
 	id := atomic.AddInt64(&c.nextID, 1)
 	ch := make(chan json.RawMessage, 1)
 
@@ -285,15 +325,18 @@ func (c *Client) call(method string, params interface{}) (json.RawMessage, error
 	}
 
 	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(data))
-	c.mu.Lock()
+	c.writeMu.Lock()
 	_, err = c.stdin.Write(append([]byte(header), data...))
-	c.mu.Unlock()
+	c.writeMu.Unlock()
 	if err != nil {
 		return nil, err
 	}
 
 	select {
-	case res := <-ch:
+	case res, ok := <-ch:
+		if !ok {
+			return nil, fmt.Errorf("lsp: %s server closed", method)
+		}
 		return res, nil
 	case <-time.After(callTimeout):
 		return nil, fmt.Errorf("lsp: %s timed out", method)
@@ -301,6 +344,17 @@ func (c *Client) call(method string, params interface{}) (json.RawMessage, error
 }
 
 func (c *Client) notify(method string, params interface{}) error {
+	// Notifications are also gated on the initialize handshake. A didOpen
+	// written before initialize makes gopls never answer the subsequent
+	// completion; DidChange may be issued by any goroutine at any time, so
+	// every write path must wait, not just the request path.
+	if method != "initialized" && method != "exit" {
+		select {
+		case <-c.initDone:
+		case <-time.After(callTimeout):
+			return fmt.Errorf("lsp: %s timed out before initialize", method)
+		}
+	}
 	req := rpcRequest{
 		JSONRPC: "2.0",
 		Method:  method,
@@ -311,32 +365,80 @@ func (c *Client) notify(method string, params interface{}) error {
 		return err
 	}
 	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(data))
-	c.mu.Lock()
+	c.writeMu.Lock()
 	_, err = c.stdin.Write(append([]byte(header), data...))
-	c.mu.Unlock()
+	c.writeMu.Unlock()
 	return err
 }
 
-// DidOpen informs the server that a document was opened.
-func (c *Client) DidOpen(path, languageID, text string) {
+// EnsureOpened sends textDocument/didOpen for path exactly once. The eager
+// goroutine in the editor and the lazy request goroutines may race; holding
+// writeMu across the "decide to open → written → marked" span guarantees a
+// later didChange can never hit the pipe before didOpen, which gopls would
+// silently drop and resurface as an empty completion.
+func (c *Client) EnsureOpened(path, languageID, text string) error {
+	// didOpen must never reach gopls before initialize: it would hang the
+	// first completion. Wait for the handshake first, then serialize the write
+	// against didChange via writeMu.
+	select {
+	case <-c.initDone:
+	case <-time.After(callTimeout):
+		return fmt.Errorf("lsp: didOpen timed out before initialize")
+	}
 	abs, _ := filepath.Abs(path)
-	_ = c.notify("textDocument/didOpen", map[string]interface{}{
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	c.mu.Lock()
+	if c.opened[abs] {
+		c.mu.Unlock()
+		return nil
+	}
+	c.mu.Unlock()
+	params := map[string]interface{}{
 		"textDocument": map[string]interface{}{
 			"uri":        pathToURI(abs),
 			"languageId": languageID,
 			"version":    1,
 			"text":       text,
 		},
-	})
+	}
+	req := rpcRequest{
+		JSONRPC: "2.0",
+		Method:  "textDocument/didOpen",
+		Params:  params,
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(data))
+	_, err = c.stdin.Write(append([]byte(header), data...))
+	if err == nil {
+		c.mu.Lock()
+		c.opened[abs] = true
+		c.mu.Unlock()
+	}
+	return err
 }
 
-// DidChange informs the server that a document was edited.
-func (c *Client) DidChange(path, text string, version int) {
+// DidOpen informs the server that a document was opened.
+func (c *Client) DidOpen(path, languageID, text string) {
+	_ = c.EnsureOpened(path, languageID, text)
+}
+
+// DidChange informs the server that a document was edited. Versions bump
+// monotonically per document; gopls ignores changes that do not follow the
+// last version it saw, and the editor fires these from many goroutines.
+func (c *Client) DidChange(path, text string, _ int) {
 	abs, _ := filepath.Abs(path)
+	c.mu.Lock()
+	c.versions[abs]++
+	v := c.versions[abs]
+	c.mu.Unlock()
 	_ = c.notify("textDocument/didChange", map[string]interface{}{
 		"textDocument": map[string]interface{}{
 			"uri":     pathToURI(abs),
-			"version": version,
+			"version": v,
 		},
 		"contentChanges": []map[string]interface{}{
 			{"text": text},

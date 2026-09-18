@@ -1,6 +1,8 @@
 package editor
 
 import (
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -69,6 +71,11 @@ func (m *Model) complWordCandidates(prefix string) []string {
 // or closes the popup. force ignores whether candidates were found, so
 // Ctrl+Space can surface suggestions even mid-word. It returns a command that
 // fires an async LSP completion request when a language server is available.
+//
+// The popup also opens when the buffer has no matching words but a language
+// server could answer (e.g. freshly typed "fmt.P" where no buffer word starts
+// with a capital). Without this, type-aware candidates are never requested and
+// the user only ever sees words scraped from the current file.
 func (m *Model) triggerCompletion(force bool) tea.Cmd {
 	start, prefix := m.complPrefix()
 	if prefix == "" && !force {
@@ -76,7 +83,7 @@ func (m *Model) triggerCompletion(force bool) tea.Cmd {
 		return nil
 	}
 	cands := m.complWordCandidates(prefix)
-	if len(cands) == 0 && !force {
+	if len(cands) == 0 && !force && !m.lspAvailable() {
 		m.closeCompletion()
 		return nil
 	}
@@ -87,6 +94,22 @@ func (m *Model) triggerCompletion(force bool) tea.Cmd {
 	m.complSel = 0
 	m.complOffset = 0
 	return m.lspCompletionCmd()
+}
+
+// lspAvailable reports whether the current tab's language has an LSP server
+// installed. It mirrors ensureLSP so triggerCompletion can decide whether a
+// zero-candidate popup is worth holding open for server results.
+func (m *Model) lspAvailable() bool {
+	t := m.cur()
+	if t == nil || t.path == "" {
+		return false
+	}
+	cmd, _, _ := lspServerFor(strings.ToLower(filepath.Ext(t.path)))
+	if cmd == "" {
+		return false
+	}
+	_, err := exec.LookPath(cmd)
+	return err == nil
 }
 
 func (m *Model) closeCompletion() {
@@ -183,13 +206,13 @@ func (m Model) complExtraRows() int {
 	if n > complVisible {
 		n = complVisible
 	}
-	return n + 1
+	return n
 }
 
-// complWidth is the natural popup width: the widest candidate (or the title),
-// capped so the window stays compact next to the cursor.
+// complWidth is the natural popup width: the widest candidate, capped so the
+// window stays compact next to the cursor.
 func (m Model) complWidth() int {
-	w := lipgloss.Width(m.t("compl.title")) + 4
+	w := 4
 	for _, it := range m.complItems {
 		if lw := lipgloss.Width(it) + 4; lw > w {
 			w = lw
@@ -211,8 +234,7 @@ func (m Model) complPanel() []string {
 		items = items[m.complOffset : m.complOffset+complVisible]
 	}
 	w := m.complWidth()
-	rows := make([]string, 0, len(items)+1)
-	rows = append(rows, statusHiStyle.Render(padTo(" "+m.t("compl.title")+" ", w)))
+	rows := make([]string, 0, len(items))
 	for i, it := range items {
 		label := padTo(" "+it+" ", w)
 		if m.complOffset+i == m.complSel {

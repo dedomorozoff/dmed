@@ -313,6 +313,8 @@ func (m Model) View() tea.View {
 	rows = m.overlayCompletion(rows)
 	// The status-icon hover callout floats just above the status bar.
 	rows = m.overlayStatusTooltip(rows)
+	// The split-icon hover callout floats just under the tab bar.
+	rows = m.overlaySplitTooltip(rows)
 	var v tea.View
 	v.SetContent(lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n")))
 	v.AltScreen = true
@@ -657,11 +659,12 @@ func (m Model) tabBar() string {
 		}
 	}
 	line := strings.Join(parts, "")
-	fill := m.width - lipgloss.Width(line)
+	icons := m.splitIconsString()
+	fill := m.width - lipgloss.Width(line) - lipgloss.Width(icons)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
-	return line
+	return line + icons
 }
 
 func (m Model) treePanel(h int) []string {

@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"dmed/internal/debug"
 	"dmed/internal/lsp"
 )
 
@@ -154,7 +155,15 @@ func (m *Model) ensureLSP() {
 		return
 	}
 	m.lspClient = c
-	m.lspClient.DidOpen(t.path, lang, t.buf.Text())
+	path := t.path
+	text := t.buf.Text()
+	// didOpen is sent from a background goroutine because it waits for the
+	// server's initialize handshake, and gopls must not receive the document
+	// before it (that hangs the first completion). The spawn itself stays on
+	// the UI thread so the editor keeps rendering while gopls loads.
+	go debug.CapturePanicReport(func() {
+		_ = c.EnsureOpened(path, lang, text)
+	})
 }
 
 // lspCompletionCmd fires an async completion request for the current cursor and
@@ -164,8 +173,8 @@ func (m *Model) lspCompletionCmd() tea.Cmd {
 	if t == nil || t.path == "" {
 		return nil
 	}
-	cmd, _, _ := lspServerFor(strings.ToLower(filepath.Ext(t.path)))
-	if cmd == "" {
+	cmd, _, lang := lspServerFor(strings.ToLower(filepath.Ext(t.path)))
+	if cmd == "" || lang == "" {
 		return nil
 	}
 	if m.lspClient == nil {
@@ -179,6 +188,7 @@ func (m *Model) lspCompletionCmd() tea.Cmd {
 	text := t.buf.Text()
 	c := m.lspClient
 	return func() tea.Msg {
+		_ = c.EnsureOpened(path, lang, text)
 		c.DidChange(path, text, 1)
 		items, err := c.Completion(path, line, col)
 		if err != nil {
@@ -205,8 +215,8 @@ func (m *Model) gotoDefinitionAt(path string, line, col int) tea.Cmd {
 	if path == "" {
 		return nil
 	}
-	cmd, _, _ := lspServerFor(strings.ToLower(filepath.Ext(path)))
-	if cmd == "" {
+	cmd, _, lang := lspServerFor(strings.ToLower(filepath.Ext(path)))
+	if cmd == "" || lang == "" {
 		return nil
 	}
 	if m.lspClient == nil {
@@ -218,6 +228,7 @@ func (m *Model) gotoDefinitionAt(path string, line, col int) tea.Cmd {
 	text := m.cur().buf.Text()
 	c := m.lspClient
 	return func() tea.Msg {
+		_ = c.EnsureOpened(path, lang, text)
 		c.DidChange(path, text, 1)
 		loc, err := c.Definition(path, line, col)
 		return lspDefinitionMsg{path: path, loc: loc, err: err}

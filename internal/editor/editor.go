@@ -539,8 +539,9 @@ type Model struct {
 	agentReviewOffX   int
 
 	// Mouse state
-	mouseDown bool
-	hoverIcon statusAction // status-bar icon under the cursor (actNone if none)
+	mouseDown  bool
+	hoverIcon  statusAction // status-bar icon under the cursor (actNone if none)
+	hoverSplit statusAction // top-right split icon under the cursor
 
 	// Double-click detection: last click position/time plus a validity flag so
 	// a third quick click starts a fresh pair instead of chaining.
@@ -1390,7 +1391,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case lspCompletionMsg:
 		if m.complOpen && msg.path == m.cur().path {
-			m.mergeLSPCompletion(msg.items)
+			if msg.err != nil {
+				m.msg = "lsp: " + msg.err.Error()
+				if len(m.complItems) == 0 {
+					m.closeCompletion()
+				}
+			} else {
+				m.mergeLSPCompletion(msg.items)
+				if len(m.complItems) == 0 {
+					m.closeCompletion()
+				}
+			}
 		}
 	case lspDiagMsg:
 		abs, _ := filepath.Abs(msg.path)
@@ -1427,6 +1438,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+	case folderPickMsg:
+		if msg.err != nil {
+			m.msg = "open folder: " + msg.err.Error()
+		} else if msg.path != "" {
+			m.switchRoot(msg.path)
+		}
 	case pluginSourceMsg:
 		m.pendingStoreInstall = ""
 		if msg.err != nil {
@@ -1452,6 +1469,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.dapClient = msg.cl
 		m.dapSupportsConfigDone = msg.supports
+		m.msg = "debug: " + msg.adapter + " attached"
 		return m, m.dapLaunchCmd()
 	case dapLaunchMsg:
 		if msg.gen != m.dapGen {
@@ -1461,7 +1479,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.dapRunState = dapIdle
 			m.msg = "debug launch: " + msg.err.Error()
+			return m, nil
 		}
+		m.dapRunState = dapRunning
+		m.msg = "debug: running"
 	case dapStepMsg:
 		if msg.err != nil {
 			m.msg = "debug step: " + msg.err.Error()
@@ -2652,6 +2673,7 @@ func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
 // hovered cell can highlight and a callout can be drawn. Called for motion
 // events with no button pressed (requires MouseModeAllMotion).
 func (m *Model) updateStatusHover(msg tea.MouseMotionMsg) {
+	m.updateSplitHover(msg)
 	if m.statusIconsVisible() && msg.Y == m.viewHeight()+1 {
 		m.hoverIcon = m.statusIconAt(msg.X)
 		return
