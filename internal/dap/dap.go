@@ -623,6 +623,12 @@ func (c *Client) Continue(threadID int64) error {
 	return err
 }
 
+// Pause interrupts a running thread (the inverse of Continue).
+func (c *Client) Pause(threadID int64) error {
+	_, err := c.call("pause", map[string]interface{}{"threadId": threadID})
+	return err
+}
+
 // Next steps over one line. StepIn steps into, StepOut steps out.
 func (c *Client) Next(threadID int64) error {
 	_, err := c.call("next", map[string]interface{}{"threadId": threadID})

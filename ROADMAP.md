@@ -136,7 +136,8 @@ in the Makefile as insurance).
       position accounting for the gutter, scroll, split layout.
 - [x] Window title: `dmed — <file name>` in the terminal title.
 - [x] Mouse support (bubbletea v2 `MouseModeAllMotion`): click = move the
-      cursor, wheel = scroll, drag = select text; hover over the status-bar
+      cursor, wheel = scroll, drag = select text; gutter click = breakpoint
+      (left) / bookmark (middle); hover over the status-bar
       panel icons (`▤` tree, `⎇` git, `✦` AI, `◉` debug, `❯` terminal) shows a
       callout and click toggles the panel.
 - [x] Command palette (`Ctrl+P` / `F2`) — fuzzy search across all editor commands
@@ -208,12 +209,19 @@ in the Makefile as insurance).
       variables/evaluate, stopped/continued/output/exited/terminated/
       breakpoint/disconnected events. Unit tests on a small mock adapter over net.Pipe.
 - [x] Debug panel (`Ctrl+Alt+D`): state header, columns
-      threads / stack / variables (tree with expansion on Enter, Esc — back),
-      process console (`l` — view, `Ctrl+L` — clear, eval line `> expr`).
-- [x] Breakpoints in the gutter (`F4`): the gutter's 4th column, `●` confirmed
-      by the adapter; the current stop line is `▶`.
-- [x] Controls: `F5` run/continue, `Shift+F5` stop, `F10` step over,
-      `F11` step in, `Shift+F11` step out; auto-navigation to the file and line
+      threads / stack / variables (tree with expansion on Enter, Backspace —
+      back out), process console (`l` — view with scroll-back, `Ctrl+L` —
+      clear, eval line `> expr`). Fully mouse-driven: a click selects a
+      thread/frame/variable (reloading the derived columns), a double click
+      expands an expandable variable, the wheel walks the focused column. The
+      lists scroll so the selection always stays on screen.
+- [x] Breakpoints in the gutter (`F4`): `●` confirmed by the adapter; the
+      current stop line is `▶`; one shared marker column with bookmarks (`◆`) —
+      left click toggles a breakpoint, middle click (the wheel) a bookmark.
+- [x] Controls: `F5` run/continue (and pause a running debuggee),
+      `Shift+F5` stop, `F6` step over,
+      `F7` step in, `Shift+F7` step out (panel-local; with the panel closed
+      `F6`/`F7` keep the split bindings); auto-navigation to the file and line
       of the stop.
 - [x] `[debug]` config: mode (debug/test/exec), program, args, stop_on_entry,
       dlv_path; "Debug: Toggle Debug Panel" palette command; i18n en/ru.
@@ -226,7 +234,15 @@ in the Makefile as insurance).
 ### Post-M7 — polish
 - [x] F1 help scrolls (`j`/`k`, PgUp/PgDn, Home/End, mouse wheel): the window
       is sized to the terminal height instead of being clipped; debug
-      combinations were added to the help (Ctrl+Alt+D, F4/F5/F10/F11/S+F5/S+F11).
+      combinations were added to the help (Ctrl+Alt+D, F4/F5/F6/F7/S+F7/S+F5).
+- [x] Debugger correctness pass: the launch sequence now sends launch →
+      setBreakpoints → configurationDone (Delve rejects breakpoints before
+      launch with "No debug session started", which used to abort the launch
+      and leave every later F5 swallowed by the "session already attached"
+      guard); `F5` pauses a running debuggee; the panel takes mouse clicks and
+      its own scroll offsets; the status bar / hovered tooltip / overlay start
+      rows account for the docked panel. Real-Delve integration tests cover a
+      breakpoint hit and a pause.
 - [x] Fixed PgDn across the whole application: in bubbletea v2 the key string is
       `pgdown`, while handlers matched the outdated `pgdn` (dead branches in chat,
       DAP, git, terminal, diff, AI panels, completion).

@@ -398,6 +398,7 @@ type Model struct {
 	dapBusy               bool
 	dapGen                int // session generation; drops stale start/launch msgs
 	dapConsolePeek        bool
+	dapConsoleScroll      int // console lines scrolled back from the newest
 	dapSupportsConfigDone bool
 
 	// Command palette & Clipboard
@@ -1478,10 +1479,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // stale launch result from a superseded session
 		}
 		m.dapBusy = false
+		m.applyDapBPSyncs(msg.bps)
 		if msg.err != nil {
 			m.dapRunState = dapIdle
 			m.msg = "debug launch: " + msg.err.Error()
-			return m, nil
+			// The adapter never produced a debuggee. Release it so F5 can
+			// launch again: leaving the client attached while the state reads
+			// idle made the "session already attached" guard swallow every
+			// later F5 press.
+			return m, m.dapRelease()
 		}
 		m.dapRunState = dapRunning
 		m.msg = "debug: running"
@@ -1507,12 +1513,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.msg = "debug breakpoints: " + msg.err.Error()
 			return m, nil
 		}
-		if m.dapBPVerif[msg.path] == nil {
-			m.dapBPVerif[msg.path] = map[int]bool{}
-		}
-		for i, l := range msg.lines {
-			m.dapBPVerif[msg.path][l] = msg.verified[i]
-		}
+		m.applyDapBPSyncs([]dapBPSyncMsg{msg})
 	}
 	m.clampScroll()
 	return m, nil
@@ -1669,17 +1670,29 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.startDebugging()
 	case "shift+f5":
 		return m.stopDebugging()
-	case "f10":
-		if m.dapRunState == dapStopped {
-			return m.dapStepCmd("next")
+	case "f6":
+		// With the debug panel open the F-keys step (F10/F11 are far from the
+		// home row); with the panel closed F6 falls through to the vertical
+		// split binding.
+		if m.dapOpen {
+			if m.dapRunState == dapStopped {
+				return m.dapStepCmd("next")
+			}
+			return nil
 		}
-	case "f11":
-		if m.dapRunState == dapStopped {
-			return m.dapStepCmd("stepIn")
+	case "f7":
+		if m.dapOpen {
+			if m.dapRunState == dapStopped {
+				return m.dapStepCmd("stepIn")
+			}
+			return nil
 		}
-	case "shift+f11":
-		if m.dapRunState == dapStopped {
-			return m.dapStepCmd("stepOut")
+	case "shift+f7":
+		if m.dapOpen {
+			if m.dapRunState == dapStopped {
+				return m.dapStepCmd("stepOut")
+			}
+			return nil
 		}
 	case "ctrl+alt+d":
 		return m.toggleDebugPanel()
@@ -1750,9 +1763,6 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.termOpen {
 		return m.handleTerm(msg)
 	}
-	if m.dapOpen {
-		return m.handleDap(msg)
-	}
 	if m.agentReviewMode {
 		return m.handleAgentReview(msg)
 	}
@@ -1800,6 +1810,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.treeFocus {
 		return m.handleTree(msg)
+	}
+	if m.dapOpen {
+		return m.handleDap(msg)
 	}
 	if m.searchOpen {
 		if m.replaceOpen {
@@ -2679,7 +2692,7 @@ func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
 // events with no button pressed (requires MouseModeAllMotion).
 func (m *Model) updateStatusHover(msg tea.MouseMotionMsg) {
 	m.updateSplitHover(msg)
-	if m.statusIconsVisible() && msg.Y == m.viewHeight()+1 {
+	if m.statusIconsVisible() && msg.Y == m.statusBarRow() {
 		m.hoverIcon = m.statusIconAt(msg.X)
 		return
 	}

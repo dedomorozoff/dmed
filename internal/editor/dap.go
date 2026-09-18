@@ -22,10 +22,13 @@ type dapEventMsg struct {
 	gen int
 }
 
-// dapLaunchMsg reports the outcome of the async launch sequence.
+// dapLaunchMsg reports the outcome of the async launch sequence. bps carries
+// the adapter's verification of every breakpoint pushed during the launch so
+// the gutter can tell a real breakpoint (●) from a rejected one (○).
 type dapLaunchMsg struct {
 	err error
 	gen int
+	bps []dapBPSyncMsg
 }
 
 // dapStartMsg reports the outcome of the async adapter start (spawn +
@@ -200,18 +203,38 @@ func (m *Model) dapLaunchCmd() tea.Cmd {
 		if err != nil {
 			return dapLaunchMsg{err: err, gen: gen}
 		}
-		for path, lines := range bps {
-			if _, err := cl.SetBreakpoints(path, lines); err != nil {
-				return dapLaunchMsg{err: fmt.Errorf("breakpoints: %w", err), gen: gen}
-			}
-		}
+		// Order matters: the adapter only accepts source breakpoints once the
+		// launch/attach request has created the debug session (Delve answers
+		// "No debug session started" otherwise), yet they must land before
+		// configurationDone lets the debuggee run — the order VS Code uses.
+		// Pushing them first aborted the launch before it started, which also
+		// left F5 permanently stuck on the "session already attached" guard.
 		if err := cl.Launch(launchArgs); err != nil {
 			return dapLaunchMsg{err: err, gen: gen}
+		}
+		paths := make([]string, 0, len(bps))
+		for path := range bps {
+			paths = append(paths, path)
+		}
+		sort.Strings(paths)
+		var sync []dapBPSyncMsg
+		for _, path := range paths {
+			res, err := cl.SetBreakpoints(path, bps[path])
+			if err != nil {
+				return dapLaunchMsg{err: fmt.Errorf("breakpoints: %w", err), gen: gen}
+			}
+			lines := make([]int, len(res))
+			verified := make([]bool, len(res))
+			for i, b := range res {
+				lines[i] = b.Line
+				verified[i] = b.Verified
+			}
+			sync = append(sync, dapBPSyncMsg{path: path, lines: lines, verified: verified})
 		}
 		if supports {
 			_ = cl.ConfigureDone()
 		}
-		return dapLaunchMsg{gen: gen}
+		return dapLaunchMsg{gen: gen, bps: sync}
 	}
 }
 
@@ -355,6 +378,8 @@ func (m *Model) dapStepCmd(op string) tea.Cmd {
 			err = cl.StepIn(threadID)
 		case "stepOut":
 			err = cl.StepOut(threadID)
+		case "pause":
+			err = cl.Pause(threadID)
 		}
 		if err != nil {
 			return dapStepMsg{err: err}
@@ -511,11 +536,17 @@ func (m *Model) toggleDebugBreakpoint() tea.Cmd {
 }
 
 // startDebugging launches (or, when a session is already live and paused,
-// continues) the current program. F5. An ended session is torn down and
-// restarted from scratch.
+// continues) the current program. F5. While the debuggee is running F5
+// interrupts it, and an ended session is torn down and restarted from scratch.
 func (m *Model) startDebugging() tea.Cmd {
-	if m.dapRunState == dapStopped {
+	switch m.dapRunState {
+	case dapStopped:
 		return m.dapStepCmd("continue")
+	case dapRunning:
+		// Without this a program that never reaches a breakpoint (or simply
+		// runs long) left F5 a dead key: the "already attached" guard below
+		// refused to do anything, and there was no way to interrupt the run.
+		return m.dapStepCmd("pause")
 	}
 	if m.dapBusy || (m.dapClient != nil && m.dapRunState != dapEnded) {
 		return nil // already launching/running
@@ -525,13 +556,8 @@ func (m *Model) startDebugging() tea.Cmd {
 	m.dapBusy = true
 	var cmds []tea.Cmd
 	if m.dapClient != nil {
-		cl := m.dapClient
-		m.dapClient = nil
-		m.dapThreads = nil
-		m.dapFrames = nil
-		m.dapVarStack = nil
-		m.dapBPVerif = map[string]map[int]bool{}
-		cmds = append(cmds, func() tea.Msg { cl.Close(); return nil })
+		// An ended session must be released before the new adapter starts.
+		cmds = append(cmds, m.dapRelease())
 	}
 	cmds = append(cmds, m.dapStartCmd())
 	return tea.Batch(cmds...)
@@ -539,9 +565,18 @@ func (m *Model) startDebugging() tea.Cmd {
 
 // stopDebugging disconnects the session and tears the adapter down. Shift+F5.
 func (m *Model) stopDebugging() tea.Cmd {
-	cl := m.dapClient
 	m.dapGen++
 	m.dapRunState = dapIdle
+	m.dapBusy = false
+	return m.dapRelease()
+}
+
+// dapRelease detaches the client and clears every piece of derived session
+// state, returning a command that closes the adapter (nil when none was
+// attached). The generation is left alone so callers decide whether the
+// session counts as superseded.
+func (m *Model) dapRelease() tea.Cmd {
+	cl := m.dapClient
 	m.dapClient = nil
 	m.dapThreads = nil
 	m.dapFrames = nil
@@ -550,7 +585,6 @@ func (m *Model) stopDebugging() tea.Cmd {
 	m.dapCurPath = ""
 	m.dapCurLine = 0
 	m.dapReason = ""
-	m.dapBusy = false
 	m.dapBPVerif = map[string]map[int]bool{}
 	if cl == nil {
 		return nil
@@ -561,21 +595,20 @@ func (m *Model) stopDebugging() tea.Cmd {
 	}
 }
 
-// handleDap routes keys while the debug panel is open. F4/F5/F10/F11/Shift+F5
+// handleDap routes keys while the debug panel is open. F4/F5/F6/F7/Shift+F5
 // are handled globally in handleKey, so only panel-local keys land here.
 // dapFocus 0-2 select the threads/stack/variables lists; focus 3 is the
-// evaluator input row where every printable key is typed literally.
+// evaluator input row, reached only explicitly via Tab (typed characters stay
+// out of it so the panel never hijacks ordinary editing keys).
 func (m *Model) handleDap(msg tea.KeyPressMsg) tea.Cmd {
 	s := msg.String()
 
 	if m.dapFocus == 3 {
 		switch s {
 		case "esc":
-			if len(m.dapIn) > 0 {
-				m.dapIn = nil
-			} else {
-				m.dapFocus = 0
-			}
+			m.dapIn = nil
+			m.dapFocus = 0
+			m.dapOpen = false
 		case "backspace":
 			if len(m.dapIn) > 0 {
 				m.dapIn = m.dapIn[:len(m.dapIn)-1]
@@ -602,19 +635,20 @@ func (m *Model) handleDap(msg tea.KeyPressMsg) tea.Cmd {
 
 	switch s {
 	case "esc":
-		if len(m.dapIn) > 0 {
-			m.dapIn = nil
-			return nil
-		}
-		if len(m.dapVarStack) > 1 {
-			m.dapVarStack = m.dapVarStack[:len(m.dapVarStack)-1]
-			return nil
-		}
+		m.dapIn = nil
+		m.dapFocus = 0
 		m.dapOpen = false
 		return nil
-	case "backspace":
+	case "backspace", "left":
 		if len(m.dapIn) > 0 {
 			m.dapIn = m.dapIn[:len(m.dapIn)-1]
+			return nil
+		}
+		// Walking back out of an expanded variable: expanding replaces the
+		// visible level, so this is the only way back to the parent scope.
+		if m.dapFocus == 2 && len(m.dapVarStack) > 1 {
+			m.dapVarStack = m.dapVarStack[:len(m.dapVarStack)-1]
+			m.dapVarSel = 0
 		}
 		return nil
 	case "l":
@@ -634,24 +668,20 @@ func (m *Model) handleDap(msg tea.KeyPressMsg) tea.Cmd {
 		m.dapFocus = (m.dapFocus + 3) % 4
 		return nil
 	case "up", "k":
-		m.dapMoveSel(-1)
+		return m.dapMoveSelCmd(-1)
 	case "down", "j":
-		m.dapMoveSel(1)
+		return m.dapMoveSelCmd(1)
 	case "pgup":
-		m.dapMoveSel(-6)
+		return m.dapMoveSelCmd(-6)
 	case "pgdown":
-		m.dapMoveSel(6)
+		return m.dapMoveSelCmd(6)
 	case "ctrl+l":
 		m.dapConsole = nil
 		return nil
 	default:
-		if len(msg.Text) > 0 {
-			// First typed character jumps to the input row so the rest of the
-			// expression is typed literally (Tab focuses it explicitly when an
-			// expression starts with a reserved navigation key).
-			m.dapIn = append(m.dapIn, []rune(msg.Text)...)
-			m.dapFocus = 3
-		}
+		// Typed characters are deliberately ignored here: the evaluator row is
+		// opt-in via Tab (or a click on it once it is focused), so ordinary
+		// editing keys are never hijacked by the debug panel.
 	}
 	return nil
 }
@@ -693,7 +723,83 @@ func (m *Model) dapMoveSel(d int) {
 	}
 }
 
-// ── DAP event handling ─────────────────────────────────────────────────────
+// dapMoveSelCmd moves the panel selection like dapMoveSel and reloads the
+// snapshot when the move changes what the other columns show: another thread
+// carries its own stack, another frame its own variables. Selecting a thread
+// or frame used to leave the stack/variables pane on stale data.
+func (m *Model) dapMoveSelCmd(d int) tea.Cmd {
+	switch m.dapFocus {
+	case 0:
+		if len(m.dapThreads) == 0 {
+			return nil
+		}
+		before := m.dapSelThread
+		m.dapMoveSel(d)
+		if m.dapSelThread == before {
+			return nil
+		}
+		return m.dapRefreshCmd()
+	case 1:
+		if len(m.dapFrames) == 0 {
+			return nil
+		}
+		before := m.dapSelFrame
+		m.dapMoveSel(d)
+		if m.dapSelFrame == before {
+			return nil
+		}
+		return m.dapRefreshCmd()
+	}
+	m.dapMoveSel(d)
+	return nil
+}
+
+// dapSelectThread/frame/var are the mouse entry points into the panel: they
+// move the focus and selection exactly like the arrow keys, reloading the
+// derived columns when the pick changes them.
+func (m *Model) dapSelectThread(idx int) tea.Cmd {
+	if idx < 0 || idx >= len(m.dapThreads) {
+		return nil
+	}
+	m.dapFocus = 0
+	if m.dapSelThread == idx {
+		return nil
+	}
+	m.dapSelThread = idx
+	m.dapSelFrame = 0
+	return m.dapRefreshCmd()
+}
+
+func (m *Model) dapSelectFrame(idx int) tea.Cmd {
+	if idx < 0 || idx >= len(m.dapFrames) {
+		return nil
+	}
+	m.dapFocus = 1
+	if m.dapSelFrame == idx {
+		return nil
+	}
+	m.dapSelFrame = idx
+	return m.dapRefreshCmd()
+}
+
+// dapSelectVar highlights a variable row; expand asks for its children the
+// way pressing Enter does.
+func (m *Model) dapSelectVar(idx int, expand bool) tea.Cmd {
+	vars := m.dapCurrentVars()
+	if idx < 0 || idx >= len(vars) {
+		return nil
+	}
+	m.dapFocus = 2
+	m.dapVarSel = idx
+	if !expand {
+		return nil
+	}
+	if v := vars[idx]; v.ref > 0 {
+		return m.dapExpandVarsCmd(v.ref)
+	}
+	return nil
+}
+
 
 // handleDAPEventUpdate routes an adapter event into panel state and re-arms
 // the event channel. Events from a superseded session are dropped so a stale
@@ -742,6 +848,24 @@ func (m *Model) applyDAPRefresh(msg dapRefreshMsg) {
 	}
 	m.dapVarSel = 0
 	m.updateDapCurrentLocation()
+}
+
+// applyDapBPSyncs merges adapter breakpoint verifications into the gutter map
+// so a rejected line renders as ○ instead of ●.
+func (m *Model) applyDapBPSyncs(syncs []dapBPSyncMsg) {
+	for _, s := range syncs {
+		if s.err != nil || s.path == "" {
+			continue
+		}
+		if m.dapBPVerif[s.path] == nil {
+			m.dapBPVerif[s.path] = map[int]bool{}
+		}
+		for i, l := range s.lines {
+			if i < len(s.verified) {
+				m.dapBPVerif[s.path][l] = s.verified[i]
+			}
+		}
+	}
 }
 
 // updateDapCurrentLocation syncs the ▶ marker to the selected stack frame.

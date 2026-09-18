@@ -49,7 +49,7 @@ func TestStatusIconClickTogglesPanels(t *testing.T) {
 
 	click := func(act statusAction) {
 		t.Helper()
-		_ = m.handleMouseClick(tea.MouseClickMsg{X: m.statusIconX(act), Y: m.viewHeight() + 1})
+		_ = m.handleMouseClick(tea.MouseClickMsg{X: m.statusIconX(act), Y: m.statusBarRow()})
 	}
 
 	// Git panel toggles on then off.
@@ -89,7 +89,7 @@ func TestStatusIconHiddenInPromptMode(t *testing.T) {
 	a := writeTemp(t, dir, "a.txt", "alpha\n")
 	m := New(a)
 	m.width, m.height = 80, 24
-	y := m.viewHeight() + 1
+	y := m.statusBarRow()
 
 	m.promptOpen = true
 	if m.statusIconsVisible() {
@@ -108,7 +108,7 @@ func TestStatusIconHoverSetsTipAndCallout(t *testing.T) {
 	a := writeTemp(t, dir, "a.txt", "alpha\n")
 	m := New(a)
 	m.width, m.height = 100, 5
-	y := m.viewHeight() + 1
+	y := m.statusBarRow()
 	x := m.statusIconX(actGit)
 
 	m.updateStatusHover(tea.MouseMotionMsg{X: x, Y: y})
@@ -133,10 +133,11 @@ func TestStatusIconHoverSetsTipAndCallout(t *testing.T) {
 		rows[i] = "content"
 	}
 	out := m.overlayStatusTooltip(rows)
-	if out[m.viewHeight()] == "content" {
+	tipRow := m.statusBarRow() - 1
+	if out[tipRow] == "content" {
 		t.Fatal("hover callout must replace the row above the status bar")
 	}
-	if !strings.Contains(stripANSI(out[m.viewHeight()]), tip) {
-		t.Fatalf("callout %q does not contain the label %q", stripANSI(out[m.viewHeight()]), tip)
+	if !strings.Contains(stripANSI(out[tipRow]), tip) {
+		t.Fatalf("callout %q does not contain the label %q", stripANSI(out[tipRow]), tip)
 	}
 }

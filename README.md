@@ -70,7 +70,7 @@ DMED_PROVIDER=DeepSeek DMED_API_KEY=sk-... DMED_MODEL=deepseek-chat dmed
 - Built-in **terminal** (`Alt+T`) — persistent shell session at the bottom
 - **LSP client** — diagnostics (rendered in the gutter), completion, go-to-definition; hints the install command when a language server is missing
 - **Autocompletion** (`Ctrl+Space`, auto-trigger) — buffer words + LSP sources for Go, Python, TS/JS, Rust, C/C++, Lua, Ruby, PHP, Zig, JSON, YAML, CSS, HTML
-- **Debugger** (`Ctrl+Alt+D`) — DAP-based debugging: gutter breakpoints (`F4`), run/continue (`F5`), step over/in/out (`F10`/`F11`/`Shift+F11`), stop (`Shift+F5`); threads/stack/variables panel with a process console and expression eval; Go/Delve out of the box, any other DAP adapter (debugpy, lldb-dap, node, ...) via `[debug]` config
+- **Debugger** (`Ctrl+Alt+D`) — DAP-based debugging: gutter breakpoints (`F4`), run/continue (`F5`, which pauses a running debuggee), step over/in/out (`F6`/`F7`/`Shift+F7`), stop (`Shift+F5`); a threads/stack/variables panel that is fully mouse-driven (click a thread, frame or variable to select it, double-click a `▸` variable to expand, the wheel walks the focused column, `l` peeks at the process console with scroll-back), an opt-in expression eval (`Tab`), and one shared gutter marker column — left click toggles a breakpoint, middle click (the wheel) toggles a bookmark; Go/Delve out of the box, any other DAP adapter (debugpy, lldb-dap, node, ...) via `[debug]` config
 - **Lua plugins** — keybindings, palette commands and events; hot-reload on edit, plus a built-in store (`Plugins: Install...`) with embedded and GitHub-hosted plugins
 - **Localization** — English/Russian UI, switchable from the palette
 - **Sessions** — auto-save/restore open files across restarts
@@ -174,13 +174,15 @@ terminal) are clickable; hovering one shows a callout with its shortcut.
 | Keys | Action |
 |------|--------|
 | `Ctrl+Alt+D` | Toggle debug panel |
-| `F4` | Toggle breakpoint at cursor line |
-| `F5` | Run / continue |
+| `F4` | Toggle breakpoint at cursor line (or left-click the gutter) |
+| Middle click (gutter) | Toggle bookmark |
+| `F5` | Run / continue / pause a running debuggee |
 | `Shift+F5` | Stop session |
-| `F10` | Step over |
-| `F11` | Step in |
-| `Shift+F11` | Step out |
+| `F6` | Step over (while the debug panel is open) |
+| `F7` | Step in (while the debug panel is open) |
+| `Shift+F7` | Step out (while the debug panel is open) |
 | `Tab` (in panel) | Cycle threads / stack / variables / eval input |
+| Click / wheel (in panel) | Select a thread, frame or variable; `Backspace` leaves an expanded variable |
 
 ### AI
 

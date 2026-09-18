@@ -292,8 +292,8 @@ func (m Model) overlayStatusTooltip(rows []string) []string {
 	if m.hoverIcon == actNone || !m.statusIconsVisible() {
 		return rows
 	}
-	h := m.viewHeight()
-	if h < 1 || h >= len(rows) {
+	row := m.statusBarRow() - 1 // the row directly above the status bar
+	if row < 1 || row >= len(rows) {
 		return rows
 	}
 	tip := m.statusTip(m.hoverIcon)
@@ -316,6 +316,6 @@ func (m Model) overlayStatusTooltip(rows []string) []string {
 	if fill < 0 {
 		fill = 0
 	}
-	rows[h] = strings.Repeat(" ", x) + text + strings.Repeat(" ", fill)
+	rows[row] = strings.Repeat(" ", x) + text + strings.Repeat(" ", fill)
 	return rows
 }

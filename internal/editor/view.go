@@ -62,7 +62,7 @@ var helpEntries = []helpEntry{
 	{"Alt+Z", "help.word_wrap"},
 	{"Ctrl+G", "help.git_panel"},
 	{"Ctrl+Alt+D", "help.debug"},
-	{"F4 / F5 / F10 / F11 / S+F5 / S+F11", "help.debug_keys"},
+	{"F4 / F5 / F6 / F7 / S+F5 / S+F7", "help.debug_keys"},
 	{"F12 / Ctrl+Click", "help.goto_def"},
 	{"D (in Git panel)", "help.git_diff"},
 	{"Alt+[ / Alt+]", "help.hunk"},
@@ -198,9 +198,10 @@ func (m Model) viewHeight() int {
 }
 
 func (m Model) gutterWidthForTab(t *tab) int {
-	w := len(strconv.Itoa(t.buf.LineCount())) + 4
-	if w < 7 {
-		w = 7
+	// Line number + one shared marker column (breakpoint ● / bookmark ◆).
+	w := len(strconv.Itoa(t.buf.LineCount())) + 3
+	if w < 6 {
+		w = 6
 	}
 	return w
 }
@@ -237,6 +238,11 @@ func (m Model) View() tea.View {
 		rows = append(rows, m.helpPanel(h)...)
 	} else {
 		rows = append(rows, m.editorRows(h)...)
+	}
+	if m.dapOpen {
+		// The debug panel docks between the content and the status bar so the
+		// status bar never moves away from the bottom of the screen.
+		rows = append(rows, m.debugPanel()...)
 	}
 	bottom := m.statusBar()
 	if m.diffViewOpen {
@@ -326,9 +332,6 @@ func (m Model) View() tea.View {
 	}
 	if m.termOpen {
 		rows = append(rows, m.terminalPanel()...)
-	}
-	if m.dapOpen {
-		rows = append(rows, m.debugPanel()...)
 	}
 	// The completion popup floats under the edit line instead of being pinned
 	// to the bottom of the screen.
@@ -534,29 +537,37 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 			diagMark = " "
 		}
 
-		bpMark := " "
+		// One shared marker column: the current stop marker ▶ and breakpoints
+		// ● / ○ take precedence over a bookmark ◆ (their own columns used to
+		// make gutter clicks depend on which sub-column was hit).
+		mark := " "
+		if bmSet[ln+1] {
+			mark = "◆"
+		}
 		if bpSet[ln+1] {
-			bpMark = "●"
+			mark = "●"
 			// The adapter explicitly rejected this line after a session ran:
 			// show it unverified instead of a solid breakpoint.
 			if v, ok := bpVerifSet[ln+1]; ok && !v {
-				bpMark = "○"
+				mark = "○"
 			}
 		}
 		if dapStoppedHere && m.dapCurLine == ln+1 {
-			bpMark = "▶"
+			mark = "▶"
 		}
-		bpMarkStyle := gutterStyle
-		switch bpMark {
+		markStyle := gutterStyle
+		switch mark {
 		case "●":
-			bpMarkStyle = bpStyle
+			markStyle = bpStyle
 		case "○":
-			bpMarkStyle = bpDimStyle
+			markStyle = bpDimStyle
 		case "▶":
-			bpMarkStyle = stopStyle
+			markStyle = stopStyle
+		case "◆":
+			markStyle = bmStyle
 		}
 
-		numPad := gw - 4 - len(num)
+		numPad := gw - 3 - len(num)
 		if numPad < 0 {
 			numPad = 0
 		}
@@ -569,13 +580,7 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 		}
 		gutStr += diagMarkStyle.Render(diagMark)
 		gutStr += gitMarkStyle.Render(gitMark)
-		gutStr += bpMarkStyle.Render(bpMark)
-
-		bmMark := " "
-		if bmSet[ln+1] {
-			bmMark = "◆"
-		}
-		gutStr += bmStyle.Render(bmMark)
+		gutStr += markStyle.Render(mark)
 
 		if active && !wrap && m.ghostVisible && len(m.ghostLines) > 1 && ln > m.ghostRow {
 			// Multi-line ghost: subsequent ghost lines appear on their own rows.
