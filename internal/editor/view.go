@@ -116,6 +116,25 @@ func (m Model) paletteExtraRows() int {
 	return len(hits) + 1
 }
 
+// folderExtraRows is how many rows the built-in folder picker occupies below
+// the status bar, reserving their height so the panel stays on screen.
+func (m Model) folderExtraRows() int {
+	if !m.folderOpen {
+		return 0
+	}
+	n := 3 // header + parent row + hint
+	if len(m.folderEntries) == 0 {
+		n++ // — empty directory —
+		return n
+	}
+	if len(m.folderEntries) > folderVisible {
+		n += folderVisible
+	} else {
+		n += len(m.folderEntries)
+	}
+	return n
+}
+
 func (m Model) termPanelHeight() int {
 	h := m.height / 3
 	if h < 6 {
@@ -171,7 +190,7 @@ func (m Model) pluginStoreExtraRows() int {
 }
 
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows()
+	h := m.height - 2 - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -292,6 +311,9 @@ func (m Model) View() tea.View {
 	}
 	if m.finderOpen {
 		rows = append(rows, m.finderPanel()...)
+	}
+	if m.folderOpen {
+		rows = append(rows, m.folderPanel()...)
 	}
 	if m.paletteOpen {
 		rows = append(rows, m.palettePanel()...)
@@ -1744,6 +1766,62 @@ func (m Model) finderPanel() []string {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	rows = append(rows, line)
+	return rows
+}
+
+// folderPanel renders the built-in folder picker: a path header, the
+// directory listing (row 0 is always the parent), and a hint line.
+func (m Model) folderPanel() []string {
+	rows := make([]string, 0, folderVisible+2)
+	head := statusHiStyle.Render(" " + m.t("folder.title") + m.folderPath + " ")
+	fill := m.width - lipgloss.Width(head)
+	if fill > 0 {
+		head += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	rows = append(rows, head)
+
+	// Row 0: parent directory.
+	upLabel := m.t("folder.up")
+	if m.folderSel == 0 {
+		rows = append(rows, statusHiStyle.Render(padTo(" "+upLabel+" ", m.width)))
+	} else {
+		rows = append(rows, statusStyle.Render(padTo(" "+upLabel+" ", m.width)))
+	}
+
+	// Rows 1+: entries from the current directory.
+	if len(m.folderEntries) == 0 {
+		rows = append(rows, statusStyle.Render(padTo(" "+m.t("folder.empty")+" ", m.width)))
+	} else {
+		end := m.folderOffset + folderVisible
+		if start := m.folderOffset; start < len(m.folderEntries) {
+			if end > len(m.folderEntries) {
+				end = len(m.folderEntries)
+			}
+			for i := start; i < end; i++ {
+				e := m.folderEntries[i]
+				label := " ▸ " + e.name + "/"
+				if !e.dir {
+					label = "   " + e.name
+				}
+				label = padTo(label+" ", m.width)
+				if m.folderSel == i+1 {
+					rows = append(rows, statusHiStyle.Render(label))
+				} else if e.dir {
+					rows = append(rows, statusStyle.Render(label))
+				} else {
+					rows = append(rows, hintStyle.Render(label))
+				}
+			}
+		}
+	}
+
+	// Hint line.
+	hint := statusStyle.Render(m.t("folder.hint"))
+	fill = m.width - lipgloss.Width(hint)
+	if fill > 0 {
+		hint += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	rows = append(rows, hint)
 	return rows
 }
 

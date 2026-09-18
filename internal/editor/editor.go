@@ -280,6 +280,14 @@ type Model struct {
 	finderHits  []string
 	finderSel   int
 
+	// Folder browser: a native TUI picker so "File: Open Folder..." works the
+	// same on every platform (no zenity/kdialog/PowerShell dependency).
+	folderOpen    bool
+	folderPath    string // current directory being browsed
+	folderEntries []folderEntry
+	folderSel     int
+	folderOffset  int
+
 	helpOpen   bool
 	helpScroll int // help panel scroll offset (the list overflows small screens)
 
@@ -1438,12 +1446,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-	case folderPickMsg:
-		if msg.err != nil {
-			m.msg = "open folder: " + msg.err.Error()
-		} else if msg.path != "" {
-			m.switchRoot(msg.path)
-		}
 	case pluginSourceMsg:
 		m.pendingStoreInstall = ""
 		if msg.err != nil {
@@ -1771,6 +1773,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.paletteOpen {
 		return m.handlePalette(msg)
+	}
+	if m.folderOpen {
+		return m.handleFolderBrowser(msg)
 	}
 	if m.aiCfgOpen {
 		return m.handleAISettings(msg)

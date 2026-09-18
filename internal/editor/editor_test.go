@@ -392,12 +392,12 @@ func TestPasteCRLFNormalized(t *testing.T) {
 	m.width, m.height = 80, 24
 	m.cur().buf.SetCursor(0, 5)
 	var clipErr error
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 10; i++ {
 		clipErr = clipboard.WriteAll("\r\nline one\r\nline two\r\n")
 		if clipErr == nil {
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(250 * time.Millisecond)
 	}
 	if clipErr != nil {
 		t.Fatalf("clipboard write: %v", clipErr)
