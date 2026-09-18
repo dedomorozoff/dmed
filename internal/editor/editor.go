@@ -893,9 +893,21 @@ func (m *Model) refind() {
 	}
 }
 
+// normalizePaste converts CRLF / lone CR line endings in pasted text to LF.
+// Windows terminals and the system clipboard deliver "\r\n", and a literal
+// "\r" inside buffer content would both garble the terminal rendering (the
+// terminal treats it as a carriage return) and pollute the saved file.
+func normalizePaste(s string) string {
+	if !strings.ContainsRune(s, '\r') {
+		return s
+	}
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+}
+
 // pasteInput inserts pasted text into the active field, mirroring where typed
 // keys land (see handleKey routing), and falls back to the editor buffer.
 func (m *Model) pasteInput(text string) {
+	text = normalizePaste(text)
 	switch {
 	case m.aiCfgEdit:
 		m.aiCfgIn = append(m.aiCfgIn, []rune(text)...)
@@ -1875,7 +1887,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.closePane()
 	case "ctrl+v":
 		if sysClip, err := clipboard.ReadAll(); err == nil && sysClip != "" {
-			m.clipboard = sysClip
+			m.clipboard = normalizePaste(sysClip)
 		}
 		if m.clipboard != "" {
 			if m.cur().buf.HasMultipleCursors() {
