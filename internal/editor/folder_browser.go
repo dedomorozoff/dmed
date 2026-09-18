@@ -196,6 +196,9 @@ func (m *Model) switchRoot(path string) {
 	m.cfg = config.Load(m.root)
 	m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
 	m.treeVisible = true
+	m.treeFocus = true
+	m.gitFocus = false
+	m.chatFocus = false
 	m.rebuildTree()
 	if repo, err := vcs.Open(m.baseDir()); err == nil {
 		m.repo = repo

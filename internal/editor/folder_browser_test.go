@@ -53,6 +53,9 @@ func TestSwitchRoot(t *testing.T) {
 	if !m.treeVisible {
 		t.Fatal("switchRoot must enable the project tree")
 	}
+	if !m.treeFocus {
+		t.Fatal("switchRoot must move the caret to the project tree")
+	}
 	if !strings.Contains(m.msg, filepath.Base(dirB)) {
 		t.Fatalf("status must announce the new project, got %q", m.msg)
 	}
