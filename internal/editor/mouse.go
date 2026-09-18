@@ -344,6 +344,20 @@ func (m *Model) clickBuffer(x, y int, mod tea.KeyMod) tea.Cmd {
 
 	p := m.curPane()
 	t := &m.tabs[p.tabIdx]
+
+	// A click in the gutter toggles markers without moving the cursor: the
+	// rightmost column flips a bookmark, anywhere else flips a breakpoint.
+	gw := m.gutterWidthForTab(t)
+	if gx := x - leftW; gx >= 0 && gx < gw {
+		ln, _ := m.clickPosToLineCol(m.activePane, editorRow, x)
+		m.lastClickValid = false // a rapid second click must not toggle twice
+		if gx == gw-1 {
+			m.toggleBookmarkAt(ln)
+			return nil
+		}
+		return m.toggleBreakpointAt(ln)
+	}
+
 	ln, rawCol := m.clickPosToLineCol(m.activePane, editorRow, x)
 
 	// Ctrl+Click navigates to the definition under the pointer (like Zed /

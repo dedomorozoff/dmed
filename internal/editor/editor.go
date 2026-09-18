@@ -384,6 +384,7 @@ type Model struct {
 	dapIn                 []rune
 	dapBreak              map[string]map[int]bool // abs path → line → true
 	dapBPVerif            map[string]map[int]bool // adapter-verified breakpoints
+	bookmarks             map[string]map[int]bool // abs path → line (1-based) → true
 	dapCurPath            string
 	dapCurLine            int
 	dapBusy               bool
@@ -610,6 +611,7 @@ func New(paths ...string) Model {
 		dapCh:                 make(chan dapEventMsg, 64),
 		dapBreak:              map[string]map[int]bool{},
 		dapBPVerif:            map[string]map[int]bool{},
+		bookmarks:             map[string]map[int]bool{},
 		chatThreadPos:         -1,
 		chatPromptIdx:         -1,
 	}
@@ -1631,6 +1633,15 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.gotoDefinition()
 	case "f4":
 		return m.toggleDebugBreakpoint()
+	case "alt+m":
+		m.toggleBookmarkAt(m.cur().buf.CurLine())
+		return nil
+	case "alt+n":
+		m.jumpBookmark(1)
+		return nil
+	case "alt+shift+n":
+		m.jumpBookmark(-1)
+		return nil
 	case "f5":
 		return m.startDebugging()
 	case "shift+f5":

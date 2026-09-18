@@ -418,27 +418,38 @@ func (m *Model) dapSyncBreakpoints(path string) tea.Cmd {
 	}
 }
 
-// toggleDebugBreakpoint adds/removes a breakpoint at the cursor line and
-// synchronizes it with the adapter (while a session is live).
-func (m *Model) toggleDebugBreakpoint() tea.Cmd {
+// toggleBreakpointAt adds/removes a breakpoint at the given 0-based line of
+// the active tab and synchronizes it with the adapter (while a session is
+// live).
+func (m *Model) toggleBreakpointAt(ln int) tea.Cmd {
 	t := m.cur()
 	if t == nil || t.path == "" {
 		return nil
 	}
 	abs, _ := filepath.Abs(t.path)
-	ln := t.buf.CurLine() + 1
+	line := ln + 1
 	if m.dapBreak[abs] == nil {
 		m.dapBreak[abs] = map[int]bool{}
 	}
-	if m.dapBreak[abs][ln] {
-		delete(m.dapBreak[abs], ln)
+	if m.dapBreak[abs][line] {
+		delete(m.dapBreak[abs], line)
 		if len(m.dapBreak[abs]) == 0 {
 			delete(m.dapBreak, abs)
 		}
 	} else {
-		m.dapBreak[abs][ln] = true
+		m.dapBreak[abs][line] = true
 	}
 	return m.dapSyncBreakpoints(abs)
+}
+
+// toggleDebugBreakpoint adds/removes a breakpoint at the cursor line and
+// synchronizes it with the adapter (while a session is live). F4.
+func (m *Model) toggleDebugBreakpoint() tea.Cmd {
+	t := m.cur()
+	if t == nil || t.path == "" {
+		return nil
+	}
+	return m.toggleBreakpointAt(t.buf.CurLine())
 }
 
 // startDebugging launches (or, when a session is already live and paused,

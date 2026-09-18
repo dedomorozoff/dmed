@@ -33,6 +33,7 @@ var (
 	diagInfoStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
 	bpStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
 	bpDimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	bmStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
 	stopStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	okTestStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
 	errTestStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
@@ -65,6 +66,7 @@ var helpEntries = []helpEntry{
 	{"F12 / Ctrl+Click", "help.goto_def"},
 	{"D (in Git panel)", "help.git_diff"},
 	{"Alt+[ / Alt+]", "help.hunk"},
+	{"Alt+M / Alt+N / S+Alt+N", "help.bookmark"},
 	{"Ctrl+O", "help.finder"},
 	{"Ctrl+T", "help.open"},
 	{"Alt+T", "help.terminal"},
@@ -442,6 +444,7 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	tabDiags := m.diags[diagPath]
 	bpSet := m.dapBreak[diagPath]
 	bpVerifSet := m.dapBPVerif[diagPath]
+	bmSet := m.bookmarks[diagPath]
 	dapStoppedHere := m.dapRunState == dapStopped && m.dapCurPath == diagPath
 
 	wrap := p.wordWrap && contentW > 0
@@ -529,7 +532,7 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 			bpMarkStyle = stopStyle
 		}
 
-		numPad := gw - 3 - len(num)
+		numPad := gw - 4 - len(num)
 		if numPad < 0 {
 			numPad = 0
 		}
@@ -543,6 +546,12 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 		gutStr += diagMarkStyle.Render(diagMark)
 		gutStr += gitMarkStyle.Render(gitMark)
 		gutStr += bpMarkStyle.Render(bpMark)
+
+		bmMark := " "
+		if bmSet[ln+1] {
+			bmMark = "◆"
+		}
+		gutStr += bmStyle.Render(bmMark)
 
 		if active && !wrap && m.ghostVisible && len(m.ghostLines) > 1 && ln > m.ghostRow {
 			// Multi-line ghost: subsequent ghost lines appear on their own rows.
