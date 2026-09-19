@@ -396,7 +396,8 @@ type Model struct {
 	dapCurPath            string
 	dapCurLine            int
 	dapBusy               bool
-	dapGen                int // session generation; drops stale start/launch msgs
+	dapGen                int   // session generation; drops stale start/launch msgs
+	dapFollowPending      bool  // reveal the stopped location on the next Update
 	dapConsolePeek        bool
 	dapConsoleScroll      int // console lines scrolled back from the newest
 	dapSupportsConfigDone bool
@@ -1501,6 +1502,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case dapRefreshMsg:
 		m.applyDAPRefresh(msg)
+		if m.dapFollowPending {
+			m.dapFollowPending = false
+			return m, m.dapFollowCmd()
+		}
+		return m, nil
+	case dapFollowMsg:
+		return m, m.handleDapFollowMsg()
 	case dapEvalMsg:
 		m.dapConsole = append(m.dapConsole, "> "+msg.expr)
 		if msg.err != nil {

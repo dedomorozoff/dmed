@@ -816,9 +816,11 @@ func (m *Model) handleDAPEventUpdate(msg dapEventMsg) tea.Cmd {
 }
 
 // applyDAPRefresh merges a fetched threads/frames/variables snapshot into the
-// panel state. The stopped location is always re-derived from the top stack
-// frame so the ▶ marker survives even when scopes/variables requests fail.
-func (m *Model) applyDAPRefresh(msg dapRefreshMsg) {
+// panel state. The stopped location is always re-derived from the selected
+// stack frame so the ▶ marker survives even when scopes/variables requests
+// fail. It reports whether the follow reveal is due (this refresh moved the
+// stopped location or an earlier stop armed the flag).
+func (m *Model) applyDAPRefresh(msg dapRefreshMsg) bool {
 	if msg.err != nil {
 		m.msg = "debug refresh: " + msg.err.Error()
 	}
@@ -838,8 +840,8 @@ func (m *Model) applyDAPRefresh(msg dapRefreshMsg) {
 		m.dapScopes = msg.scopes
 	}
 	if msg.vars == nil {
-		m.updateDapCurrentLocation()
-		return
+		m.updateDapCurrentLocationFollow()
+		return m.dapFollowPending
 	}
 	if msg.scopePush {
 		m.dapVarStack = append(m.dapVarStack, msg.vars)
@@ -847,7 +849,24 @@ func (m *Model) applyDAPRefresh(msg dapRefreshMsg) {
 		m.dapVarStack = [][]dapVarRow{msg.vars}
 	}
 	m.dapVarSel = 0
-	m.updateDapCurrentLocation()
+	m.updateDapCurrentLocationFollow()
+	return m.dapFollowPending
+}
+
+// handleDapFollowMsg reveals the stopped location in the editor: opens the
+// file, puts the cursor on the stopped line and scrolls it into view.
+func (m *Model) handleDapFollowMsg() tea.Cmd {
+	m.dapFollowPending = false
+	if m.dapRunState != dapStopped || m.dapCurPath == "" || m.dapCurLine <= 0 {
+		return nil
+	}
+	m.focusOrOpen(m.dapCurPath)
+	if t := m.cur(); t != nil {
+		t.buf.SetCursor(m.dapCurLine-1, 0)
+		t.buf.Deselect()
+		m.clampScroll()
+	}
+	return nil
 }
 
 // applyDapBPSyncs merges adapter breakpoint verifications into the gutter map
@@ -869,13 +888,40 @@ func (m *Model) applyDapBPSyncs(syncs []dapBPSyncMsg) {
 }
 
 // updateDapCurrentLocation syncs the ▶ marker to the selected stack frame.
-func (m *Model) updateDapCurrentLocation() {
+// It reports whether the location actually moved (a fresh stop or a different
+// frame was picked), so the caller can reveal that spot in the editor.
+func (m *Model) updateDapCurrentLocation() bool {
 	if len(m.dapFrames) > 0 && m.dapSelFrame < len(m.dapFrames) {
 		f := m.dapFrames[m.dapSelFrame]
 		if f.Path != "" {
-			m.dapCurPath = f.Path
-			m.dapCurLine = f.Line
+			if f.Path != m.dapCurPath || f.Line != m.dapCurLine {
+				m.dapCurPath = f.Path
+				m.dapCurLine = f.Line
+				return true
+			}
+			return false
 		}
+	}
+	return false
+}
+
+// updateDapCurrentLocationFollow wraps updateDapCurrentLocation, arming the
+// follow-the-debuggee reveal when the stopped location moved.
+func (m *Model) updateDapCurrentLocationFollow() {
+	if m.updateDapCurrentLocation() {
+		m.dapFollowPending = true
+	}
+}
+
+// dapFollowMsg asks Update to reveal the stopped location (open the file,
+// put the cursor on the stopped line) on the model that consumes it, not on
+// the value snapshot that produced the refresh.
+type dapFollowMsg struct{}
+
+// dapFollowCmd schedules the reveal as a command.
+func (m *Model) dapFollowCmd() tea.Cmd {
+	return func() tea.Msg {
+		return dapFollowMsg{}
 	}
 }
 
@@ -892,18 +938,15 @@ func (m *Model) handleDAPEvent(ev dap.Event) tea.Cmd {
 		m.dapVarSel = 0
 		m.dapCurPath = ev.SourcePath
 		m.dapCurLine = ev.Line
-		// Reveal the stopped location in the editor so the ▶ marker is visible.
-		if m.dapCurPath != "" {
-			m.focusOrOpen(m.dapCurPath)
-			if t := m.cur(); t != nil && m.dapCurLine > 0 {
-				t.buf.SetCursor(m.dapCurLine-1, 0)
-				t.buf.Deselect()
-				m.clampScroll()
-			}
+		// The reveal (open file, cursor on the stop line) is deferred to the
+		// follow msg so it lands on the model that is current when it runs,
+		// not on the value snapshot inside this event handler.
+		if m.dapCurPath != "" && m.dapCurLine > 0 {
+			m.dapFollowPending = true
 		}
 		m.dapOpen = true
 		m.termOpen = false
-		return m.dapRefreshCmd()
+		return tea.Batch(m.dapFollowCmd(), m.dapRefreshCmd())
 	case dap.EventContinued:
 		m.dapRunState = dapRunning
 		m.dapCurPath = ""

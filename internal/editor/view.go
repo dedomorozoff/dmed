@@ -35,6 +35,7 @@ var (
 	bpDimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	bmStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
 	stopStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	dapLineStyle    = lipgloss.NewStyle().Background(lipgloss.Color("236"))
 	okTestStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
 	errTestStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	diffAddBg       = lipgloss.NewStyle().Background(lipgloss.Color("22"))
@@ -574,6 +575,11 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 		numStr := strings.Repeat(" ", numPad) + num
 		gutStr := numStr
 		if active && ln == cur && ln < t.buf.LineCount() {
+			gutStr = curGutterStyle.Render(numStr)
+		} else if dapStoppedHere && m.dapCurLine == ln+1 {
+			// The debuggee is stopped on this line: render its number like the
+			// cursor line so the execution point stays easy to spot while
+			// stepping through code far from the editing cursor.
 			gutStr = curGutterStyle.Render(numStr)
 		} else {
 			gutStr = gutterStyle.Render(numStr)
@@ -1840,6 +1846,11 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 		rawStyles = syntaxLines[ln]
 	}
 
+	// Highlight the line the debuggee is stopped on, so the execution point is
+	// visible at a glance (not just the ▶ gutter mark). dapCurLine is 1-based.
+	isDebugLine := activePane && m.dapRunState == dapStopped && m.dapCurPath != "" &&
+		m.dapCurPath == t.path && m.dapCurLine > 0 && ln == m.dapCurLine-1
+
 	// Expand tabs
 	exp := make([]rune, 0, len(raw))
 	expStyles := make([]lipgloss.Style, 0, len(raw))
@@ -1862,6 +1873,14 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 		}
 	}
 	rawToExp[len(raw)] = len(exp)
+
+	// Apply the execution-point line highlight under the existing syntax
+	// foreground so the stopped line glows without muting its colors.
+	if isDebugLine {
+		for i := range expStyles {
+			expStyles[i] = dapLineStyle.Inherit(expStyles[i])
+		}
+	}
 
 	// Search match highlighting
 	type matchInfo struct {
@@ -2004,6 +2023,16 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 		// Show ghost only when the cursor is at the end of the ghost start line.
 		if t.buf.CurLine() == ln && t.buf.Col() == prefixLen && rem != "" {
 			out.WriteString(ghostStyle.Render(rem))
+		}
+	}
+
+	// Extend the execution-point highlight to the full row width so the glow
+	// isn't clipped on short lines; search/selection/cursor overrides still win
+	// for their respective cells above.
+	if isDebugLine && w > 0 {
+		written := end - start
+		if written < w {
+			out.WriteString(dapLineStyle.Render(strings.Repeat(" ", w-written)))
 		}
 	}
 
