@@ -104,7 +104,7 @@ func (m *Model) lspAvailable() bool {
 	if t == nil || t.path == "" {
 		return false
 	}
-	cmd, _, _ := lspServerFor(strings.ToLower(filepath.Ext(t.path)))
+	cmd, _, _ := m.lspResolve(strings.ToLower(filepath.Ext(t.path)))
 	if cmd == "" {
 		return false
 	}

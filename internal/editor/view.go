@@ -235,6 +235,8 @@ func (m Model) View() tea.View {
 		rows = append(rows, renderSideBySide(m.conflictLeftLines, m.conflictRightLines, m.conflictRows, m.conflictOffY, m.conflictOffX, m.width, h, nil, nil)...)
 	} else if m.aiCfgOpen {
 		rows = append(rows, m.aiSettingsPanel(h)...)
+	} else if m.dapCfgOpen {
+		rows = append(rows, m.dapCfgPanel(h)...)
 	} else if m.helpOpen {
 		rows = append(rows, m.helpPanel(h)...)
 	} else {

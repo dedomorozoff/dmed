@@ -396,11 +396,17 @@ type Model struct {
 	dapCurPath            string
 	dapCurLine            int
 	dapBusy               bool
-	dapGen                int   // session generation; drops stale start/launch msgs
-	dapFollowPending      bool  // reveal the stopped location on the next Update
+	dapGen                int  // session generation; drops stale start/launch msgs
+	dapFollowPending      bool // reveal the stopped location on the next Update
 	dapConsolePeek        bool
 	dapConsoleScroll      int // console lines scrolled back from the newest
 	dapSupportsConfigDone bool
+
+	// DAP settings wizard (debug/launch configuration dialog)
+	dapCfgOpen  bool
+	dapCfgField int
+	dapCfgEdit  bool
+	dapCfgIn    []rune
 
 	// Command palette & Clipboard
 	paletteOpen   bool
@@ -755,7 +761,7 @@ func (m *Model) openPath(rawPath string) {
 	}
 	// Hint when this file's language needs an LSP server that isn't installed.
 	if err == nil {
-		if hint := lspMissingHint(t.path); hint != "" {
+		if hint := m.lspMissingHintFor(t.path); hint != "" {
 			m.msg = m.t("msg.lsp_missing", hint)
 		}
 	}
@@ -1797,6 +1803,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.aiCfgOpen {
 		return m.handleAISettings(msg)
+	}
+	if m.dapCfgOpen {
+		return m.handleDAPCfg(msg)
 	}
 	if m.helpOpen {
 		return m.handleHelp(msg)

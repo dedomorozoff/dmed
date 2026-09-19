@@ -83,6 +83,20 @@ func lspServerFor(ext string) (cmd string, args []string, langID string) {
 	return "", nil, ""
 }
 
+// lspResolve is the config-aware variant of lspServerFor: the master [lsp]
+// switch and per-language opt-out toggles can shut a server off even when the
+// binary is installed. Empty command means no LSP for that extension.
+func (m Model) lspResolve(ext string) (cmd string, args []string, langID string) {
+	cmd, args, lang := lspServerFor(ext)
+	if cmd == "" || lang == "" {
+		return "", nil, ""
+	}
+	if !m.cfg.LSP.Enabled || m.cfg.LSP.Disabled[lang] {
+		return "", nil, ""
+	}
+	return cmd, args, lang
+}
+
 // lspInstallFor returns the command that installs the given LSP server binary,
 // or "" if there's no known way to install it.
 func lspInstallFor(bin string) string {
@@ -134,7 +148,7 @@ func (m *Model) ensureLSP() {
 	if t == nil || t.path == "" {
 		return
 	}
-	cmd, args, lang := lspServerFor(strings.ToLower(filepath.Ext(t.path)))
+	cmd, args, lang := m.lspResolve(strings.ToLower(filepath.Ext(t.path)))
 	if cmd == "" {
 		return
 	}
@@ -173,7 +187,7 @@ func (m *Model) lspCompletionCmd() tea.Cmd {
 	if t == nil || t.path == "" {
 		return nil
 	}
-	cmd, _, lang := lspServerFor(strings.ToLower(filepath.Ext(t.path)))
+	cmd, _, lang := m.lspResolve(strings.ToLower(filepath.Ext(t.path)))
 	if cmd == "" || lang == "" {
 		return nil
 	}
@@ -215,7 +229,7 @@ func (m *Model) gotoDefinitionAt(path string, line, col int) tea.Cmd {
 	if path == "" {
 		return nil
 	}
-	cmd, _, lang := lspServerFor(strings.ToLower(filepath.Ext(path)))
+	cmd, _, lang := m.lspResolve(strings.ToLower(filepath.Ext(path)))
 	if cmd == "" || lang == "" {
 		return nil
 	}
@@ -258,4 +272,67 @@ func (m *Model) mergeLSPCompletion(items []lsp.CompletionItem) {
 		m.complSel = 0
 		m.complOffset = 0
 	}
+}
+
+// lspMissingHintFor is the config-aware variant of lspMissingHint: it stays
+// silent when the [lsp] switch is off or the file's language is disabled.
+func (m Model) lspMissingHintFor(path string) string {
+	cmd, _, _ := m.lspResolve(strings.ToLower(filepath.Ext(path)))
+	if cmd == "" {
+		return ""
+	}
+	if _, err := exec.LookPath(cmd); err == nil {
+		return ""
+	}
+	if inst := lspInstallFor(cmd); inst != "" {
+		return fmt.Sprintf("%s — %s", cmd, inst)
+	}
+	return cmd
+}
+
+// lspStatusMsg sets the status-bar line describing the current file's LSP
+// situation: an active server, a known-but-missing one (with install hint),
+// or the reason it is shut off. It is the "LSP: Server Status" palette action.
+func (m *Model) lspStatusMsg() {
+	t := m.cur()
+	if t == nil || t.path == "" {
+		m.msg = m.t("msg.lsp_none")
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(t.path))
+	cmd, _, lang := m.lspResolve(ext)
+	if cmd == "" {
+		if !m.cfg.LSP.Enabled {
+			m.msg = m.t("msg.lsp_disabled_all")
+			return
+		}
+		if lang != "" && m.cfg.LSP.Disabled[lang] {
+			m.msg = fmt.Sprintf("%s", m.t("msg.lsp_disabled_lang", lang))
+			return
+		}
+		m.msg = m.t("msg.lsp_none")
+		return
+	}
+	if m.lspClient == nil {
+		if hint := lspInstallFor(cmd); hint != "" {
+			m.msg = m.t("msg.lsp_missing", cmd+" ("+hint+")")
+		} else {
+			m.msg = fmt.Sprintf("%s", cmd)
+		}
+		return
+	}
+	m.msg = m.t("msg.lsp_active", cmd)
+}
+
+// restartLSP tears down the current language server (if any) so the next
+// completion or go-to-definition lazily spawns a fresh one. Useful after a
+// server update or a wedged gopls process.
+func (m *Model) restartLSP() {
+	if m.lspClient != nil {
+		_ = m.lspClient.Close()
+		m.lspClient = nil
+		m.msg = m.t("msg.lsp_restarted")
+		return
+	}
+	m.msg = m.t("msg.lsp_none")
 }

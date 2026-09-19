@@ -17,6 +17,7 @@ type Config struct {
 	UI      UIConfig
 	Plugins PluginsConfig
 	Debug   DebugConfig
+	LSP     LSPConfig
 }
 
 // DebugConfig holds DAP debugger settings (M7). Go/Delve is the default
@@ -52,6 +53,17 @@ type DebugConfig struct {
 	// LaunchJSON is an optional raw JSON object merged into the launch/attach
 	// arguments; adapter-specific keys override the built-in ones.
 	LaunchJSON string
+}
+
+// LSPConfig holds language-server integration settings.
+//
+// The master switch (Enabled) disables every language server at once; the
+// Disabled map turns individual languages off by their LSP language id
+// ("go", "python", "typescript", ...). Servers that are not installed on
+// PATH are skipped regardless, so these are purely opt-out toggles.
+type LSPConfig struct {
+	Enabled  bool            // master switch; default true = LSP on everywhere
+	Disabled map[string]bool // language id => LSP switched off for it
 }
 
 // AgentConfig holds settings for background agent tasks (M4).
@@ -163,6 +175,10 @@ func Defaults() Config {
 			LaunchType:    "go",
 			LaunchRequest: "launch",
 			LaunchJSON:    "",
+		},
+		LSP: LSPConfig{
+			Enabled:  true,
+			Disabled: map[string]bool{},
 		},
 	}
 }
@@ -473,6 +489,24 @@ func loadFile(path string, cfg *Config) {
 			cfg.Debug.LaunchJSON = v
 		}
 	}
+
+	// [lsp] — master switch plus per-language opt-out toggles.
+	if s, ok := sections["lsp"]; ok {
+		if v, ok := s["enabled"]; ok {
+			cfg.LSP.Enabled = parseBool(v)
+		}
+		if cfg.LSP.Disabled == nil {
+			cfg.LSP.Disabled = map[string]bool{}
+		}
+		for k, v := range s {
+			if k == "enabled" {
+				continue
+			}
+			if parseBool(v) {
+				cfg.LSP.Disabled[k] = true
+			}
+		}
+	}
 }
 
 // parseINI reads an INI file and returns section -> key -> value.
@@ -609,6 +643,148 @@ func WriteAI(path string, ai AIConfig) (int, error) {
 		return 0, err
 	}
 	return len(replaced) + len(missing), nil
+}
+
+// writeSection merges the given key/value pairs into the INI section at path,
+// preserving all other sections, keys and comments. A missing section or file
+// is appended. It returns the number of keys written. This is the shared
+// engine behind WriteAI, WriteDebug and WriteLSP.
+func writeSection(path, section string, known [][2]string) (int, error) {
+	data, err := os.ReadFile(path)
+	var lines []string
+	if err != nil && !os.IsNotExist(err) {
+		return 0, err
+	}
+	if err == nil {
+		lines = strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	}
+
+	var out []string
+	inSec := false
+	secPresent := false
+	replaced := make(map[string]bool, len(known))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			name := strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+			inSec = strings.EqualFold(name, section)
+			if inSec {
+				secPresent = true
+			}
+		}
+		if inSec {
+			if idx := strings.IndexByte(line, '='); idx > 0 {
+				key := strings.ToLower(strings.TrimSpace(line[:idx]))
+				matched := false
+				for _, k := range known {
+					if k[0] == key {
+						out = append(out, key+" = "+k[1])
+						replaced[key] = true
+						matched = true
+						break
+					}
+				}
+				if matched {
+					continue
+				}
+			}
+		}
+		out = append(out, line)
+	}
+
+	var missing []string
+	for _, k := range known {
+		if !replaced[k[0]] {
+			missing = append(missing, k[0]+" = "+k[1])
+		}
+	}
+	if !secPresent {
+		if len(out) > 0 && out[len(out)-1] != "" {
+			out = append(out, "")
+		}
+		out = append(out, "["+section+"]")
+		out = append(out, missing...)
+	} else if len(missing) > 0 {
+		for i := len(out) - 1; i >= 0; i-- {
+			t := strings.TrimSpace(out[i])
+			if strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]") &&
+				strings.EqualFold(strings.TrimSpace(t[1:len(t)-1]), section) {
+				tail := append([]string{}, out[i+1:]...)
+				out = append(append(out[:i+1], missing...), tail...)
+				break
+			}
+		}
+	}
+
+	content := strings.Join(out, "\n") + "\n"
+	if len(content) == 1 {
+		content = ""
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return 0, err
+	}
+	return len(replaced) + len(missing), nil
+}
+
+// WriteDebug merges the DAP/[debug] settings into the INI file at path,
+// updating the [debug] section in place and preserving everything else.
+func WriteDebug(path string, d DebugConfig) (int, error) {
+	known := [][2]string{
+		{"adapter_cmd", d.AdapterCmd},
+		{"adapter_mode", d.AdapterMode},
+		{"adapter_args", d.AdapterArgs},
+		{"launch_type", d.LaunchType},
+		{"launch_request", d.LaunchRequest},
+		{"mode", d.Mode},
+		{"program", d.Program},
+		{"args", d.Args},
+		{"stop_on_entry", boolStr(d.StopOnEntry)},
+		{"launch_json", d.LaunchJSON},
+	}
+	return writeSection(path, "debug", known)
+}
+
+// WriteLSP merges the LSP settings into the INI file at path, updating the
+// [lsp] section in place. Every known language id is written so a toggled-off
+// server stays off across edits; unknown ids already present are kept.
+func WriteLSP(path string, l LSPConfig) (int, error) {
+	if l.Disabled == nil {
+		l.Disabled = map[string]bool{}
+	}
+	known := make([][2]string, 0, len(LSPLanguages)+1)
+	known = append(known, [2]string{"enabled", boolStr(l.Enabled)})
+	seen := map[string]bool{"enabled": true}
+	for _, lang := range LSPLanguages {
+		val := "false"
+		if l.Disabled[lang] {
+			val = "true"
+		}
+		known = append(known, [2]string{lang, val})
+		seen[lang] = true
+	}
+	// Preserve any user-added unknown language keys in the written state.
+	for k, v := range l.Disabled {
+		if !seen[k] {
+			known = append(known, [2]string{k, boolStr(v)})
+			seen[k] = true
+		}
+	}
+	return writeSection(path, "lsp", known)
+}
+
+// LSPLanguages lists every language id the editor knows how to power through
+// a language server, in a stable display order. Used by the [lsp] config
+// writer and the LSP settings wizard.
+var LSPLanguages = []string{
+	"go", "python", "typescript", "rust", "c", "cpp", "lua",
+	"ruby", "php", "json", "yaml", "css", "html", "zig",
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
 
 // AIPreset describes one built-in "just works" provider entry a beginner can
