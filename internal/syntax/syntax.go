@@ -81,6 +81,22 @@ func (h *Highlighter) getStyle(tt chroma.TokenType) lipgloss.Style {
 	return res
 }
 
+// Lang returns the short language tag for a filename (chroma's first alias,
+// e.g. "go", "php", "python"), or "" when the file type is unknown/plain
+// text. Used for the status-bar language indicator and DAP auto-detection.
+func Lang(filename string) string {
+	lexer := lexers.Match(filename)
+	if lexer == nil {
+		return ""
+	}
+	lexer = chroma.Coalesce(lexer)
+	cfg := lexer.Config()
+	if len(cfg.Aliases) > 0 {
+		return cfg.Aliases[0]
+	}
+	return cfg.Name
+}
+
 // HighlightBuffer tokenizes full buffer text and returns a slice of styles per rune for each line.
 // CommentTokens returns the line-comment prefix/suffix for a file based on the
 // chroma lexer that would highlight it. For simple line comments suffix is

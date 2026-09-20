@@ -382,6 +382,33 @@ launch_json = {"justMyCode": false, "console": "integratedTerminal"}
 	}
 }
 
+func TestLoadDebugConnectMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[debug]
+adapter_mode = connect
+adapter_args = 127.0.0.1:9003
+launch_type = php
+launch_json = {"request": "launch", "type": "php"}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if cfg.Debug.AdapterMode != "connect" {
+		t.Errorf("adapter_mode = %q, want connect", cfg.Debug.AdapterMode)
+	}
+	if cfg.Debug.AdapterArgs != "127.0.0.1:9003" {
+		t.Errorf("adapter_args = %q", cfg.Debug.AdapterArgs)
+	}
+	if cfg.Debug.LaunchType != "php" {
+		t.Errorf("launch_type = %q, want php", cfg.Debug.LaunchType)
+	}
+	if cfg.Debug.LaunchJSON != `{"request": "launch", "type": "php"}` {
+		t.Errorf("launch_json = %q", cfg.Debug.LaunchJSON)
+	}
+}
+
 func TestWriteLang(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".dmed.conf")

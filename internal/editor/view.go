@@ -21,6 +21,7 @@ var (
 	cursorStyle     = lipgloss.NewStyle().Reverse(true)
 	statusStyle     = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("250"))
 	statusHiStyle   = lipgloss.NewStyle().Background(lipgloss.Color("61")).Foreground(lipgloss.Color("255")).Bold(true)
+	langStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
 	hintStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	activePaneStyle = lipgloss.NewStyle().Background(lipgloss.Color("235"))
 	matchStyle      = lipgloss.NewStyle().Background(lipgloss.Color("214")).Foreground(lipgloss.Color("0"))
@@ -2157,10 +2158,14 @@ func (m Model) statusBar() string {
 		right = m.t("status.lncol", t.buf.CurLine()+1, t.buf.Col()+1)
 	}
 	fileInfo := ""
+	langTag := ""
 	if !perPane && t.path != "" {
 		endings := map[string]string{"lf": "LF", "crlf": "CRLF"}
 		enc := strings.ToUpper(t.encoding)
-		fileInfo = fmt.Sprintf("%s %s ", endings[t.lineEnding], enc)
+		fileInfo = endings[t.lineEnding] + " " + enc + " "
+		if lang := syntax.Lang(t.path); lang != "" {
+			langTag = lang + " "
+		}
 	}
 	hint := ""
 	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gotoOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
@@ -2169,7 +2174,7 @@ func (m Model) statusBar() string {
 			hint += m.t("status.f8_pane")
 		}
 	}
-	rightBar := hintStyle.Render(hint) + statusStyle.Render(fileInfo) + statusStyle.Render(right)
+	rightBar := hintStyle.Render(hint) + langStyle.Render(langTag) + statusStyle.Render(fileInfo) + statusStyle.Render(right)
 
 	// The active file name already lives in the tab bar, so the status line
 	// only carries the icon strip, the split marker and the git branch.

@@ -225,9 +225,11 @@ in the Makefile as insurance).
       of the stop.
 - [x] `[debug]` config: mode (debug/test/exec), program, args, stop_on_entry,
       dlv_path; "Debug: Toggle Debug Panel" palette command; i18n en/ru.
-- [x] Generic adapters: `adapter_cmd`/`adapter_mode` (reverse|stdio)/
+- [x] Generic adapters: `adapter_cmd`/`adapter_mode` (reverse|stdio|connect)/
       `adapter_args`/`launch_type`/`launch_request`/`launch_json` — any
-      DAP adapter (debugpy, lldb-dap, node, ...); Go/Delve is the default. Asynchronous
+      DAP adapter (debugpy, lldb-dap, node, ...); Go/Delve is the default.
+      `connect` dials a listening DAP endpoint (Xdebug's PHP server on 9003)
+      instead of spawning an adapter process. Asynchronous
       adapter start without blocking the UI, restart after the session ends,
       eval line with focus (Tab), unconfirmed breakpoints `○`.
 

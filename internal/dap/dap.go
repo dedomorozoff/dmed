@@ -1,8 +1,9 @@
 // Package dap implements a Debug Adapter Protocol (DAP) client over
 // Content-Length framed JSON-RPC 2.0, the same wire transport used by LSP.
 // It is transport-agnostic at the core (any io.ReadWriteCloser) with
-// ready-made launchers for stdio adapters and for Delve's reverse-connect
-// mode (`dlv dap --client-addr`), which the editor targets for Go.
+// ready-made launchers for stdio adapters, for Delve's reverse-connect mode
+// (`dlv dap --client-addr`), which the editor targets for Go, and for
+// connecting out to a listening DAP endpoint (Xdebug's PHP debug server).
 package dap
 
 import (
@@ -291,6 +292,24 @@ func StartReverse(adapter string, args []string, rootDir string, onEvent OnEvent
 		_ = cmd.Process.Kill()
 		return nil, fmt.Errorf("dap: adapter %s did not connect", adapter)
 	}
+}
+
+// StartConnect dials a listening DAP endpoint and speaks DAP over the
+// resulting TCP connection. No adapter process is spawned: the debuggee (or a
+// server embedding it) is already running and accepts our connection — the
+// Xdebug 3 default layout, where Xdebug listens on port 9003 while PHP
+// executes. rootDir is unused (there is no child process) and kept only so
+// the signature reads like its siblings; the dial times out so a dead
+// endpoint never leaves the editor hanging.
+func StartConnect(addr string, rootDir string, onEvent OnEvent) (*Client, error) {
+	if strings.TrimSpace(addr) == "" {
+		return nil, fmt.Errorf("dap connect: empty address — set [debug] adapter_args to host:port")
+	}
+	conn, err := net.DialTimeout("tcp", addr, 15*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("dap connect %s: %w", addr, err)
+	}
+	return NewClient(conn, onEvent), nil
 }
 
 func outputScanner(r io.Reader, emit func(string)) error {

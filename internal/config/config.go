@@ -39,8 +39,9 @@ type DebugConfig struct {
 	// "node", ...). Defaults to "dlv"; the legacy `dlv_path` key is an alias.
 	AdapterCmd string
 	// AdapterMode is how the adapter transports DAP: "reverse" (the adapter
-	// dials us back, Delve-style) or "stdio" (the adapter speaks DAP on
-	// stdin/stdout — the common layout for debugpy, lldb-dap, etc.).
+	// dials us back, Delve-style), "stdio" (the adapter speaks DAP on
+	// stdin/stdout — the common layout for debugpy, lldb-dap, etc.) or
+	// "connect" (we dial a listening DAP endpoint — Xdebug's PHP debug server).
 	AdapterMode string
 	// AdapterArgs are extra whitespace-separated CLI arguments for the
 	// adapter process itself (e.g. `--host 127.0.0.1`).
@@ -53,6 +54,11 @@ type DebugConfig struct {
 	// LaunchJSON is an optional raw JSON object merged into the launch/attach
 	// arguments; adapter-specific keys override the built-in ones.
 	LaunchJSON string
+
+	// AutoDetect picks the DAP adapter/mode from the active file's language
+	// when the [debug] section still carries dmed's built-in defaults. Explicit
+	// settings always win; set auto_detect = false to disable entirely.
+	AutoDetect bool
 }
 
 // LSPConfig holds language-server integration settings.
@@ -175,6 +181,7 @@ func Defaults() Config {
 			LaunchType:    "go",
 			LaunchRequest: "launch",
 			LaunchJSON:    "",
+			AutoDetect:    true,
 		},
 		LSP: LSPConfig{
 			Enabled:  true,
@@ -470,7 +477,7 @@ func loadFile(path string, cfg *Config) {
 			cfg.Debug.AdapterCmd = v
 		}
 		if v, ok := s["adapter_mode"]; ok {
-			if v == "reverse" || v == "stdio" {
+			if v == "reverse" || v == "stdio" || v == "connect" {
 				cfg.Debug.AdapterMode = v
 			}
 		}
@@ -487,6 +494,9 @@ func loadFile(path string, cfg *Config) {
 		}
 		if v, ok := s["launch_json"]; ok {
 			cfg.Debug.LaunchJSON = v
+		}
+		if v, ok := s["auto_detect"]; ok {
+			cfg.Debug.AutoDetect = parseBool(v)
 		}
 	}
 
@@ -740,6 +750,7 @@ func WriteDebug(path string, d DebugConfig) (int, error) {
 		{"args", d.Args},
 		{"stop_on_entry", boolStr(d.StopOnEntry)},
 		{"launch_json", d.LaunchJSON},
+		{"auto_detect", boolStr(d.AutoDetect)},
 	}
 	return writeSection(path, "debug", known)
 }

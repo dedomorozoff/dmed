@@ -401,6 +401,7 @@ type Model struct {
 	dapConsolePeek        bool
 	dapConsoleScroll      int // console lines scrolled back from the newest
 	dapSupportsConfigDone bool
+	dapDeduced            *config.DebugConfig // language-detected [debug] for the live session
 
 	// DAP settings wizard (debug/launch configuration dialog)
 	dapCfgOpen  bool

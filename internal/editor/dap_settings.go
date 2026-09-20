@@ -26,10 +26,13 @@ var dapSettingsFields = []struct {
 	{name: "Args", kind: "text"},
 	{name: "Stop On Entry", kind: "bool"},
 	{name: "Launch JSON", kind: "text"},
+	{name: "Auto Detect", kind: "bool"},
 }
 
-// dapAdapterModes are the two supported adapter transports, in cycle order.
-var dapAdapterModes = []string{"reverse", "stdio"}
+// dapAdapterModes are the supported adapter transports, in cycle order.
+// reverse = Delve dials us back, stdio = adapter speaks on stdin/stdout,
+// connect = we dial a listening DAP endpoint (Xdebug).
+var dapAdapterModes = []string{"reverse", "stdio", "connect"}
 
 // dapLaunchRequests are the two supported DAP request kinds, in cycle order.
 var dapLaunchRequests = []string{"launch", "attach"}
@@ -69,6 +72,11 @@ func (m *Model) dapFieldValue(i int) string {
 		return "no"
 	case 9:
 		return m.cfg.Debug.LaunchJSON
+	case 10:
+		if m.cfg.Debug.AutoDetect {
+			return "yes"
+		}
+		return "no"
 	}
 	return ""
 }
@@ -83,7 +91,12 @@ func (m *Model) cycleDAPChoice(i, d int) {
 		return
 	}
 	if dapSettingsFields[i].kind == "bool" {
-		m.cfg.Debug.StopOnEntry = !m.cfg.Debug.StopOnEntry
+		switch dapSettingsFields[i].name {
+		case "Stop On Entry":
+			m.cfg.Debug.StopOnEntry = !m.cfg.Debug.StopOnEntry
+		case "Auto Detect":
+			m.cfg.Debug.AutoDetect = !m.cfg.Debug.AutoDetect
+		}
 	}
 }
 
@@ -188,7 +201,7 @@ func (m Model) dapCfgPanel(h int) []string {
 }
 
 func (m Model) dapCfgEditLine() string {
-	if m.dapCfgField == 8 {
+	if m.dapCfgField == 8 || m.dapCfgField == 10 {
 		// Bool rows are cycled, never edited inline.
 		return m.dapCfgBottom()
 	}

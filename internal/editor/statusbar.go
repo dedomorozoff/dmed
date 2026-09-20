@@ -6,6 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"dmed/internal/syntax"
 )
 
 // Clickable status-bar icons. The bottom-left of the status bar carries a
@@ -297,9 +299,13 @@ func (m Model) paneStatusBar(paneIdx int) string {
 	mark := fmt.Sprintf("[%d] %s", paneIdx+1, t.name(m.baseDir()))
 	lncol := m.t("status.lncol", t.buf.CurLine()+1, t.buf.Col()+1)
 	fileInfo := ""
+	langTag := ""
 	if t.path != "" {
 		endings := map[string]string{"lf": "LF", "crlf": "CRLF"}
 		fileInfo = " " + endings[t.lineEnding] + "/" + strings.ToUpper(t.encoding)
+		if lang := syntax.Lang(t.path); lang != "" {
+			langTag = " " + lang
+		}
 	}
 	branchSuffix := ""
 	if active && m.repo != nil {
@@ -307,7 +313,7 @@ func (m Model) paneStatusBar(paneIdx int) string {
 			branchSuffix = " (" + b + ")"
 		}
 	}
-	rightBar := statusStyle.Render(fileInfo) + hintStyle.Render(branchSuffix+" "+lncol)
+	rightBar := langStyle.Render(langTag) + statusStyle.Render(fileInfo) + hintStyle.Render(branchSuffix+" "+lncol)
 
 	left := statusStyle.Render(mark)
 	if active {

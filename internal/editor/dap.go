@@ -11,7 +11,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"dmed/internal/config"
 	"dmed/internal/dap"
+	"dmed/internal/syntax"
 )
 
 // dapEventMsg carries a decoded DAP server event from the adapter's read loop
@@ -123,20 +125,109 @@ func dapAdapterCommand(adapter, args string) (string, []string) {
 	return adapter, argv
 }
 
+// dapLangPreset describes the [debug] adapter a language debugs with.
+type dapLangPreset struct {
+	adapter     string // adapter executable (connect mode: display name only)
+	adapterMode string // "reverse" | "stdio" | "connect"
+	adapterArgs string // connect endpoint (host:port) or adapter CLI args
+	mode        string // launch "mode" field; "" omits it (Xdebug etc. reject it)
+	launchType  string // launch "type" field
+	launchJSON  string // extra launch body merged over the computed one
+}
+
+// dapLangPresets maps chroma language tags (syntax.Lang) to their debug
+// adapters. Go is the editor's default; PHP connects to an Xdebug 3 server
+// that already runs inside PHP. Add more languages here as they gain solid
+// DAP support.
+var dapLangPresets = map[string]dapLangPreset{
+	"go": {
+		adapter:     "dlv",
+		adapterMode: "reverse",
+		mode:        "debug",
+		launchType:  "go",
+	},
+	"php": {
+		adapter:     "xdebug",
+		adapterMode: "connect",
+		adapterArgs: "127.0.0.1:9003",
+		launchType:  "php",
+		launchJSON:  `{"type":"php","request":"launch"}`,
+	},
+}
+
+// dapLangPreset deduces the [debug] settings for the active file's language.
+// Adapter fields are applied only while they still carry dmed's built-in
+// defaults (adapter_cmd=dlv/mode reverse/launch go/empty args+json, mode
+// debug): any field pinned explicitly by the user wins over auto-detection.
+// Returns ok=false when auto_detect is off, the file has no known language,
+// or there is no preset for it.
+func (m Model) dapLangPreset() (config.DebugConfig, bool) {
+	if !m.cfg.Debug.AutoDetect {
+		return config.DebugConfig{}, false
+	}
+	t := m.cur()
+	if t == nil || t.path == "" {
+		return config.DebugConfig{}, false
+	}
+	preset, ok := dapLangPresets[syntax.Lang(t.path)]
+	if !ok {
+		return config.DebugConfig{}, false
+	}
+	d := m.cfg.Debug
+	if d.AdapterCmd == "" || d.AdapterCmd == "dlv" {
+		d.AdapterCmd = preset.adapter
+		d.AdapterMode = preset.adapterMode
+		if d.AdapterArgs == "" {
+			d.AdapterArgs = preset.adapterArgs
+		}
+	}
+	if d.Mode == "debug" {
+		d.Mode = preset.mode
+	}
+	if d.LaunchType == "go" {
+		d.LaunchType = preset.launchType
+	}
+	if d.LaunchJSON == "" {
+		d.LaunchJSON = preset.launchJSON
+	}
+	return d, true
+}
+
+// dapDebugCfg returns the [debug] settings for the live session: the
+// language-auto-detected merge when one was computed at startDebugging, else
+// the plain configured values.
+func (m Model) dapDebugCfg() config.DebugConfig {
+	if m.dapDeduced != nil {
+		return *m.dapDeduced
+	}
+	return m.cfg.Debug
+}
+
 // dapStartCmd spawns the DAP adapter and completes the initialize handshake
 // in the background so the UI never blocks on adapter startup. The outcome
 // arrives as a dapStartMsg stamped with the session generation; results from
 // superseded sessions are dropped by the Update handler.
 func (m *Model) dapStartCmd() tea.Cmd {
-	adapter := m.cfg.Debug.AdapterCmd
+	dc := m.dapDebugCfg()
+	adapter := dc.AdapterCmd
 	if adapter == "" {
-		adapter = "dlv"
+		if dc.AdapterMode == "connect" {
+			adapter = "xdebug" // connect mode spawns nothing; display name only
+		} else {
+			adapter = "dlv"
+		}
 	}
-	mode := m.cfg.Debug.AdapterMode
+	mode := dc.AdapterMode
 	if mode == "" {
 		mode = "reverse"
 	}
-	adapter, adapterArgs := dapAdapterCommand(adapter, m.cfg.Debug.AdapterArgs)
+	isConnect := mode == "connect"
+	// In connect mode adapter_args is the endpoint address, not CLI arguments
+	// for an adapter process, so skip the Delve/stdio argument splitting.
+	cmdAdapter, adapterArgs := adapter, []string(nil)
+	if !isConnect {
+		cmdAdapter, adapterArgs = dapAdapterCommand(adapter, dc.AdapterArgs)
+	}
 	root := m.baseDir()
 	if p := m.dapProgram(); p != "" {
 		// dlv runs `go build <program>` in its own working directory, so the
@@ -158,8 +249,10 @@ func (m *Model) dapStartCmd() tea.Cmd {
 	ch := m.dapCh
 	gen := m.dapGen
 	return func() tea.Msg {
-		if _, err := exec.LookPath(adapter); err != nil {
-			return dapStartMsg{gen: gen, err: fmt.Errorf("debug: %s not found — install it or set [debug] adapter_cmd", adapter)}
+		if !isConnect {
+			if _, err := exec.LookPath(cmdAdapter); err != nil {
+				return dapStartMsg{gen: gen, err: fmt.Errorf("debug: %s not found — install it or set [debug] adapter_cmd", cmdAdapter)}
+			}
 		}
 		onEvent := func(e dap.Event) {
 			select {
@@ -171,10 +264,17 @@ func (m *Model) dapStartCmd() tea.Cmd {
 			cl  *dap.Client
 			err error
 		)
-		if mode == "stdio" {
-			cl, err = dap.StartStdio(adapter, adapterArgs, root, onEvent)
-		} else {
-			cl, err = dap.StartReverse(adapter, adapterArgs, root, onEvent)
+		switch {
+		case mode == "stdio":
+			cl, err = dap.StartStdio(cmdAdapter, adapterArgs, root, onEvent)
+		case isConnect:
+			addr := dc.AdapterArgs
+			if addr == "" {
+				addr = "127.0.0.1:9003" // Xdebug's default DAP port
+			}
+			cl, err = dap.StartConnect(addr, root, onEvent)
+		default:
+			cl, err = dap.StartReverse(cmdAdapter, adapterArgs, root, onEvent)
 		}
 		if err != nil {
 			return dapStartMsg{gen: gen, err: err}
@@ -242,12 +342,13 @@ func (m *Model) dapLaunchCmd() tea.Cmd {
 // [debug] config. Adapter-specific keys from launch_json override the
 // built-in ones, so any DAP adapter can be driven from config.
 func (m Model) dapLaunchArgs() (map[string]interface{}, error) {
+	dc := m.dapDebugCfg()
 	args := map[string]interface{}{
-		"request": m.cfg.Debug.LaunchRequest,
-		"type":    m.cfg.Debug.LaunchType,
+		"request": dc.LaunchRequest,
+		"type":    dc.LaunchType,
 	}
-	if m.cfg.Debug.Mode != "" {
-		args["mode"] = m.cfg.Debug.Mode
+	if dc.Mode != "" {
+		args["mode"] = dc.Mode
 	}
 	if p := m.dapProgram(); p != "" {
 		args["program"] = p
@@ -255,17 +356,17 @@ func (m Model) dapLaunchArgs() (map[string]interface{}, error) {
 	if c := m.dapCwd(); c != "" {
 		args["cwd"] = c
 	}
-	if m.cfg.Debug.StopOnEntry {
+	if dc.StopOnEntry {
 		args["stopOnEntry"] = true
 	}
-	if a := strings.Fields(m.cfg.Debug.Args); len(a) > 0 {
+	if a := strings.Fields(dc.Args); len(a) > 0 {
 		args["args"] = a
 	}
-	if m.cfg.Debug.LaunchJSON == "" {
+	if dc.LaunchJSON == "" {
 		return args, nil
 	}
 	var extra map[string]interface{}
-	if err := json.Unmarshal([]byte(m.cfg.Debug.LaunchJSON), &extra); err != nil {
+	if err := json.Unmarshal([]byte(dc.LaunchJSON), &extra); err != nil {
 		return nil, fmt.Errorf("debug launch_json: %w", err)
 	}
 	for k, v := range extra {
@@ -280,7 +381,7 @@ func (m Model) dapLaunchArgs() (map[string]interface{}, error) {
 // itself is returned: dlv then builds `go build <file>.go`, which works
 // without a go.mod, instead of failing on a module-less package directory.
 func (m Model) dapProgram() string {
-	if p := m.cfg.Debug.Program; p != "" {
+	if p := m.dapDebugCfg().Program; p != "" {
 		return p
 	}
 	if t := m.cur(); t != nil && t.path != "" {
@@ -554,6 +655,9 @@ func (m *Model) startDebugging() tea.Cmd {
 	m.dapGen++
 	m.dapRunState = dapLaunch
 	m.dapBusy = true
+	if dc, ok := m.dapLangPreset(); ok {
+		m.dapDeduced = &dc
+	}
 	var cmds []tea.Cmd
 	if m.dapClient != nil {
 		// An ended session must be released before the new adapter starts.
@@ -586,6 +690,7 @@ func (m *Model) dapRelease() tea.Cmd {
 	m.dapCurLine = 0
 	m.dapReason = ""
 	m.dapBPVerif = map[string]map[int]bool{}
+	m.dapDeduced = nil // drop the language-detected config with the session
 	if cl == nil {
 		return nil
 	}

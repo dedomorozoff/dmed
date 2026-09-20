@@ -214,6 +214,85 @@ func TestCallReturnsServerError(t *testing.T) {
 	}
 }
 
+// ── Connect transport ─────────────────────────────────────────────────────
+
+func TestStartConnectDialAndHandshake(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	addr := ln.Addr().String()
+
+	type started struct {
+		client *Client
+		err    error
+	}
+	st := make(chan started, 1)
+	go func() {
+		cl, err := StartConnect(addr, "", func(Event) {})
+		st <- started{client: cl, err: err}
+	}()
+
+	conn, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &mockServer{t: t, srv: conn, read: bufio.NewReader(conn), reqs: make(chan mockReq, 8)}
+	go srv.loop()
+
+	s := <-st
+	if s.err != nil {
+		t.Fatalf("StartConnect: %v", s.err)
+	}
+	cl := s.client
+	defer cl.Close()
+
+	supports := make(chan bool, 1)
+	go func() {
+		s, _ := cl.Initialize()
+		supports <- s
+	}()
+	req := srv.nextReq()
+	if req.command != "initialize" {
+		t.Fatalf("command = %q, want initialize", req.command)
+	}
+	srv.respond(req.seq, map[string]interface{}{"supportsConfigurationDoneRequest": true})
+	select {
+	case s := <-supports:
+		if !s {
+			t.Fatal("supportsConfigurationDoneRequest = false, want true")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Initialize over connect transport did not return")
+	}
+}
+
+func TestStartConnectEmptyAddr(t *testing.T) {
+	if _, err := StartConnect("", "", func(Event) {}); err == nil {
+		t.Fatal("want error for empty address")
+	}
+}
+
+func TestStartConnectRefused(t *testing.T) {
+	// Grab an ephemeral port and release it: nothing listens there, so the
+	// dial must fail fast instead of hanging.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	_, err = StartConnect(addr, "", func(Event) {})
+	if err == nil {
+		t.Fatal("want error for closed endpoint")
+	}
+	if !strings.Contains(err.Error(), "dap connect") {
+		t.Fatalf("err = %v, want dap connect error", err)
+	}
+}
+
 // ── Event dispatch ────────────────────────────────────────────────────────
 
 func TestEventsDispatch(t *testing.T) {
