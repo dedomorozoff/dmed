@@ -102,6 +102,71 @@ func TestStatusIconHiddenInPromptMode(t *testing.T) {
 	}
 }
 
+func TestPaneStatusBarsInSplit(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	a := writeTemp(t, dir, "a.txt", "one\ntwo\nthree\n")
+	b := writeTemp(t, dir, "b.txt", "alpha\nbeta\n")
+	m := New(a, b)
+	m.width, m.height = 80, 24
+
+	// No split: no per-pane bars, content fills the cell.
+	if got := m.paneContentHeight(0); got != m.paneViewHeight(0) {
+		t.Fatalf("splitNone paneContentHeight = %d, want %d", got, m.paneViewHeight(0))
+	}
+
+	m.splitVert()
+	if got := m.paneContentHeight(0); got != m.paneViewHeight(0)-1 {
+		t.Fatalf("vert split paneContentHeight = %d, want cell-1 (%d)", got, m.paneViewHeight(0))
+	}
+	// Each pane's bar carries its own file name and cursor position.
+	p0 := stripANSI(m.paneStatusBar(0))
+	p1 := stripANSI(m.paneStatusBar(1))
+	if !strings.Contains(p0, "[1]") || !strings.Contains(p0, "b.txt") {
+		t.Fatalf("pane0 bar %q must carry [1] and b.txt (active pane)", p0)
+	}
+	if !strings.Contains(p1, "[2]") || !strings.Contains(p1, "a.txt") {
+		t.Fatalf("pane1 bar %q must carry [2] and a.txt", p1)
+	}
+	if !strings.Contains(p0, "Ln") || !strings.Contains(p1, "Ln") {
+		t.Fatalf("both bars must show a cursor line: %q / %q", p0, p1)
+	}
+
+	rows := m.editorRows(m.viewHeight())
+	if len(rows) != m.viewHeight() {
+		t.Fatalf("vert split renders %d rows, want %d", len(rows), m.viewHeight())
+	}
+	last := stripANSI(rows[len(rows)-1])
+	// Shared bottom row: b.txt in the left column, a.txt in the right one.
+	if !strings.Contains(last, "b.txt") || !strings.Contains(last, "a.txt") {
+		t.Fatalf("vert status row %q must carry both files", last)
+	}
+
+	// Horiz split docks each bar at the bottom of its own cell.
+	m = New(a, b)
+	m.height = 24
+	m.width = 80
+	m.splitHoriz()
+	rows = m.editorRows(m.viewHeight())
+	if len(rows) != m.viewHeight() {
+		t.Fatalf("horiz split renders %d rows, want %d", len(rows), m.viewHeight())
+	}
+	top := stripANSI(rows[m.paneContentHeight(0)])
+	bottom := stripANSI(rows[len(rows)-1])
+	if !strings.Contains(top, "[1]") || !strings.Contains(top, "b.txt") {
+		t.Fatalf("top pane bar %q must carry [1] b.txt (active)", top)
+	}
+	if !strings.Contains(bottom, "[2]") || !strings.Contains(bottom, "a.txt") {
+		t.Fatalf("bottom pane bar %q must carry [2] a.txt", bottom)
+	}
+
+	// The app-wide line hands Ln/Col to the pane bars in split mode.
+	sb := stripANSI(m.statusBar())
+	if strings.Contains(sb, "Ln") || strings.Contains(sb, "b.txt") {
+		t.Fatalf("global status bar %q must not duplicate per-pane info in a split", sb)
+	}
+}
+
 func TestStatusIconHoverSetsTipAndCallout(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, t.TempDir())

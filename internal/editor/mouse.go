@@ -638,11 +638,11 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 	// Buffer scroll.
 	p := m.curPane()
 	t := &m.tabs[p.tabIdx]
-	maxOff := t.buf.LineCount() - m.paneViewHeight(m.activePane)
+	maxOff := t.buf.LineCount() - m.paneContentHeight(m.activePane)
 	if p.wordWrap {
 		w := m.paneContentWidth(m.activePane)
 		if w > 0 {
-			maxOff = len(t.tabWrap(w, m.cfg.Editor.TabWidth)) - m.paneViewHeight(m.activePane)
+			maxOff = len(t.tabWrap(w, m.cfg.Editor.TabWidth)) - m.paneContentHeight(m.activePane)
 		}
 	}
 	if maxOff < 0 {

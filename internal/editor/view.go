@@ -375,8 +375,9 @@ func (m Model) editorRows(h int) []string {
 	} else if m.layout == splitVert {
 		w0 := m.paneTotalWidth(0)
 		w1 := m.paneTotalWidth(1)
-		left := m.renderPaneRows(0, h, w0)
-		right := m.renderPaneRows(1, h, w1)
+		ch := m.paneContentHeight(0)
+		left := m.renderPaneRows(0, ch, w0)
+		right := m.renderPaneRows(1, ch, w1)
 		combined := make([]string, h)
 		sepColor := "238"
 		if m.activePane == 0 {
@@ -384,9 +385,11 @@ func (m Model) editorRows(h int) []string {
 		}
 		sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(sepColor))
 		sep := sepStyle.Render("│")
-		for row := 0; row < h; row++ {
+		for row := 0; row < ch; row++ {
 			combined[row] = padTo(left[row], w0) + sep + padTo(right[row], w1)
 		}
+		// The shared bottom row is the status bar of both panes, one per column.
+		combined[ch] = padTo(m.paneStatusBar(0), w0) + sep + padTo(m.paneStatusBar(1), w1)
 		rows = m.composeSidebar(combined)
 		return m.composeChatRail(rows)
 	}
@@ -395,8 +398,8 @@ func (m Model) editorRows(h int) []string {
 	h1 := m.paneViewHeight(1)
 	w0 := m.paneTotalWidth(0)
 	w1 := m.paneTotalWidth(1)
-	top := m.renderPaneRows(0, h0, w0)
-	bottom := m.renderPaneRows(1, h1, w1)
+	top := m.renderPaneRows(0, m.paneContentHeight(0), w0)
+	bottom := m.renderPaneRows(1, m.paneContentHeight(1), w1)
 	for row := range top {
 		top[row] = padTo(top[row], w0)
 	}
@@ -411,8 +414,11 @@ func (m Model) editorRows(h int) []string {
 	sep := sepStyle.Render(strings.Repeat("─", m.editorAreaWidth()))
 	combined := make([]string, 0, h0+h1+1)
 	combined = append(combined, top...)
+	// Each pane docks its own status line at the bottom of its cell.
+	combined = append(combined, padTo(m.paneStatusBar(0), w0))
 	combined = append(combined, sep)
 	combined = append(combined, bottom...)
+	combined = append(combined, padTo(m.paneStatusBar(1), w1))
 	rows = m.composeSidebar(combined)
 	return m.composeChatRail(rows)
 }
@@ -2131,10 +2137,10 @@ func (m Model) palettePanel() []string {
 
 func (m Model) statusBar() string {
 	t := m.activeTab()
-	paneMark := ""
-	if m.layout != splitNone {
-		paneMark = fmt.Sprintf("[%d] ", m.activePane+1)
-	}
+	// In a split each pane draws its own status line (name, Ln/Col, file
+	// format) at the bottom of its cell, so the app-wide line must not repeat
+	// that per-file state.
+	perPane := m.layout != splitNone
 	branchSuffix := ""
 	if m.repo != nil {
 		if b := m.repo.Branch(); b != "" {
@@ -2146,9 +2152,12 @@ func (m Model) statusBar() string {
 	if m.msg != "" {
 		mid = statusStyle.Render("  " + m.msg)
 	}
-	right := m.t("status.lncol", t.buf.CurLine()+1, t.buf.Col()+1)
+	right := ""
+	if !perPane {
+		right = m.t("status.lncol", t.buf.CurLine()+1, t.buf.Col()+1)
+	}
 	fileInfo := ""
-	if t.path != "" {
+	if !perPane && t.path != "" {
 		endings := map[string]string{"lf": "LF", "crlf": "CRLF"}
 		enc := strings.ToUpper(t.encoding)
 		fileInfo = fmt.Sprintf("%s %s ", endings[t.lineEnding], enc)
@@ -2165,10 +2174,10 @@ func (m Model) statusBar() string {
 	// The active file name already lives in the tab bar, so the status line
 	// only carries the icon strip, the split marker and the git branch.
 	left := m.statusIconsString()
-	if paneMark != "" {
-		left += statusHiStyle.Render(" " + paneMark)
+	if m.layout != splitNone {
+		left += statusHiStyle.Render(fmt.Sprintf(" [%d] ", m.activePane+1))
 	}
-	if branchSuffix != "" {
+	if !perPane && branchSuffix != "" {
 		left += hintStyle.Render(branchSuffix)
 	}
 

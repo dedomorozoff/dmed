@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -282,6 +283,42 @@ func (m *Model) activateStatusIcon(a statusAction) tea.Cmd {
 		return m.toggleTerminal()
 	}
 	return nil
+}
+
+// paneStatusBar renders the status line docked at the bottom of each pane in a
+// split. It reports that pane's own file, cursor position and file format. The
+// app-wide line (icon strip, branch, transient messages, hints) stays on the
+// single bottom row, so per-pane bars carry no interactive state of their own.
+func (m Model) paneStatusBar(paneIdx int) string {
+	p := &m.panes[paneIdx]
+	t := &m.tabs[p.tabIdx]
+	active := paneIdx == m.activePane
+
+	mark := fmt.Sprintf("[%d] %s", paneIdx+1, t.name(m.baseDir()))
+	lncol := m.t("status.lncol", t.buf.CurLine()+1, t.buf.Col()+1)
+	fileInfo := ""
+	if t.path != "" {
+		endings := map[string]string{"lf": "LF", "crlf": "CRLF"}
+		fileInfo = " " + endings[t.lineEnding] + "/" + strings.ToUpper(t.encoding)
+	}
+	branchSuffix := ""
+	if active && m.repo != nil {
+		if b := m.repo.Branch(); b != "" {
+			branchSuffix = " (" + b + ")"
+		}
+	}
+	rightBar := statusStyle.Render(fileInfo) + hintStyle.Render(branchSuffix+" "+lncol)
+
+	left := statusStyle.Render(mark)
+	if active {
+		left = statusHiStyle.Render(mark)
+	}
+
+	fill := m.paneTotalWidth(paneIdx) - lipgloss.Width(left) - lipgloss.Width(rightBar)
+	if fill < 0 {
+		fill = 0
+	}
+	return left + statusStyle.Render(strings.Repeat(" ", fill)) + rightBar
 }
 
 // overlayStatusTooltip draws a one-row floating callout directly above the
