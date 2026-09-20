@@ -1563,6 +1563,17 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		msg.Code = normalizeKey(msg.Code)
 	}
 	s := msg.String()
+	// Some terminal stacks bundle the letter as Text even for Ctrl/Alt chords
+	// (notably the Windows Console API on non-US keyboard layouts, where a
+	// pressed Ctrl+<physical key> arrives with the Cyrillic Code/Text). String()
+	// returns that Text verbatim and drops the modifier, so such a chord would
+	// match the plain letter — and fall through to the buffer, typing "g" after
+	// Ctrl+G. Rebuild the key name from the modifiers instead (uv's Keystroke)
+	// whenever Ctrl or Alt is involved; Shift-only events keep their Text form
+	// so the bare "G" ⇄ "g" top/bottom distinction is preserved.
+	if (msg.Mod&(tea.ModCtrl|tea.ModAlt)) != 0 && msg.Text != "" {
+		s = msg.Keystroke()
+	}
 	// Restore original text so text-input handlers (chat, search, prompt,
 	// etc.) receive the actual typed characters instead of the normalized
 	// English equivalents used only for keybinding matching.
