@@ -65,6 +65,7 @@ var helpEntries = []helpEntry{
 	{"Ctrl+G", "help.git_panel"},
 	{"Ctrl+Alt+D", "help.debug"},
 	{"F4 / F5 / F6 / F7 / S+F5 / S+F7", "help.debug_keys"},
+	{"↑↓/PgUp/PgDn/Home/End, +/-", "help.debug_panel"},
 	{"F12 / Ctrl+Click", "help.goto_def"},
 	{"D (in Git panel)", "help.git_diff"},
 	{"Alt+[ / Alt+]", "help.hunk"},
@@ -155,15 +156,48 @@ func (m Model) termExtraRows() int {
 	return m.termPanelHeight()
 }
 
+// dapPanelMinRows is the smallest usable debug panel: header, column titles
+// and a few entries. dapPanelAutoMax caps the height derived from the terminal;
+// a height the user picked with +/- is only bounded by the terminal itself.
+const (
+	dapPanelMinRows = 6
+	dapPanelAutoMax = 14
+)
+
+// debugPanelHeight is the height of the docked debug panel: a quarter of the
+// terminal by default, or the height the user resized it to with +/-.
 func (m Model) debugPanelHeight() int {
-	h := m.height / 4
-	if h < 6 {
-		h = 6
+	if m.dapPanelRows > 0 {
+		return m.clampDapPanelRows(m.dapPanelRows)
 	}
-	if h > 14 {
-		h = 14
+	h := m.height / 4
+	if h < dapPanelMinRows {
+		h = dapPanelMinRows
+	}
+	if h > dapPanelAutoMax {
+		h = dapPanelAutoMax
 	}
 	return h
+}
+
+// clampDapPanelRows keeps a requested panel height usable for the current
+// terminal: at least dapPanelMinRows, at most the terminal minus those same
+// rows, so the buffer and the status bar stay on screen.
+func (m Model) clampDapPanelRows(h int) int {
+	if max := m.height - dapPanelMinRows; h > max {
+		h = max
+	}
+	if h < dapPanelMinRows {
+		h = dapPanelMinRows
+	}
+	return h
+}
+
+// growDapPanel resizes the debug panel by d rows (positive grows). It starts
+// from the height currently in effect, so the first press never jumps on a
+// terminal whose automatic height differs from the default quarter.
+func (m *Model) growDapPanel(d int) {
+	m.dapPanelRows = m.clampDapPanelRows(m.debugPanelHeight() + d)
 }
 
 func (m Model) debugExtraRows() int {

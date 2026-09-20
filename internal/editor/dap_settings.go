@@ -31,8 +31,9 @@ var dapSettingsFields = []struct {
 
 // dapAdapterModes are the supported adapter transports, in cycle order.
 // reverse = Delve dials us back, stdio = adapter speaks on stdin/stdout,
-// connect = we dial a listening DAP endpoint (Xdebug).
-var dapAdapterModes = []string{"reverse", "stdio", "connect"}
+// connect = we dial a listening DAP endpoint, dbgp = Xdebug dials us back
+// over the DBGp protocol (PHP).
+var dapAdapterModes = []string{"reverse", "stdio", "connect", "dbgp"}
 
 // dapLaunchRequests are the two supported DAP request kinds, in cycle order.
 var dapLaunchRequests = []string{"launch", "attach"}

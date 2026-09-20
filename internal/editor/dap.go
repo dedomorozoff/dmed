@@ -13,8 +13,30 @@ import (
 
 	"dmed/internal/config"
 	"dmed/internal/dap"
+	"dmed/internal/dbgp"
 	"dmed/internal/syntax"
 )
+
+// debugBackend is the transport surface the debug panel needs: DAP adapters
+// (*dap.Client) and the DBGp Xdebug client (*dbgp.Client) both implement it,
+// so the panel, launch sequence and step keys work for either protocol.
+type debugBackend interface {
+	Initialize() (bool, error)
+	Launch(map[string]interface{}) error
+	ConfigureDone() error
+	SetBreakpoints(path string, lines []int) ([]dap.Breakpoint, error)
+	Continue(threadID int64) error
+	Pause(threadID int64) error
+	Next(threadID int64) error
+	StepIn(threadID int64) error
+	StepOut(threadID int64) error
+	Threads() ([]dap.Thread, error)
+	StackTrace(threadID int64, levels int) ([]dap.StackFrame, error)
+	Scopes(frameID int64) ([]dap.Scope, error)
+	Variables(ref int64) ([]dap.Variable, error)
+	Evaluate(expr string, frameID int64) (dap.Variable, error)
+	Close()
+}
 
 // dapEventMsg carries a decoded DAP server event from the adapter's read loop
 // into the model (Mirror of lspDiagMsg). gen stamps the session that produced
@@ -37,7 +59,7 @@ type dapLaunchMsg struct {
 // initialize handshake). gen lets the UI drop results from a session that was
 // already superseded by stop/restart.
 type dapStartMsg struct {
-	cl       *dap.Client
+	cl       debugBackend
 	gen      int
 	supports bool
 	adapter  string // resolved adapter base name, for the status bar
@@ -127,18 +149,18 @@ func dapAdapterCommand(adapter, args string) (string, []string) {
 
 // dapLangPreset describes the [debug] adapter a language debugs with.
 type dapLangPreset struct {
-	adapter     string // adapter executable (connect mode: display name only)
-	adapterMode string // "reverse" | "stdio" | "connect"
-	adapterArgs string // connect endpoint (host:port) or adapter CLI args
+	adapter     string // adapter executable (connect/dbgp: display name only)
+	adapterMode string // "reverse" | "stdio" | "connect" | "dbgp"
+	adapterArgs string // connect/dbgp endpoint (host:port) or adapter CLI args
 	mode        string // launch "mode" field; "" omits it (Xdebug etc. reject it)
 	launchType  string // launch "type" field
 	launchJSON  string // extra launch body merged over the computed one
 }
 
 // dapLangPresets maps chroma language tags (syntax.Lang) to their debug
-// adapters. Go is the editor's default; PHP connects to an Xdebug 3 server
-// that already runs inside PHP. Add more languages here as they gain solid
-// DAP support.
+// adapters. Go is the editor's default; PHP is debugged by spawning the
+// interpreter with Xdebug, which dials back to us over DBGp. Add more
+// languages here as they gain solid DAP/DBGp support.
 var dapLangPresets = map[string]dapLangPreset{
 	"go": {
 		adapter:     "dlv",
@@ -147,8 +169,8 @@ var dapLangPresets = map[string]dapLangPreset{
 		launchType:  "go",
 	},
 	"php": {
-		adapter:     "xdebug",
-		adapterMode: "connect",
+		adapter:     "php",
+		adapterMode: "dbgp",
 		adapterArgs: "127.0.0.1:9003",
 		launchType:  "php",
 		launchJSON:  `{"type":"php","request":"launch"}`,
@@ -211,9 +233,12 @@ func (m *Model) dapStartCmd() tea.Cmd {
 	dc := m.dapDebugCfg()
 	adapter := dc.AdapterCmd
 	if adapter == "" {
-		if dc.AdapterMode == "connect" {
+		switch dc.AdapterMode {
+		case "connect":
 			adapter = "xdebug" // connect mode spawns nothing; display name only
-		} else {
+		case "dbgp":
+			adapter = "php"
+		default:
 			adapter = "dlv"
 		}
 	}
@@ -222,10 +247,11 @@ func (m *Model) dapStartCmd() tea.Cmd {
 		mode = "reverse"
 	}
 	isConnect := mode == "connect"
-	// In connect mode adapter_args is the endpoint address, not CLI arguments
-	// for an adapter process, so skip the Delve/stdio argument splitting.
+	isDBGP := mode == "dbgp"
+	// In connect/dbgp mode adapter_args is the endpoint address, not CLI
+	// arguments for an adapter process, so skip the Delve/stdio splitting.
 	cmdAdapter, adapterArgs := adapter, []string(nil)
-	if !isConnect {
+	if !isConnect && !isDBGP {
 		cmdAdapter, adapterArgs = dapAdapterCommand(adapter, dc.AdapterArgs)
 	}
 	root := m.baseDir()
@@ -249,7 +275,7 @@ func (m *Model) dapStartCmd() tea.Cmd {
 	ch := m.dapCh
 	gen := m.dapGen
 	return func() tea.Msg {
-		if !isConnect {
+		if mode == "stdio" || mode == "reverse" {
 			if _, err := exec.LookPath(cmdAdapter); err != nil {
 				return dapStartMsg{gen: gen, err: fmt.Errorf("debug: %s not found — install it or set [debug] adapter_cmd", cmdAdapter)}
 			}
@@ -261,7 +287,7 @@ func (m *Model) dapStartCmd() tea.Cmd {
 			}
 		}
 		var (
-			cl  *dap.Client
+			cl  debugBackend
 			err error
 		)
 		switch {
@@ -270,9 +296,20 @@ func (m *Model) dapStartCmd() tea.Cmd {
 		case isConnect:
 			addr := dc.AdapterArgs
 			if addr == "" {
-				addr = "127.0.0.1:9003" // Xdebug's default DAP port
+				addr = "127.0.0.1:9003" // Xdebug's conventional endpoint
 			}
 			cl, err = dap.StartConnect(addr, root, onEvent)
+		case isDBGP:
+			addr := dc.AdapterArgs
+			if addr == "" {
+				addr = "127.0.0.1:9003" // Xdebug's connect-back port
+			}
+			program := dc.Program
+			if program == "" {
+				program = m.dapProgram()
+			}
+			cl, err = dbgp.StartDebugger(cmdAdapter, program,
+				strings.Fields(dc.Args), root, addr, onEvent)
 		default:
 			cl, err = dap.StartReverse(cmdAdapter, adapterArgs, root, onEvent)
 		}
@@ -380,11 +417,15 @@ func (m Model) dapLaunchArgs() (map[string]interface{}, error) {
 // adapters like Delve), else ".". For a Go file outside any module, the file
 // itself is returned: dlv then builds `go build <file>.go`, which works
 // without a go.mod, instead of failing on a module-less package directory.
+// Script languages (PHP/Xdebug) debug the active file, not a directory.
 func (m Model) dapProgram() string {
 	if p := m.dapDebugCfg().Program; p != "" {
 		return p
 	}
 	if t := m.cur(); t != nil && t.path != "" {
+		if filepath.Ext(t.path) == ".php" {
+			return t.path
+		}
 		if filepath.Ext(t.path) == ".go" && !pathInGoModule(filepath.Dir(t.path)) {
 			return t.path
 		}
@@ -729,7 +770,7 @@ func (m *Model) handleDap(msg tea.KeyPressMsg) tea.Cmd {
 		case "shift+tab":
 			m.dapFocus = (m.dapFocus + 3) % 4
 		case "ctrl+l":
-			m.dapConsole = nil
+			m.dapClearConsole()
 		default:
 			if len(msg.Text) > 0 {
 				m.dapIn = append(m.dapIn, []rune(msg.Text)...)
@@ -773,15 +814,49 @@ func (m *Model) handleDap(msg tea.KeyPressMsg) tea.Cmd {
 		m.dapFocus = (m.dapFocus + 3) % 4
 		return nil
 	case "up", "k":
+		if m.dapConsolePeek {
+			m.dapScrollConsole(1) // the peek has no selection: walk the backlog
+			return nil
+		}
 		return m.dapMoveSelCmd(-1)
 	case "down", "j":
+		if m.dapConsolePeek {
+			m.dapScrollConsole(-1)
+			return nil
+		}
 		return m.dapMoveSelCmd(1)
 	case "pgup":
-		return m.dapMoveSelCmd(-6)
+		if m.dapConsolePeek {
+			m.dapScrollConsole(m.dapListRows())
+			return nil
+		}
+		return m.dapMoveSelPageCmd(-1)
 	case "pgdown":
-		return m.dapMoveSelCmd(6)
+		if m.dapConsolePeek {
+			m.dapScrollConsole(-m.dapListRows())
+			return nil
+		}
+		return m.dapMoveSelPageCmd(1)
+	case "home":
+		if m.dapConsolePeek {
+			m.dapConsoleToEdge(true)
+			return nil
+		}
+		return m.dapMoveSelEdgeCmd(true)
+	case "end":
+		if m.dapConsolePeek {
+			m.dapConsoleToEdge(false)
+			return nil
+		}
+		return m.dapMoveSelEdgeCmd(false)
+	case "+", "=":
+		m.growDapPanel(1)
+		return nil
+	case "-", "_":
+		m.growDapPanel(-1)
+		return nil
 	case "ctrl+l":
-		m.dapConsole = nil
+		m.dapClearConsole()
 		return nil
 	default:
 		// Typed characters are deliberately ignored here: the evaluator row is
@@ -812,34 +887,78 @@ func (m Model) dapCurrentVars() []dapVarRow {
 	return m.dapVarStack[len(m.dapVarStack)-1]
 }
 
-// dapMoveSel moves the panel selection within the focused list.
-func (m *Model) dapMoveSel(d int) {
-	n := 0
+// dapSelList returns the current index into, and the length of, the focused
+// list.
+func (m Model) dapSelList() (idx, total int) {
 	switch m.dapFocus {
 	case 0:
-		n = len(m.dapThreads)
-		m.dapSelThread = (m.dapSelThread + d + n) % maxInt(n, 1)
+		return m.dapSelThread, len(m.dapThreads)
 	case 1:
-		n = len(m.dapFrames)
-		m.dapSelFrame = (m.dapSelFrame + d + n) % maxInt(n, 1)
+		return m.dapSelFrame, len(m.dapFrames)
 	default:
-		n = len(m.dapCurrentVars())
-		m.dapVarSel = (m.dapVarSel + d + n) % maxInt(n, 1)
+		return m.dapVarSel, len(m.dapCurrentVars())
 	}
 }
 
-// dapMoveSelCmd moves the panel selection like dapMoveSel and reloads the
-// snapshot when the move changes what the other columns show: another thread
-// carries its own stack, another frame its own variables. Selecting a thread
-// or frame used to leave the stack/variables pane on stale data.
+// dapSetSel writes a selection index into the focused list, clamped to it. An
+// empty list keeps index 0, which is what the columns render an empty state
+// from.
+func (m *Model) dapSetSel(i int) {
+	_, total := m.dapSelList()
+	if total == 0 {
+		i = 0
+	} else {
+		i = maxInt(i, 0)
+		if i > total-1 {
+			i = total - 1
+		}
+	}
+	switch m.dapFocus {
+	case 0:
+		m.dapSelThread = i
+	case 1:
+		m.dapSelFrame = i
+	default:
+		m.dapVarSel = i
+	}
+}
+
+// dapMoveSelCmd moves the focused list's selection by one entry, wrapping at
+// the ends.
 func (m *Model) dapMoveSelCmd(d int) tea.Cmd {
+	idx, total := m.dapSelList()
+	return m.dapSetSelCmd((idx + d + total) % maxInt(total, 1))
+}
+
+// dapMoveSelPageCmd jumps one screenful of the focused list. Unlike a one-step
+// move it clamps instead of wrapping: a page step that wrapped would throw the
+// selection to the far end of a long stack and lose the place.
+func (m *Model) dapMoveSelPageCmd(dir int) tea.Cmd {
+	idx, _ := m.dapSelList()
+	return m.dapSetSelCmd(idx + dir*m.dapListRows())
+}
+
+// dapMoveSelEdgeCmd jumps to the top (first) or bottom (last) entry.
+func (m *Model) dapMoveSelEdgeCmd(top bool) tea.Cmd {
+	_, total := m.dapSelList()
+	if top {
+		return m.dapSetSelCmd(0)
+	}
+	return m.dapSetSelCmd(total - 1)
+}
+
+// dapSetSelCmd applies idx to the focused list and reloads the snapshot when
+// the move changes what the other columns show: another thread carries its own
+// stack, another frame its own variables. Selecting a thread or frame used to
+// leave the stack/variables pane on stale data.
+func (m *Model) dapSetSelCmd(idx int) tea.Cmd {
 	switch m.dapFocus {
 	case 0:
 		if len(m.dapThreads) == 0 {
 			return nil
 		}
 		before := m.dapSelThread
-		m.dapMoveSel(d)
+		m.dapSetSel(idx)
 		if m.dapSelThread == before {
 			return nil
 		}
@@ -849,13 +968,13 @@ func (m *Model) dapMoveSelCmd(d int) tea.Cmd {
 			return nil
 		}
 		before := m.dapSelFrame
-		m.dapMoveSel(d)
+		m.dapSetSel(idx)
 		if m.dapSelFrame == before {
 			return nil
 		}
 		return m.dapRefreshCmd()
 	}
-	m.dapMoveSel(d)
+	m.dapSetSel(idx)
 	return nil
 }
 
@@ -1074,18 +1193,15 @@ func (m *Model) handleDAPEvent(ev dap.Event) tea.Cmd {
 		case "console":
 			line = "dbg | " + line
 		}
-		m.dapConsole = append(m.dapConsole, line)
-		if len(m.dapConsole) > 1000 {
-			m.dapConsole = m.dapConsole[len(m.dapConsole)-1000:]
-		}
+		m.dapAppendConsole(line)
 	case dap.EventExited:
-		m.dapConsole = append(m.dapConsole, fmt.Sprintf("process exited with code %d", ev.ExitCode))
+		m.dapAppendConsole(fmt.Sprintf("process exited with code %d", ev.ExitCode))
 		m.msg = fmt.Sprintf("debug: process exited with code %d", ev.ExitCode)
 	case dap.EventTerminated:
 		m.dapRunState = dapEnded
 		m.dapCurPath = ""
 		m.dapCurLine = 0
-		m.dapConsole = append(m.dapConsole, "debug session terminated")
+		m.dapAppendConsole("debug session terminated")
 		m.msg = "debug: session ended"
 	case dap.EventBreakpoint:
 		if ev.SourcePath != "" {

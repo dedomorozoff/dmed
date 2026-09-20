@@ -42,8 +42,8 @@ func TestDapLangPresetPHP(t *testing.T) {
 	if !ok {
 		t.Fatal("php preset not detected")
 	}
-	if dc.AdapterCmd != "xdebug" || dc.AdapterMode != "connect" {
-		t.Errorf("adapter = %q/%q, want xdebug/connect", dc.AdapterCmd, dc.AdapterMode)
+	if dc.AdapterCmd != "php" || dc.AdapterMode != "dbgp" {
+		t.Errorf("adapter = %q/%q, want php/dbgp", dc.AdapterCmd, dc.AdapterMode)
 	}
 	if dc.AdapterArgs != "127.0.0.1:9003" {
 		t.Errorf("adapter_args = %q, want 127.0.0.1:9003", dc.AdapterArgs)
@@ -56,8 +56,8 @@ func TestDapLangPresetPHP(t *testing.T) {
 	}
 
 	m.dapDeduced = &dc // startDebugging stores the merge before launching
-	if got := m.dapDebugCfg().AdapterMode; got != "connect" {
-		t.Errorf("dapDebugCfg().AdapterMode = %q, want connect", got)
+	if got := m.dapDebugCfg().AdapterMode; got != "dbgp" {
+		t.Errorf("dapDebugCfg().AdapterMode = %q, want dbgp", got)
 	}
 }
 
@@ -110,7 +110,7 @@ func TestDapLangPresetRespectsExplicitConfig(t *testing.T) {
 
 func TestDapDeducedClearedOnRelease(t *testing.T) {
 	m := newEditorWithFile(t, "index.php", "<?php\n")
-	dc := config.DebugConfig{AdapterCmd: "xdebug"}
+	dc := config.DebugConfig{AdapterCmd: "php", AdapterMode: "dbgp"}
 	m.dapDeduced = &dc
 	m.dapRelease()
 	if m.dapDeduced != nil {

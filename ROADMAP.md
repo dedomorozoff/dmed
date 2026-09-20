@@ -225,11 +225,13 @@ in the Makefile as insurance).
       of the stop.
 - [x] `[debug]` config: mode (debug/test/exec), program, args, stop_on_entry,
       dlv_path; "Debug: Toggle Debug Panel" palette command; i18n en/ru.
-- [x] Generic adapters: `adapter_cmd`/`adapter_mode` (reverse|stdio|connect)/
-      `adapter_args`/`launch_type`/`launch_request`/`launch_json` — any
+- [x] Generic adapters: `adapter_cmd`/`adapter_mode` (reverse|stdio|connect|
+      dbgp)/`adapter_args`/`launch_type`/`launch_request`/`launch_json` — any
       DAP adapter (debugpy, lldb-dap, node, ...); Go/Delve is the default.
-      `connect` dials a listening DAP endpoint (Xdebug's PHP server on 9003)
-      instead of spawning an adapter process. Asynchronous
+      `connect` dials a listening DAP endpoint instead of spawning an adapter
+      process; `dbgp` spawns the interpreter and serves the session over the
+      DBGp wire protocol, which is how PHP is debugged (Xdebug has no DAP).
+      Asynchronous
       adapter start without blocking the UI, restart after the session ends,
       eval line with focus (Tab), unconfirmed breakpoints `○`.
 
@@ -245,6 +247,26 @@ in the Makefile as insurance).
       its own scroll offsets; the status bar / hovered tooltip / overlay start
       rows account for the docked panel. Real-Delve integration tests cover a
       breakpoint hit and a pause.
+- [x] PHP debugging through Xdebug: `internal/dbgp`, a DBGp client (a second
+      protocol behind the same panel, since Xdebug does not speak DAP) —
+      breakpoints, run/step, threads/stack/scopes/variables with expandable
+      arrays, expression eval, and clean end-of-session handling. Detected from
+      the active `.php` file; `php` is spawned with the session env and dials
+      back over 9003. Verified against a real interpreter by
+      `TestRealXdebugSession` and `TestPHPXdebugBreakpointHit` (both skip
+      without PHP/Xdebug), which caught the wire details a mock had gotten
+      wrong: the `<length>\0<xml>\0` framing of every engine document, the
+      `iso-8859-1` XML prolog, the breakpoint id being a response attribute,
+      errors arriving as an `<error>` child with no `success="0"`, and the
+      base64-encoded `eval` expression.
+- [x] Debug panel scrolling and fit: `PgUp`/`PgDn` move a screenful (clamped —
+      they were a fixed six entries that wrapped around and lost the place),
+      `Home`/`End` jump to the ends, and `+`/`-` resize the panel so a deep
+      stack or a long variable list is not squeezed into a quarter of the
+      screen. The console peek scrolls from the keyboard too (`↑↓`/`PgUp`/`PgDn`/
+      `Home`/`End`, wheel direction fixed) and keeps its place while new output
+      arrives. The row holding the focused selection is drawn across the whole
+      panel, since a column is far too narrow for a long value or path.
 - [x] Fixed PgDn across the whole application: in bubbletea v2 the key string is
       `pgdown`, while handlers matched the outdated `pgdn` (dead branches in chat,
       DAP, git, terminal, diff, AI panels, completion).

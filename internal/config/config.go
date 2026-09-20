@@ -38,10 +38,11 @@ type DebugConfig struct {
 	// AdapterCmd is the DAP adapter executable ("dlv", "debugpy-adapter",
 	// "node", ...). Defaults to "dlv"; the legacy `dlv_path` key is an alias.
 	AdapterCmd string
-	// AdapterMode is how the adapter transports DAP: "reverse" (the adapter
-	// dials us back, Delve-style), "stdio" (the adapter speaks DAP on
-	// stdin/stdout — the common layout for debugpy, lldb-dap, etc.) or
-	// "connect" (we dial a listening DAP endpoint — Xdebug's PHP debug server).
+	// AdapterMode is how the adapter transports the session: "reverse" (the
+	// adapter dials us back, Delve-style), "stdio" (the adapter speaks DAP on
+	// stdin/stdout — the common layout for debugpy, lldb-dap, etc.), "connect"
+	// (we dial a listening DAP endpoint) or "dbgp" (we spawn the interpreter and
+	// serve it over the DBGp protocol — PHP with Xdebug, which has no DAP).
 	AdapterMode string
 	// AdapterArgs are extra whitespace-separated CLI arguments for the
 	// adapter process itself (e.g. `--host 127.0.0.1`).
@@ -477,7 +478,7 @@ func loadFile(path string, cfg *Config) {
 			cfg.Debug.AdapterCmd = v
 		}
 		if v, ok := s["adapter_mode"]; ok {
-			if v == "reverse" || v == "stdio" || v == "connect" {
+			if v == "reverse" || v == "stdio" || v == "connect" || v == "dbgp" {
 				cfg.Debug.AdapterMode = v
 			}
 		}

@@ -63,7 +63,7 @@ func (m Model) dapHeader(w int) string {
 		loc := filepath.Base(m.dapCurPath) + fmt.Sprintf(":%d", m.dapCurLine)
 		line += statusStyle.Render(" " + loc)
 	}
-	hint := " [F4 bp] [F5 run/pause] [F6 step] [F7 in] [S+F7 out] [S+F5 stop] [Tab eval] [l console]"
+	hint := " [F4 bp] [F5 run/pause] [F6 step] [F7 in] [S+F7 out] [S+F5 stop] [Tab eval] [l console] [+/- size]"
 	line += dapDimStyle.Render(hint)
 	if fill := w - lipgloss.Width(line); fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -137,18 +137,75 @@ func (m Model) dapVarWindow(n int) int {
 }
 
 // dapColumns lays the three lists side by side. Focus 0 shows threads unless
-// the console peek is enabled, focus 1 frames, focus 2 variables.
+// the console peek is enabled, focus 1 frames, focus 2 variables. The row
+// carrying the focused list's selection spans the whole panel instead of its
+// column, so long frame paths and variable values stay readable.
 func (m Model) dapColumns(h, w int) []string {
 	threadW, frameW, varW := m.dapColumnWidths(w)
 	sep := dapColSepStyle.Render("│")
 	left := m.dapThreadsCol(h, threadW)
 	middle := m.dapFramesCol(h, frameW)
 	right := m.dapVarsCol(h, varW)
+	wideRow, wideText := m.dapWideSelection(h, w)
 	out := make([]string, h)
 	for i := 0; i < h; i++ {
+		if i == wideRow {
+			out[i] = wideText
+			continue
+		}
 		out[i] = left[i] + sep + middle[i] + sep + right[i]
 	}
 	return out
+}
+
+// dapConsoleActive reports whether the console peek owns the panel keys and
+// the left column: it is showing and that column has the focus.
+func (m Model) dapConsoleActive() bool { return m.dapConsolePeek && m.dapFocus == 0 }
+
+// dapWideSelection returns the screen row of the focused list's selected entry
+// and its label padded to the full panel width, or (-1, "") when nothing is
+// selected there (console peek in that column, empty list).
+//
+// A column is far too narrow for a long frame path or variable value, and a
+// debugger is where long ones turn up, so the row under examination expands
+// across the panel rather than being cut at its column.
+func (m Model) dapWideSelection(h, w int) (int, string) {
+	if h < 2 || m.dapConsoleActive() {
+		return -1, ""
+	}
+	var (
+		label string
+		row   int
+	)
+	switch m.dapFocus {
+	case 0:
+		if m.dapSelThread >= len(m.dapThreads) {
+			return -1, ""
+		}
+		label = threadLabel(m.dapThreads[m.dapSelThread])
+		row = 1 + m.dapSelThread - m.dapThreadWindow(h-1)
+	case 1:
+		if m.dapSelFrame >= len(m.dapFrames) {
+			return -1, ""
+		}
+		label = frameLabel(m.dapFrames[m.dapSelFrame])
+		row = 1 + m.dapSelFrame - m.dapFrameWindow(h-1)
+	default:
+		vars := m.dapCurrentVars()
+		if m.dapVarSel >= len(vars) {
+			return -1, ""
+		}
+		label = varLabel(vars[m.dapVarSel])
+		row = 1 + m.dapVarSel - m.dapVarWindow(h-1)
+	}
+	if row < 1 || row >= h {
+		return -1, ""
+	}
+	label = truncW(label, w)
+	if fill := w - len([]rune(label)); fill > 0 {
+		label += strings.Repeat(" ", fill)
+	}
+	return row, dapSelStyle.Render(label)
 }
 
 // dapThreadsCol renders the thread list (or the console backlog when the
@@ -182,15 +239,9 @@ func (m Model) dapThreadsCol(h, w int) []string {
 		}
 	}
 	for i := m.dapThreadWindow(h - 1); i < len(m.dapThreads) && len(rows) < h; i++ {
-		th := m.dapThreads[i]
-		rr := fmt.Sprintf("%d %s", th.ID, th.Name)
-		if strings.TrimSpace(rr) == "" {
-			rr = fmt.Sprintf("%d", th.ID)
-		}
-		if i == m.dapSelThread && m.dapFocus == 0 {
-			rr = dapSelStyle.Render(rr)
-		}
-		rows = append(rows, truncW(rr, w))
+		// The selected entry is drawn in full by dapWideSelection, so columns
+		// keep only their own styling.
+		rows = append(rows, truncW(threadLabel(m.dapThreads[i]), w))
 	}
 	for len(rows) < h {
 		rows = append(rows, "")
@@ -206,11 +257,7 @@ func (m Model) dapFramesCol(h, w int) []string {
 		rows = append(rows, dapDimStyle.Render(" —"))
 	}
 	for i := m.dapFrameWindow(h - 1); i < len(m.dapFrames) && len(rows) < h; i++ {
-		rs := frameLabel(m.dapFrames[i])
-		if i == m.dapSelFrame && m.dapFocus == 1 {
-			rs = dapSelStyle.Render(rs)
-		}
-		rows = append(rows, truncW(rs, w))
+		rows = append(rows, truncW(frameLabel(m.dapFrames[i]), w))
 	}
 	for len(rows) < h {
 		rows = append(rows, "")
@@ -232,27 +279,14 @@ func (m Model) dapVarsCol(h, w int) []string {
 	vars := m.dapCurrentVars()
 	for i := m.dapVarWindow(h - 1); i < len(vars) && len(rows) < h; i++ {
 		v := vars[i]
-		var rr string
+		rr := varLabel(v)
+		// The selected entry of the focused list is drawn in full by
+		// dapWideSelection, so columns keep only their dim/scope styling.
 		switch {
 		case v.isScope:
-			rr = "▸ " + v.name
-			if i == m.dapVarSel && m.dapFocus == 2 {
-				rr = dapSelStyle.Render(rr)
-			} else {
-				rr = dapScopeStyle.Render(rr)
-			}
+			rr = dapScopeStyle.Render(rr)
 		case v.ref > 0:
-			rr = "▸ " + v.name + " = " + v.val
-			if i == m.dapVarSel && m.dapFocus == 2 {
-				rr = dapSelStyle.Render(rr)
-			} else {
-				rr = dapDimStyle.Render("▸ ") + padVal(v.name, v.val)
-			}
-		default:
-			rr = "  " + v.name + " = " + v.val
-			if i == m.dapVarSel && m.dapFocus == 2 {
-				rr = dapSelStyle.Render(rr)
-			}
+			rr = dapDimStyle.Render("▸ ") + padVal(v.name, v.val)
 		}
 		rows = append(rows, truncW(rr, w))
 	}
@@ -275,6 +309,26 @@ func (m Model) dapInputRow(w int) string {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	return line
+}
+
+// threadLabel renders a thread row. dapThreadsCol and the full-width selected
+// row share it, so the two never disagree about the text.
+func threadLabel(th dap.Thread) string {
+	return strings.TrimRight(fmt.Sprintf("%d %s", th.ID, th.Name), " ")
+}
+
+// varLabel renders a variables-panel row: a scope header, an expandable value
+// (▸) or a plain one. Empty compound values read as {…} rather than as nothing,
+// which is what a selected row used to show.
+func varLabel(v dapVarRow) string {
+	switch {
+	case v.isScope:
+		return "▸ " + v.name
+	case v.ref > 0:
+		return "▸ " + padVal(v.name, v.val)
+	default:
+		return "  " + v.name + " = " + v.val
+	}
 }
 
 // frameLabel renders "file:line func" for a stack frame.
@@ -346,6 +400,53 @@ func (m *Model) clampDapConsoleScroll() {
 	if m.dapConsoleScroll < 0 {
 		m.dapConsoleScroll = 0
 	}
+}
+
+// dapScrollConsole walks the console backlog by d lines, positive towards older
+// output — the direction of ↑/PgUp and of a wheel-up notch.
+func (m *Model) dapScrollConsole(d int) {
+	if d == 0 {
+		return
+	}
+	m.dapConsoleScroll += d
+	m.clampDapConsoleScroll()
+}
+
+// dapConsoleToEdge scrolls the backlog to its oldest (top) or newest (bottom)
+// end; the title marks then show how much is hidden on the other side.
+func (m *Model) dapConsoleToEdge(top bool) {
+	if top {
+		m.dapConsoleScroll = len(m.dapConsole) // clamped back to the maximum
+	} else {
+		m.dapConsoleScroll = 0
+	}
+	m.clampDapConsoleScroll()
+}
+
+// dapConsoleMax is how many console lines are kept; older output is dropped.
+const dapConsoleMax = 1000
+
+// dapAppendConsole adds a line to the backlog. The scroll offset counts lines
+// back from the newest, so a reader scrolled back through the console stays on
+// the same lines while new output arrives — and while old lines fall off the
+// top of the kept window.
+func (m *Model) dapAppendConsole(line string) {
+	m.dapConsole = append(m.dapConsole, line)
+	dropped := 0
+	if len(m.dapConsole) > dapConsoleMax {
+		dropped = len(m.dapConsole) - dapConsoleMax
+		m.dapConsole = m.dapConsole[dropped:]
+	}
+	if m.dapConsoleScroll > 0 {
+		m.dapConsoleScroll += 1 - dropped
+		m.clampDapConsoleScroll()
+	}
+}
+
+// dapClearConsole empties the backlog and re-pins the view to the newest line.
+func (m *Model) dapClearConsole() {
+	m.dapConsole = nil
+	m.dapConsoleScroll = 0
 }
 
 // consoleScrollMark labels a scrolled console title with the amount of output

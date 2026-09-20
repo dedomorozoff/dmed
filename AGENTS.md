@@ -93,6 +93,17 @@ The code is split into focused internal packages:
   continue/next/stepIn/stepOut, threads/stackTrace/scopes/variables/evaluate,
   and event dispatch. The transport and protocol are adapter-agnostic; the
   Go/Delve wiring lives in `internal/editor/dap.go`.
+- `internal/dbgp/` — own DBGp client for engines that do not speak DAP
+  (Xdebug/PHP): NUL-framed XML over TCP, the `<init>` handshake, breakpoints,
+  run/step, stack/context/property variables, and eval, all exposed through the
+  same method surface as `internal/dap.Client` so the existing panel drives it.
+  Wire details that each cost a real bug and are easy to get wrong: every
+  engine → IDE document is framed `<byte length>\0<xml>\0`, documents declare
+  `iso-8859-1`, `breakpoint_set` returns its id as a response attribute,
+  failures arrive as an `<error>` child with no `success="0"`, and the `eval`
+  expression must be sent base64-encoded. `TestRealXdebugSession` drives a real
+  interpreter and skips when PHP/Xdebug is absent — keep it, the mock engine
+  cannot catch this class of drift. Set `DMED_DBGP_DEBUG=1` to trace the wire.
 - `internal/lsp/` — JSON-RPC 2.0 LSP client over stdin/stdout (diagnostics,
   definition, didOpen/didChange); wired into autocompletion and the gutter.
 - `internal/plugin/` — gopher-lua plugin framework (`dmed.*` API); plugins

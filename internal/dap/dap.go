@@ -3,7 +3,9 @@
 // It is transport-agnostic at the core (any io.ReadWriteCloser) with
 // ready-made launchers for stdio adapters, for Delve's reverse-connect mode
 // (`dlv dap --client-addr`), which the editor targets for Go, and for
-// connecting out to a listening DAP endpoint (Xdebug's PHP debug server).
+// connecting out to a listening DAP endpoint. Engines that do not speak DAP
+// at all — Xdebug's PHP, which uses DBGp — have their own client in
+// internal/dbgp.
 package dap
 
 import (
@@ -296,11 +298,11 @@ func StartReverse(adapter string, args []string, rootDir string, onEvent OnEvent
 
 // StartConnect dials a listening DAP endpoint and speaks DAP over the
 // resulting TCP connection. No adapter process is spawned: the debuggee (or a
-// server embedding it) is already running and accepts our connection — the
-// Xdebug 3 default layout, where Xdebug listens on port 9003 while PHP
-// executes. rootDir is unused (there is no child process) and kept only so
-// the signature reads like its siblings; the dial times out so a dead
-// endpoint never leaves the editor hanging.
+// server embedding it) is already running and accepts our connection.
+// rootDir is unused (there is no child process) and kept only so the
+// signature reads like its siblings; the dial times out so a dead endpoint
+// never leaves the editor hanging. This mode is for real DAP servers — Xdebug
+// does not implement DAP, so PHP is debugged through internal/dbgp instead.
 func StartConnect(addr string, rootDir string, onEvent OnEvent) (*Client, error) {
 	if strings.TrimSpace(addr) == "" {
 		return nil, fmt.Errorf("dap connect: empty address — set [debug] adapter_args to host:port")

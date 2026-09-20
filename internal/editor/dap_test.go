@@ -465,3 +465,192 @@ func TestDapRestartAfterEnded(t *testing.T) {
 	}
 	_ = cmd() // closes the stub; the adapter start fails fast on LookPath
 }
+
+// TestDapPanelPagingAndEdges covers the panel's navigation beyond one-step
+// moves: a page is a screenful that stops at the ends (it used to be a fixed
+// six entries that wrapped around, which loses the place in a long stack), and
+// Home/End jump straight to the ends.
+func TestDapPanelPagingAndEdges(t *testing.T) {
+	m := New()
+	m.width, m.height = 80, 24
+	m.dapOpen = true
+	m.dapFocus = 2
+	m.dapVarStack = [][]dapVarRow{{}}
+	for i := 0; i < 40; i++ {
+		m.dapVarStack[0] = append(m.dapVarStack[0], dapVarRow{name: fmt.Sprintf("v%d", i), val: "0"})
+	}
+	rows := m.dapListRows()
+	if rows < 2 {
+		t.Fatalf("test needs a multi-row panel, got %d rows", rows)
+	}
+
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyPgDown})
+	if m.dapVarSel != rows {
+		t.Fatalf("pgdown = %d, want one page (%d)", m.dapVarSel, rows)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyPgDown})
+	if m.dapVarSel != 2*rows {
+		t.Fatalf("second pgdown = %d, want %d", m.dapVarSel, 2*rows)
+	}
+	for i := 0; i < 20; i++ {
+		m = press(m, tea.KeyPressMsg{Code: tea.KeyPgDown})
+	}
+	if m.dapVarSel != 39 {
+		t.Fatalf("pgdown past the end = %d, want the last entry 39", m.dapVarSel)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyPgUp})
+	if m.dapVarSel != 39-rows {
+		t.Fatalf("pgup = %d, want %d", m.dapVarSel, 39-rows)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyHome})
+	if m.dapVarSel != 0 {
+		t.Fatalf("home = %d, want the first entry", m.dapVarSel)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnd})
+	if m.dapVarSel != 39 {
+		t.Fatalf("end = %d, want the last entry", m.dapVarSel)
+	}
+	n := m.dapListRows()
+	if start := m.dapVarWindow(n); start > 39 || 39 >= start+n {
+		t.Fatalf("window start = %d with %d rows: the selection must stay visible", start, n)
+	}
+}
+
+// TestDapPanelConsoleScrollKeys pins the keyboard scrolling of the console
+// peek: with the console column focused the arrows, pages and ends walk the
+// backlog (the offset counts lines back from the newest) instead of moving the
+// hidden thread selection.
+func TestDapPanelConsoleScrollKeys(t *testing.T) {
+	m := New()
+	m.width, m.height = 80, 24
+	m.dapOpen = true
+	m.dapFocus = 0
+	m.dapThreads = []dap.Thread{{ID: 1, Name: "main"}, {ID: 2, Name: "other"}}
+	for i := 0; i < 100; i++ {
+		m.dapAppendConsole(fmt.Sprintf("line %d", i))
+	}
+	m = press(m, tea.KeyPressMsg{Text: "l"})
+	if !m.dapConsolePeek {
+		t.Fatal("l must show the console")
+	}
+
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyUp})
+	if m.dapConsoleScroll != 1 {
+		t.Fatalf("↑ = offset %d, want 1 (older)", m.dapConsoleScroll)
+	}
+	if m.dapSelThread != 0 {
+		t.Fatalf("↑ must not move the thread selection, got %d", m.dapSelThread)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.dapConsoleScroll != 0 {
+		t.Fatalf("↓ = offset %d, want back to the newest", m.dapConsoleScroll)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyPgUp})
+	if want := m.dapListRows(); m.dapConsoleScroll != want {
+		t.Fatalf("pgup = offset %d, want one page (%d)", m.dapConsoleScroll, want)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyHome})
+	if want := len(m.dapConsole) - m.dapListRows(); m.dapConsoleScroll != want {
+		t.Fatalf("home = offset %d, want the oldest (%d)", m.dapConsoleScroll, want)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnd})
+	if m.dapConsoleScroll != 0 {
+		t.Fatalf("end = offset %d, want the newest", m.dapConsoleScroll)
+	}
+
+	// The wheel over the console column scrolls it in the same direction as ↑.
+	_ = m.handleMouseWheel(tea.MouseWheelMsg{X: 1, Y: m.dapPanelStartRow() + 2, Button: tea.MouseWheelUp})
+	if m.dapConsoleScroll != 1 {
+		t.Fatalf("wheel-up = offset %d, want 1 (older)", m.dapConsoleScroll)
+	}
+	_ = m.handleMouseWheel(tea.MouseWheelMsg{X: 1, Y: m.dapPanelStartRow() + 2, Button: tea.MouseWheelDown})
+	if m.dapConsoleScroll != 0 {
+		t.Fatalf("wheel-down = offset %d, want back to the newest", m.dapConsoleScroll)
+	}
+
+	m.dapClearConsole()
+	if len(m.dapConsole) != 0 || m.dapConsoleScroll != 0 {
+		t.Fatalf("clearing must empty the backlog, got %d lines, offset %d", len(m.dapConsole), m.dapConsoleScroll)
+	}
+}
+
+// TestDapConsoleScrollAnchor keeps a reader who scrolled back through the
+// console on the same lines while new output arrives: the offset counts from
+// the newest line, so an append has to compensate for it.
+func TestDapConsoleScrollAnchor(t *testing.T) {
+	m := New()
+	m.width, m.height = 80, 24
+	m.dapOpen = true
+	for i := 0; i < 50; i++ {
+		m.dapAppendConsole(fmt.Sprintf("line %d", i))
+	}
+	n := m.dapListRows()
+	m.dapConsoleScroll = 5
+	before, _, _ := m.dapConsoleWindow(n)
+	m.dapAppendConsole("newest output")
+	after, _, _ := m.dapConsoleWindow(n)
+	if len(before) == 0 || len(after) == 0 || before[0] != after[0] {
+		t.Fatalf("the console window moved while scrolled back: %q -> %q", before, after)
+	}
+}
+
+// TestDapPanelResizeKeys covers +/-: the panel grows and shrinks a row at a
+// time within what the terminal can spare, so a long stack or variable list can
+// be given more room than the automatic quarter of the screen.
+func TestDapPanelResizeKeys(t *testing.T) {
+	m := New()
+	m.width, m.height = 80, 24
+	m.dapOpen = true
+
+	base := m.debugPanelHeight()
+	m = press(m, tea.KeyPressMsg{Text: "+"})
+	if got := m.debugPanelHeight(); got != base+1 {
+		t.Fatalf("+ = %d rows, want %d", got, base+1)
+	}
+	// "=" is the same key on layouts where "+" needs Shift.
+	m = press(m, tea.KeyPressMsg{Text: "="})
+	if got := m.debugPanelHeight(); got != base+2 {
+		t.Fatalf("= = %d rows, want %d", got, base+2)
+	}
+	for i := 0; i < 100; i++ {
+		m = press(m, tea.KeyPressMsg{Text: "+"})
+	}
+	if got, max := m.debugPanelHeight(), m.height-dapPanelMinRows; got != max {
+		t.Fatalf("growth must stop at %d rows, got %d", max, got)
+	}
+	// A taller panel lists more entries of the same data.
+	tall := m.dapListRows()
+	for i := 0; i < 100; i++ {
+		m = press(m, tea.KeyPressMsg{Text: "-"})
+	}
+	if got := m.debugPanelHeight(); got != dapPanelMinRows {
+		t.Fatalf("shrink must stop at %d rows, got %d", dapPanelMinRows, got)
+	}
+	if short := m.dapListRows(); short >= tall {
+		t.Fatalf("a shorter panel must list fewer rows: %d -> %d", tall, short)
+	}
+}
+
+// TestDapPanelWideSelection pins the answer to "the data does not fit": the row
+// carrying the focused selection is drawn across the whole panel, so a value
+// longer than its column stays readable.
+func TestDapPanelWideSelection(t *testing.T) {
+	m := New()
+	m.width, m.height = 80, 24
+	m.dapOpen = true
+	m.dapFocus = 2
+	long := strings.Repeat("x", 60)
+	m.dapVarStack = [][]dapVarRow{{{isScope: true, name: "Locals"}, {name: "s", val: long}}}
+	m.dapVarSel = 1 // the value, not the scope header
+
+	if v := m.View().Content; !strings.Contains(v, "s = "+long) {
+		t.Fatalf("the selected value must be shown in full:\n%s", v)
+	}
+	// Unfocused, the same value stays clipped to its column: the full text is
+	// the wide row's doing.
+	m.dapFocus = 0
+	m.dapThreads = []dap.Thread{{ID: 1, Name: "main"}}
+	if v := m.View().Content; strings.Contains(v, long) {
+		t.Fatalf("an unfocused long value must stay clipped to its column:\n%s", v)
+	}
+}

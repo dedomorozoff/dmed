@@ -668,8 +668,9 @@ func (m *Model) dapWheel(dir, x int) tea.Cmd {
 	switch {
 	case x < threadW:
 		if m.dapConsolePeek {
-			m.dapConsoleScroll += dir
-			m.clampDapConsoleScroll()
+			// A wheel-up notch is dir == -1; the backlog walks towards older
+			// output, which dapScrollConsole counts as positive.
+			m.dapScrollConsole(-dir)
 			return nil
 		}
 		m.dapFocus = 0

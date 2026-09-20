@@ -374,8 +374,9 @@ type Model struct {
 	termStdin   io.WriteCloser
 	termCh      <-chan []string
 
-	// DAP debug panel (Delve)
-	dapClient             *dap.Client
+	// DAP debug panel (Delve) — the backend is a DAP client or the DBGp
+	// Xdebug client, either of which serves the same panel interface.
+	dapClient             debugBackend
 	dapCh                 chan dapEventMsg
 	dapOpen               bool
 	dapRunState           string
@@ -400,6 +401,7 @@ type Model struct {
 	dapFollowPending      bool // reveal the stopped location on the next Update
 	dapConsolePeek        bool
 	dapConsoleScroll      int // console lines scrolled back from the newest
+	dapPanelRows          int // panel height override; 0 = a quarter of the terminal
 	dapSupportsConfigDone bool
 	dapDeduced            *config.DebugConfig // language-detected [debug] for the live session
 
@@ -1517,11 +1519,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dapFollowMsg:
 		return m, m.handleDapFollowMsg()
 	case dapEvalMsg:
-		m.dapConsole = append(m.dapConsole, "> "+msg.expr)
+		m.dapAppendConsole("> " + msg.expr)
 		if msg.err != nil {
-			m.dapConsole = append(m.dapConsole, "! "+msg.err.Error())
+			m.dapAppendConsole("! " + msg.err.Error())
 		} else {
-			m.dapConsole = append(m.dapConsole, "= "+msg.out)
+			m.dapAppendConsole("= " + msg.out)
 		}
 	case dapBPSyncMsg:
 		if msg.err != nil {
