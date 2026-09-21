@@ -827,6 +827,7 @@ func AIPresets() []AIPreset {
 		{Name: "Groq", Kind: "openai", BaseURL: "https://api.groq.com", Model: "llama-3.3-70b-versatile", APIKey: true},
 		{Name: "LM Studio (local)", Kind: "openai", BaseURL: "http://localhost:1234"},
 		{Name: "vLLM (local)", Kind: "openai", BaseURL: "http://localhost:8000"},
+		{Name: "Unsloth (local)", Kind: "openai", BaseURL: "http://localhost:8000", APIKey: true},
 		{Name: "Custom", Kind: "openai", BaseURL: ""},
 	}
 }

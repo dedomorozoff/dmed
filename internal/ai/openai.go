@@ -12,7 +12,7 @@ import (
 )
 
 // openAIProvider talks to an OpenAI-compatible API (POST /v1/chat/completions, SSE).
-// Compatible with: OpenAI, DeepSeek, Groq, Together, vLLM, LM Studio, etc.
+// Compatible with: OpenAI, DeepSeek, Groq, Together, vLLM, LM Studio, Unsloth, etc.
 type openAIProvider struct {
 	url    string
 	model  string

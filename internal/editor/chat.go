@@ -916,7 +916,7 @@ func (m *Model) rebuildChatRows() {
 	}
 	if len(rows) == 0 {
 		add("hint", " AI works through presets: Ollama, OpenAI, DeepSeek,")
-		add("hint", " Groq, LM Studio, vLLM or any OpenAI-compatible server.")
+		add("hint", " Groq, LM Studio, vLLM, Unsloth or any OpenAI-compatible server.")
 		if m.chatModel == "" {
 			add("hint", " No model yet — quick fix: Ctrl+P → 'AI: Preferences',")
 			add("hint", " pick a provider, press t to test, Ctrl+S to save.")

@@ -23,6 +23,13 @@ func TestAIPresetsCoverBasics(t *testing.T) {
 			t.Fatalf("preset %q must use the bare origin, not a /v1 suffix", p.Name)
 		}
 	}
+	for _, p := range ps {
+		if p.Name == "Unsloth (local)" {
+			if p.Kind != "openai" || !p.APIKey || p.BaseURL != "http://localhost:8000" {
+				t.Fatalf("unsloth preset must speak openai with a key on localhost:8000, got %+v", p)
+			}
+		}
+	}
 }
 
 func TestResolvePreset(t *testing.T) {

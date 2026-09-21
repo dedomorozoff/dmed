@@ -43,7 +43,7 @@ AI agents can read, propose, and apply changes directly to your codebase — but
   model reported by the server is picked automatically
 - Built-in provider presets (wizard cycles them with `←`/`→`):
   **Ollama** (local, free), **OpenAI**, **DeepSeek**, **Groq**,
-  **LM Studio** (local), **vLLM** (local), or any OpenAI-compatible server
+  **LM Studio** (local), **vLLM** (local), **Unsloth** (local), or any OpenAI-compatible server
 - **First-time setup, three ways**:
   - `dmed setup-ai` — interactive CLI wizard (provider → key → test → saved)
   - In the editor: `Ctrl+P` → `AI: Preferences...` — pick a preset with
@@ -232,7 +232,7 @@ word_wrap = false           # wrap long lines to pane width (Alt+Z toggles)
 skipped_dirs = .git,node_modules,vendor
 
 [ai]
-provider = Ollama (local)   # wizard preset: Ollama (local) | OpenAI | DeepSeek | Groq | LM Studio (local) | vLLM (local) | Custom
+provider = Ollama (local)   # wizard preset: Ollama (local) | OpenAI | DeepSeek | Groq | LM Studio (local) | vLLM (local) | Unsloth (local) | Custom
                             # legacy values "ollama"/"openai" still work
 model =                      # empty = first model reported by the server
 ollama_url = http://localhost:11434   # base URL, no /v1 suffix (it is appended automatically)

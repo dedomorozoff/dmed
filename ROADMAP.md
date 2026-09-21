@@ -93,7 +93,7 @@ in the Makefile as insurance).
 ### M3 — AI v1
 - [x] Chat panel with streaming, file/selection context
       (`Alt+A` — right panel; backends — provider presets: local
-      Ollama, OpenAI, DeepSeek, Groq, LM Studio, vLLM; `DMED_PROVIDER`/
+      Ollama, OpenAI, DeepSeek, Groq, LM Studio, vLLM, Unsloth; `DMED_PROVIDER`/
       `DMED_API_KEY`/`DMED_MODEL`/`DMED_OLLAMA_URL` override settings;
       with an empty config the first model from the server is used; Enter —
       send, Esc — close, PgUp/PgDn — scroll, Ctrl+U — new thread with a hint
@@ -102,7 +102,7 @@ in the Makefile as insurance).
       (`Alt+I` — enter the instruction, Accept/Reject after streaming)
 - [x] Providers: Ollama (local) + OpenAI-compatible (SSE streaming).
       Config: `provider`, `model`, `api_key`, `ollama_url`.
-      Compatible with OpenAI, DeepSeek, Groq, Together, vLLM, LM Studio.
+      Compatible with OpenAI, DeepSeek, Groq, Together, vLLM, LM Studio, Unsloth.
 - [x] Chat with tools (native tool calling): the AI calls READ/SEARCH/RUN/EDIT
       via structured JSON functions (not text markers), results
       are returned to the dialog (loop up to 6 iterations). EDIT proposals are
@@ -187,7 +187,7 @@ in the Makefile as insurance).
 
 ### M6 — AI onboarding
 - [x] Provider presets in the AI: Preferences wizard (`←`/`→`): Ollama (local),
-      OpenAI, DeepSeek, Groq, LM Studio (local), vLLM (local), Custom — the
+      OpenAI, DeepSeek, Groq, LM Studio (local), vLLM (local), Unsloth (local), Custom — the
       choice fills in the base URL and model; the provider is stored as the
       human-readable preset label, old `ollama`/`openai` values are normalized
 - [x] Test button in the wizard (`t`/Enter): background polling of `Models()`
