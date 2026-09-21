@@ -271,6 +271,9 @@ func (c *Client) sendText(cmd string) error {
 	if dbgpDebug {
 		fmt.Fprintf(os.Stderr, "dbgp >> %s\n", cmd)
 	}
+	if c.conn == nil {
+		return fmt.Errorf("dbgp: not connected")
+	}
 	_, err := io.WriteString(c.conn, cmd+"\x00")
 	return err
 }
@@ -866,7 +869,9 @@ func (c *Client) Close() {
 	}
 	seq := c.Seq()
 	_ = c.sendText(fmt.Sprintf("stop -i %d", seq))
-	_ = c.conn.Close()
+	if c.conn != nil {
+		_ = c.conn.Close()
+	}
 	if c.ln != nil {
 		_ = c.ln.Close()
 	}
