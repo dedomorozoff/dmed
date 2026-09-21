@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
@@ -218,6 +220,7 @@ func TestGitCreateBranchOnUnbornRepoKeepsCurrentBranch(t *testing.T) {
 	}
 }
 
+// TestGitDiffBuffer verifies line-by-line diff against HEAD.
 func TestGitDiffBuffer(t *testing.T) {
 	dir, repo := initTestRepo(t)
 	f := filepath.Join(dir, "sample.txt")
@@ -235,5 +238,136 @@ func TestGitDiffBuffer(t *testing.T) {
 	}
 	if modDiff.Hunks[0].Type != DiffAdded {
 		t.Fatalf("expected DiffAdded hunk, got %v", modDiff.Hunks[0].Type)
+	}
+}
+
+func writeAndCommit(t *testing.T, repo *Repo, dir, file, content, author, msg string) {
+	t.Helper()
+	path := filepath.Join(dir, file)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Stage(path); err != nil {
+		t.Fatal(err)
+	}
+	r := repo.r
+	w, err := r.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = w.Commit(msg, &git.CommitOptions{
+		Author: &object.Signature{Name: author, Email: author + "@test.com", When: time.Now()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGitBlame(t *testing.T) {
+	dir, repo := initTestRepo(t)
+	// sample.txt from init has 3 lines by "tester". Append two more lines in a
+	// second commit by another author and blame the result.
+	writeAndCommit(t, repo, dir, "sample.txt", "line1\nline2\nline3\nline4\nline5\n", "alex", "second commit")
+
+	blame, err := repo.Blame(filepath.Join(dir, "sample.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blame) != 5 {
+		t.Fatalf("expected 5 blamed lines, got %d", len(blame))
+	}
+	for i := 0; i < 3; i++ {
+		if blame[i].Author != "tester" {
+			t.Fatalf("line %d author = %q, want tester", i+1, blame[i].Author)
+		}
+		if blame[i].Hash == "" {
+			t.Fatalf("line %d missing commit hash", i+1)
+		}
+	}
+	for i := 3; i < 5; i++ {
+		if blame[i].Author != "alex" {
+			t.Fatalf("line %d author = %q, want alex", i+1, blame[i].Author)
+		}
+	}
+	if blame[0].Hash == blame[3].Hash {
+		t.Fatal("different lines should come from different commits here")
+	}
+
+	// New untracked file has no commit yet: blame must return an error.
+	if _, err := repo.Blame(filepath.Join(dir, "missing.txt")); err == nil {
+		t.Fatal("blame of a non-existent file must fail")
+	}
+}
+
+func TestGitRemoteFetchPush(t *testing.T) {
+	dir, repo := initTestRepo(t)
+	_ = dir
+	if repo.HasRemote() {
+		t.Fatal("fresh repo must not report a remote")
+	}
+	if err := repo.Fetch(); err == nil {
+		t.Fatal("fetch without a remote must fail")
+	}
+	if err := repo.Push(); err == nil {
+		t.Fatal("push without a remote must fail")
+	}
+
+	// A bare repository acts as "origin" over a local file URL.
+	bare := t.TempDir()
+	if _, err := git.PlainInit(bare, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.r.CreateRemote(&config.RemoteConfig{Name: "origin", URLs: []string{bare}}); err != nil {
+		t.Fatal(err)
+	}
+	if !repo.HasRemote() {
+		t.Fatal("repo must report a remote now")
+	}
+
+	// Push the current branch (master) to the bare remote.
+	if err := repo.Push(); err != nil {
+		t.Fatalf("push failed: %v", err)
+	}
+
+	// Clone the bare repo, commit, and push so the remote moves forward.
+	cloneDir := t.TempDir()
+	clone, err := git.PlainClone(cloneDir, false, &git.CloneOptions{URL: bare})
+	if err != nil {
+		t.Fatalf("clone failed: %v", err)
+	}
+	w, err := clone.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(cloneDir, "sample.txt")
+	if err := os.WriteFile(f, []byte("remote change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Add("sample.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Commit("remote commit", &git.CommitOptions{
+		Author: &object.Signature{Name: "remote", Email: "remote@test.com", When: time.Now()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := clone.Push(&git.PushOptions{RemoteName: "origin"}); err != nil {
+		t.Fatalf("remote push failed: %v", err)
+	}
+
+	// The first repo fetches the updated origin/main.
+	if err := repo.Fetch(); err != nil {
+		t.Fatalf("fetch failed: %v", err)
+	}
+	remoteRef, err := repo.r.Reference(plumbing.NewRemoteReferenceName("origin", "master"), false)
+	if err != nil {
+		t.Fatalf("origin/master missing after fetch: %v", err)
+	}
+	head, err := clone.Head()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remoteRef.Hash() != head.Hash() {
+		t.Fatalf("origin/master = %s, want %s", remoteRef.Hash(), head.Hash())
 	}
 }

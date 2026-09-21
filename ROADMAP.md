@@ -88,6 +88,10 @@ in the Makefile as insurance).
         create a new branch (N → name → Enter).
   - [x] Git init (`i` in the git panel): initialize a repository if missing;
         action hints in the git panel's status line.
+  - [x] Fetch / push (`f` / `p` in the git panel, status mode): background
+        sync to/from `origin` (go-git, embedded credentials, idempotent).
+  - [x] Inline git blame (`Alt+B`): author · when annotations, right-aligned
+        per line like Zed; only on unchanged lines and when no wrap.
 - [x] Internal event bus (`internal/events`) (buffers ← watchers ← agents)
 
 ### M3 — AI v1

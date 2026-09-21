@@ -63,6 +63,8 @@ DMED_PROVIDER=DeepSeek DMED_API_KEY=sk-... DMED_MODEL=deepseek-chat dmed
   - Gutter indicators: added `+`, modified `~`, deleted `_`
   - Side-by-side diff view vs HEAD
   - Stage/unstage/commit from the Git panel (`Ctrl+G`)
+  - Fetch / push to `origin` from the Git panel (`f` / `p`, in the status line)
+  - Inline per-line blame (`Alt+B`): who changed each line and when, like Zed
   - Hunk navigation (`Alt+[` / `Alt+]`)
 
 ### Developer Tools
@@ -135,6 +137,7 @@ dmed a.txt b.txt               # multiple files → tabs
 | `Ctrl+Y` / `Ctrl+D` | Delete / duplicate line |
 | `Ctrl+/` | Toggle comment |
 | `Alt+Z` | Toggle word wrap |
+| `Alt+B` | Toggle inline git blame (author · when per line) |
 | `Alt+↑` / `Alt+↓` | Move line up / down |
 | `Alt+D` | Add multi-cursor at next word occurrence |
 | `Alt+Click` | Add cursor at click position |

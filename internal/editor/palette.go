@@ -42,6 +42,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "git_diff", title: "cmd.git_diff_t", desc: "cmd.git_diff_d", action: func(m *Model) tea.Cmd { m.openDiffView(); return nil }},
 		{id: "git_next", title: "cmd.git_next_t", desc: "cmd.git_next_d", action: func(m *Model) tea.Cmd { m.jumpHunk(1); return nil }},
 		{id: "git_prev", title: "cmd.git_prev_t", desc: "cmd.git_prev_d", action: func(m *Model) tea.Cmd { m.jumpHunk(-1); return nil }},
+		{id: "git_blame", title: "cmd.git_blame_t", desc: "cmd.git_blame_d", action: func(m *Model) tea.Cmd { return m.toggleBlame() }},
 		{id: "split_v", title: "cmd.split_v_t", desc: "cmd.split_v_d", action: func(m *Model) tea.Cmd { m.splitVert(); return nil }},
 		{id: "split_h", title: "cmd.split_h_t", desc: "cmd.split_h_d", action: func(m *Model) tea.Cmd { m.splitHoriz(); return nil }},
 		{id: "pane_focus", title: "cmd.pane_focus_t", desc: "cmd.pane_focus_d", action: func(m *Model) tea.Cmd { m.focusOtherPane(); return nil }},

@@ -37,8 +37,9 @@ type tab struct {
 	syntaxText   string
 	diffCached   vcs.FileDiff
 	diffText     string
-	lineEnding   string // "lf" or "crlf"
-	encoding     string // "utf-8", "utf-16le", "utf-16be", "latin-1"
+	blame        []vcs.BlameLine // git blame of HEAD lines; nil = not computed
+	lineEnding   string          // "lf" or "crlf"
+	encoding     string          // "utf-8", "utf-16le", "utf-16be", "latin-1"
 	wrapSegs     []wrapSeg
 	wrapW        int
 	wrapTabW     int
@@ -344,6 +345,9 @@ type Model struct {
 	gitLogEntries []vcs.LogEntry
 	gitLogSel     int
 	gitLogOffset  int
+
+	// Inline git blame annotations (Alt+B)
+	blameOn bool
 
 	// Git branch management
 	gitBranchIn     []rune
@@ -1379,6 +1383,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case AgentRefreshMsg:
 		return m, waitForAgentRefresh(m.agentCh)
+	case gitTransferMsg:
+		if msg.err != "" {
+			m.msg = m.t("git.transfer_error", m.t("git.op_"+msg.op), msg.err)
+			return m, nil
+		}
+		m.msg = m.t("git.transfer_done", m.t("git.op_"+msg.op))
+		if m.gitOpen {
+			m.refreshGitFiles()
+		}
+	case gitBlameMsg:
+		if msg.err != "" {
+			m.msg = m.t("git.blame_error", msg.err)
+			m.blameOn = false
+			return m, nil
+		}
+		for i := range m.tabs {
+			t := &m.tabs[i]
+			abs, _ := filepath.Abs(t.path)
+			if abs == msg.path {
+				t.blame = msg.lines
+				if len(msg.lines) == 0 {
+					m.msg = m.t("msg.blame_none")
+				} else {
+					m.msg = m.t("msg.blame_on", len(msg.lines))
+				}
+				break
+			}
+		}
 	case tea.MouseClickMsg:
 		cmd := m.handleMouseClick(msg)
 		return m, cmd
@@ -1937,6 +1969,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.toggleComment()
 	case "alt+z":
 		m.toggleWordWrap()
+	case "alt+b":
+		return m.toggleBlame()
 	case "ctrl+z":
 		if m.cur().buf.Undo() {
 			m.msg = ""

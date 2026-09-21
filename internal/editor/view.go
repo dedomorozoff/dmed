@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -44,6 +45,7 @@ var (
 	diffModBg       = lipgloss.NewStyle().Background(lipgloss.Color("58"))
 	selectionStyle  = lipgloss.NewStyle().Background(lipgloss.Color("60")).Foreground(lipgloss.Color("255"))
 	ghostStyle      = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("243"))
+	blameStyle      = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("244"))
 )
 
 type helpEntry struct {
@@ -62,6 +64,7 @@ var helpEntries = []helpEntry{
 	{"Ctrl+H", "help.replace"},
 	{"Ctrl+L", "help.goto_line"},
 	{"Alt+Z", "help.word_wrap"},
+	{"Alt+B", "help.blame"},
 	{"Ctrl+G", "help.git_panel"},
 	{"Ctrl+Alt+D", "help.debug"},
 	{"F4 / F5 / F6 / F7 / S+F5 / S+F7", "help.debug_keys"},
@@ -656,9 +659,69 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 			rows[row] = gutStr + m.renderLineWrap(p, t, ln, segStart, segEnd, active, syntaxLines)
 		} else {
 			rows[row] = gutStr + m.renderLine(p, t, ln, contentW, active, syntaxLines)
+			rows[row] = m.appendBlame(rows[row], t, diff, ln, contentW)
 		}
 	}
 	return rows
+}
+
+// appendBlame right-aligns a "author · when" git blame annotation on a row.
+// It only annotates unchanged lines (buffer line == HEAD line) so the label
+// stays truthful, and only when there is room on the row.
+func (m Model) appendBlame(row string, t *tab, diff vcs.FileDiff, ln, contentW int) string {
+	if !m.blameOn || t.blame == nil {
+		return row
+	}
+	if ln >= len(diff.Lines) || diff.Lines[ln] != vcs.DiffNone || ln >= len(t.blame) {
+		return row
+	}
+	lab := blameLabel(t.blame[ln])
+	labW := lipgloss.Width(lab)
+	if labW < 1 {
+		return row
+	}
+	rowW := lipgloss.Width(row)
+	pad := contentW - rowW - labW
+	if pad < 2 {
+		return row
+	}
+	return row + strings.Repeat(" ", pad) + blameStyle.Render(lab)
+}
+
+// blameLabel formats one blame line as "author · when".
+func blameLabel(b vcs.BlameLine) string {
+	author := b.Author
+	if i := strings.IndexAny(author, "<"); i >= 0 {
+		author = strings.TrimSpace(author[:i])
+	}
+	if author == "" {
+		author = "?"
+	}
+	if len(author) > 12 {
+		author = author[:12]
+	}
+	return author + " · " + relWhen(b.Date)
+}
+
+// relWhen renders a time as a compact relative human string.
+func relWhen(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < 0:
+		return "now"
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	case d < 365*24*time.Hour:
+		return fmt.Sprintf("%dmo", int(d.Hours()/(24*30)))
+	default:
+		return fmt.Sprintf("%dy", int(d.Hours()/(24*365)))
+	}
 }
 
 // renderLineWrap renders one wrap segment (expanded rune range [segStart,
