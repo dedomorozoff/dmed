@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"io"
 	"net"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -245,7 +246,9 @@ func TestBreakpointURIRoundTrip(t *testing.T) {
 	if u := pathToURI(`C:\proj\my file.php`); u != "file:///C:/proj/my%20file.php" {
 		t.Errorf("pathToURI = %q", u)
 	}
-	if p := uriToPath("file:///C:/proj/my%20file.php"); p != `C:\proj\my file.php` {
+	// uriToPath returns the host's native separator (C:\proj\... on Windows,
+	// C:/proj/... elsewhere); compare slash-normalized.
+	if p := uriToPath("file:///C:/proj/my%20file.php"); filepath.ToSlash(p) != "C:/proj/my file.php" {
 		t.Errorf("uriToPath = %q", p)
 	}
 }
@@ -314,7 +317,7 @@ func TestClientLifecycle(t *testing.T) {
 	if err != nil || len(frames) != 2 {
 		t.Fatalf("StackTrace = %v, %v", frames, err)
 	}
-	if frames[0].Line != 7 || frames[0].Name != "{}" || frames[0].Path != `C:\proj\index.php` {
+	if frames[0].Line != 7 || frames[0].Name != "{}" || filepath.ToSlash(frames[0].Path) != "C:/proj/index.php" {
 		t.Errorf("frame0 = %+v", frames[0])
 	}
 
@@ -365,7 +368,7 @@ func TestClientLifecycle(t *testing.T) {
 		t.Errorf("output = %+v", got)
 	}
 	stop := getEvent(dap.EventStopped)
-	if stop.SourcePath != `C:\proj\index.php` || stop.Line != 7 || stop.Reason != "breakpoint" {
+	if filepath.ToSlash(stop.SourcePath) != "C:/proj/index.php" || stop.Line != 7 || stop.Reason != "breakpoint" {
 		t.Errorf("stopped = %+v", stop)
 	}
 

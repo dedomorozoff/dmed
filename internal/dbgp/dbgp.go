@@ -593,20 +593,31 @@ func (c *Client) ConfigureDone() error {
 	return c.continueCmd("run")
 }
 
+// isWindowsDrivePath reports whether p is an absolute Windows-style path
+// (X:\... or X:/...). It is checked on every host so URI round trips stay
+// deterministic when tests or remote engines hand out drive-letter paths.
+func isWindowsDrivePath(p string) bool {
+	if len(p) < 3 || p[1] != ':' {
+		return false
+	}
+	c := p[0]
+	return (c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z') && (p[2] == '\\' || p[2] == '/')
+}
+
 // pathToURI converts a local path to the file:// URI Xdebug matches
 // breakpoints against (file:///C:/x.php or file:///home/x.php).
 func pathToURI(p string) string {
-	abs, err := filepath.Abs(p)
-	if err != nil {
-		abs = p
-	}
-	u := "file:///"
-	if vol := filepath.VolumeName(abs); vol != "" {
-		u = "file:///" + filepath.ToSlash(abs)
+	s := p
+	if isWindowsDrivePath(p) {
+		s = strings.ReplaceAll(p, "\\", "/")
 	} else {
-		u += filepath.ToSlash(abs)
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			abs = p
+		}
+		s = filepath.ToSlash(abs)
 	}
-	return strings.ReplaceAll(u, " ", "%20")
+	return "file:///" + strings.ReplaceAll(s, " ", "%20")
 }
 
 // uriToPath converts a file:// URI back to a local path.
