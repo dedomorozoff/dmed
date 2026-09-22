@@ -253,6 +253,7 @@ func (t *tab) getDiff(repo *vcs.Repo) vcs.FileDiff {
 type Model struct {
 	root       string
 	cfg        config.Config
+	g          glyphSet // active render glyphs (unicode or ASCII fallback)
 	tr         i18n.Translator
 	plugins    *plugin.Manager
 	lspClient  *lsp.Client
@@ -623,8 +624,9 @@ func controlByteKey(r rune, mod tea.KeyMod) tea.KeyPressMsg {
 
 func New(paths ...string) Model {
 	fe := make(chan string, 16)
-	m := Model{
-		width:                 80,
+m := Model{
+		g:                    unicodeGlyphs,
+		width:                80,
 		height:                24,
 		expanded:              map[string]bool{},
 		fileEvents:            fe,

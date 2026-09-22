@@ -313,17 +313,17 @@ func (m Model) agentPanel(h int) []string {
 		t := tasks[i]
 		sel := i == m.agentSel
 
-		label := agentStatusLabel(t.Status)
-		title := fitPath(t.Prompt, gitPanelWidth-10)
+		label := m.agentStatusLabel(t.Status)
+		title := m.fitPath(t.Prompt, gitPanelWidth-10)
 		line := " " + label + " " + title
 
 		var progress string
 		if t.Status == agent.StatusRunning {
-			progress = " " + progressBar(t.Progress, 4)
+			progress = " " + m.progressBar(t.Progress, 4)
 		} else if t.Status == agent.StatusFailed {
 			progress = " !"
 		} else if t.Status == agent.StatusReview {
-			progress = " ▶"
+			progress = " " + m.g.stop
 		}
 		line += progress
 		pad := gitPanelWidth - 1 - lipgloss.Width(line)
@@ -343,27 +343,27 @@ func (m Model) agentPanel(h int) []string {
 	return rows
 }
 
-func agentStatusLabel(s agent.Status) string {
+func (m Model) agentStatusLabel(s agent.Status) string {
 	switch s {
 	case agent.StatusQueued:
 		return "Q"
 	case agent.StatusRunning:
 		return "R"
 	case agent.StatusReview:
-		return "▶"
+		return m.g.stop
 	case agent.StatusApplied:
 		return "A"
 	case agent.StatusDone:
-		return "✓"
+		return m.g.check
 	case agent.StatusFailed:
 		return "!"
 	case agent.StatusCancelled:
-		return "×"
+		return m.g.cross
 	}
 	return "?"
 }
 
-func progressBar(p float32, width int) string {
+func (m Model) progressBar(p float32, width int) string {
 	if p < 0 {
 		p = 0
 	}
@@ -371,7 +371,7 @@ func progressBar(p float32, width int) string {
 		p = 1
 	}
 	filled := int(p * float32(width))
-	return "[" + strings.Repeat("█", filled) + strings.Repeat("·", width-filled) + "]"
+	return "[" + strings.Repeat(m.g.progFull, filled) + strings.Repeat(m.g.progEmpty, width-filled) + "]"
 }
 
 // agentPromptLine renders the bottom input line while entering a new task.
@@ -620,7 +620,7 @@ func (m Model) agentReviewBottom() string {
 	if task != nil && m.agentReviewChange < len(task.Changes) {
 		path = task.Changes[m.agentReviewChange].Path
 	}
-	title := " Agent diff: " + fitPath(path, 30)
+	title := " Agent diff: " + m.fitPath(path, 30)
 	if task != nil && len(task.Changes) > 1 {
 		title += fmt.Sprintf(" (%d/%d)", m.agentReviewChange+1, len(task.Changes))
 	}

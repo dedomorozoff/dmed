@@ -822,7 +822,7 @@ func (m *Model) chatReviewBottom() string {
 	if len(m.chatPendingChanges) > 1 {
 		allHint = "  a:all"
 	}
-	line := statusHiStyle.Render(" AI edit "+multi+fitPath(name, 24)) +
+	line := statusHiStyle.Render(" AI edit "+multi+m.fitPath(name, 24)) +
 		hintStyle.Render(fmt.Sprintf(" +%d ~%d -%d", added, modified, deleted)) +
 		hintStyle.Render("   y:apply"+allHint+"  n:discard"+tabHint(m.chatPendingChanges))
 	fill := m.width - lipgloss.Width(line)
@@ -895,7 +895,7 @@ func (m *Model) rebuildChatRows() {
 					addText(" ai", "label-ai", "ai", msg.Content)
 				}
 				for _, tc := range msg.ToolCalls {
-					add("label-tool", " ⛏ "+tc.Name+" "+toolArgSummary(tc))
+					add("label-tool", " "+m.g.iconTool+" "+tc.Name+" "+toolArgSummary(tc))
 				}
 				add("hint", "")
 			} else {
@@ -932,8 +932,8 @@ func (m *Model) rebuildChatRows() {
 // addToolResultRow renders a tool result as a compact card instead of dumping
 // the raw output (which is still sent to the model as context).
 func (m Model) addToolResultRow(rows *[]chatRow, add func(string, string), msg ai.Message, inner int) {
-	add("label-tool", " ⛏ "+msg.ToolName)
-	for _, l := range compactLines(msg.Content, inner, 6) {
+	add("label-tool", " "+m.g.iconTool+" "+msg.ToolName)
+	for _, l := range m.compactLines(msg.Content, inner, 6) {
 		add("tool", l)
 	}
 	add("hint", "")
@@ -941,7 +941,7 @@ func (m Model) addToolResultRow(rows *[]chatRow, add func(string, string), msg a
 
 // compactLines keeps the first few lines of a tool result and caps line
 // length so a READ or RUN dump never floods the chat panel.
-func compactLines(s string, w, maxLines int) []string {
+func (m Model) compactLines(s string, w, maxLines int) []string {
 	if w < 1 {
 		w = 1
 	}
@@ -952,11 +952,11 @@ func compactLines(s string, w, maxLines int) []string {
 	out := make([]string, 0, maxLines+1)
 	for i, ln := range lines {
 		if i >= maxLines {
-			out = append(out, " … ("+strconv.Itoa(len(lines)-maxLines)+" more lines)")
+			out = append(out, " "+m.g.ellipsis+" ("+strconv.Itoa(len(lines)-maxLines)+" more lines)")
 			break
 		}
 		if r := []rune(ln); len(r) > w {
-			ln = string(r[:w]) + "…"
+			ln = string(r[:w]) + m.g.ellipsis
 		}
 		out = append(out, ln)
 	}

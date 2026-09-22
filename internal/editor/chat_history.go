@@ -107,7 +107,7 @@ func (m *Model) saveChatThread() {
 		}
 	} else {
 		m.chatThreads = append([]chatThread{{
-			Title:   chatThreadTitle(msgs),
+			Title:   m.chatThreadTitle(msgs),
 			Model:   m.chatModel,
 			Msgs:    msgs,
 			Updated: time.Now(),
@@ -118,14 +118,14 @@ func (m *Model) saveChatThread() {
 }
 
 // chatThreadTitle derives a thread title from the first user message.
-func chatThreadTitle(msgs []ai.Message) string {
+func (m Model) chatThreadTitle(msgs []ai.Message) string {
 	for _, msg := range msgs {
 		if msg.Role != "user" {
 			continue
 		}
 		t := strings.Join(strings.Fields(msg.Content), " ")
 		if r := []rune(t); len(r) > 48 {
-			t = string(r[:48]) + "…"
+			t = string(r[:48]) + m.g.ellipsis
 		}
 		return t
 	}
@@ -202,7 +202,6 @@ func (m *Model) chatHistoryPrev() {
 	}
 	m.chatIn = []rune(m.chatPrompts[m.chatPromptIdx])
 }
-
 
 // clearChatHistory wipes all persisted threads and prompts (deletes the
 // history file), resets the conversation and disarms any pending clear

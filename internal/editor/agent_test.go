@@ -57,6 +57,7 @@ func TestAgentPromptEscDiscards(t *testing.T) {
 }
 
 func TestAgentStatusLabels(t *testing.T) {
+	m := New()
 	for s, want := range map[agent.Status]string{
 		agent.StatusQueued:    "Q",
 		agent.StatusRunning:   "R",
@@ -66,17 +67,18 @@ func TestAgentStatusLabels(t *testing.T) {
 		agent.StatusFailed:    "!",
 		agent.StatusCancelled: "×",
 	} {
-		if got := agentStatusLabel(s); got != want {
+		if got := m.agentStatusLabel(s); got != want {
 			t.Fatalf("label(%s) = %q, want %q", s, got, want)
 		}
 	}
 }
 
 func TestProgressBar(t *testing.T) {
-	if got := progressBar(0.5, 4); got != "[██··]" {
+	m := New()
+	if got := m.progressBar(0.5, 4); got != "[██··]" {
 		t.Fatalf("progressBar(0.5,4) = %q", got)
 	}
-	if got := progressBar(1, 4); got != "[████]" {
+	if got := m.progressBar(1, 4); got != "[████]" {
 		t.Fatalf("progressBar(1,4) = %q", got)
 	}
 }

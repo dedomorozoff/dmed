@@ -120,6 +120,10 @@ type UIConfig struct {
 	TreeWidth    int
 	ChatWidthPct int
 	Lang         string
+	// Ascii controls glyph rendering on terminals that cannot display the
+	// Unicode UI safely: "auto" (default) detects, "on" forces ASCII,
+	// "off" forces Unicode.
+	Ascii string
 }
 
 // PluginsConfig configures the remote plugin store. Plugins are listed and
@@ -165,6 +169,7 @@ func Defaults() Config {
 			TreeWidth:    25,
 			ChatWidthPct: 40,
 			Lang:         "en",
+			Ascii:        "auto",
 		},
 		Plugins: PluginsConfig{
 			Repo:   "dedomorozoff/dmed",
@@ -441,6 +446,16 @@ func loadFile(path string, cfg *Config) {
 		}
 		if v, ok := s["lang"]; ok {
 			cfg.UI.Lang = v
+		}
+		if v, ok := s["ascii"]; ok {
+			switch strings.ToLower(v) {
+			case "on", "1", "true", "yes":
+				cfg.UI.Ascii = "on"
+			case "off", "0", "false", "no":
+				cfg.UI.Ascii = "off"
+			case "auto":
+				cfg.UI.Ascii = "auto"
+			}
 		}
 	}
 

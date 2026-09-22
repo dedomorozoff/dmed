@@ -142,7 +142,7 @@ func (m Model) dapVarWindow(n int) int {
 // column, so long frame paths and variable values stay readable.
 func (m Model) dapColumns(h, w int) []string {
 	threadW, frameW, varW := m.dapColumnWidths(w)
-	sep := dapColSepStyle.Render("│")
+	sep := dapColSepStyle.Render(m.g.vline)
 	left := m.dapThreadsCol(h, threadW)
 	middle := m.dapFramesCol(h, frameW)
 	right := m.dapVarsCol(h, varW)
@@ -195,13 +195,13 @@ func (m Model) dapWideSelection(h, w int) (int, string) {
 		if m.dapVarSel >= len(vars) {
 			return -1, ""
 		}
-		label = varLabel(vars[m.dapVarSel])
+		label = m.varLabel(vars[m.dapVarSel])
 		row = 1 + m.dapVarSel - m.dapVarWindow(h-1)
 	}
 	if row < 1 || row >= h {
 		return -1, ""
 	}
-	label = truncW(label, w)
+	label = m.truncW(label, w)
 	if fill := w - len([]rune(label)); fill > 0 {
 		label += strings.Repeat(" ", fill)
 	}
@@ -218,12 +218,12 @@ func (m Model) dapThreadsCol(h, w int) []string {
 		if mark := consoleScrollMark(above, below); mark != "" {
 			title = " console " + mark + " "
 		}
-		rows = append(rows, dapTitleStyle.Render(truncW(title, w)))
+		rows = append(rows, dapTitleStyle.Render(m.truncW(title, w)))
 		if len(m.dapConsole) == 0 {
 			rows = append(rows, dapDimStyle.Render(" no output yet"))
 		}
 		for _, l := range lines {
-			rows = append(rows, truncW(l, w))
+			rows = append(rows, m.truncW(l, w))
 		}
 		for len(rows) < h {
 			rows = append(rows, "")
@@ -235,13 +235,13 @@ func (m Model) dapThreadsCol(h, w int) []string {
 		if m.dapRunState == dapIdle {
 			rows = append(rows, dapDimStyle.Render(" not running — F5"))
 		} else {
-			rows = append(rows, dapDimStyle.Render(" loading…"))
+			rows = append(rows, dapDimStyle.Render(" loading"+m.g.ellipsis))
 		}
 	}
 	for i := m.dapThreadWindow(h - 1); i < len(m.dapThreads) && len(rows) < h; i++ {
 		// The selected entry is drawn in full by dapWideSelection, so columns
 		// keep only their own styling.
-		rows = append(rows, truncW(threadLabel(m.dapThreads[i]), w))
+		rows = append(rows, m.truncW(threadLabel(m.dapThreads[i]), w))
 	}
 	for len(rows) < h {
 		rows = append(rows, "")
@@ -257,7 +257,7 @@ func (m Model) dapFramesCol(h, w int) []string {
 		rows = append(rows, dapDimStyle.Render(" —"))
 	}
 	for i := m.dapFrameWindow(h - 1); i < len(m.dapFrames) && len(rows) < h; i++ {
-		rows = append(rows, truncW(frameLabel(m.dapFrames[i]), w))
+		rows = append(rows, m.truncW(frameLabel(m.dapFrames[i]), w))
 	}
 	for len(rows) < h {
 		rows = append(rows, "")
@@ -271,7 +271,7 @@ func (m Model) dapVarsCol(h, w int) []string {
 	rows = append(rows, dapTitleStyle.Render(" variables "))
 	if len(m.dapVarStack) == 0 {
 		if m.dapRunState == dapStopped {
-			rows = append(rows, dapDimStyle.Render(" loading…"))
+			rows = append(rows, dapDimStyle.Render(" loading"+m.g.ellipsis))
 		} else {
 			rows = append(rows, dapDimStyle.Render(" —"))
 		}
@@ -279,16 +279,16 @@ func (m Model) dapVarsCol(h, w int) []string {
 	vars := m.dapCurrentVars()
 	for i := m.dapVarWindow(h - 1); i < len(vars) && len(rows) < h; i++ {
 		v := vars[i]
-		rr := varLabel(v)
+		rr := m.varLabel(v)
 		// The selected entry of the focused list is drawn in full by
 		// dapWideSelection, so columns keep only their dim/scope styling.
 		switch {
 		case v.isScope:
 			rr = dapScopeStyle.Render(rr)
 		case v.ref > 0:
-			rr = dapDimStyle.Render("▸ ") + padVal(v.name, v.val)
+			rr = dapDimStyle.Render(m.g.expand+" ") + m.padVal(v.name, v.val)
 		}
-		rows = append(rows, truncW(rr, w))
+		rows = append(rows, m.truncW(rr, w))
 	}
 	for len(rows) < h {
 		rows = append(rows, "")
@@ -320,12 +320,12 @@ func threadLabel(th dap.Thread) string {
 // varLabel renders a variables-panel row: a scope header, an expandable value
 // (▸) or a plain one. Empty compound values read as {…} rather than as nothing,
 // which is what a selected row used to show.
-func varLabel(v dapVarRow) string {
+func (m Model) varLabel(v dapVarRow) string {
 	switch {
 	case v.isScope:
-		return "▸ " + v.name
+		return m.g.expand + " " + v.name
 	case v.ref > 0:
-		return "▸ " + padVal(v.name, v.val)
+		return m.g.expand + " " + m.padVal(v.name, v.val)
 	default:
 		return "  " + v.name + " = " + v.val
 	}
@@ -346,14 +346,14 @@ func frameLabel(f dap.StackFrame) string {
 	return loc
 }
 
-func padVal(name, val string) string {
+func (m Model) padVal(name, val string) string {
 	if val == "" {
-		val = "{…}"
+		val = "{" + m.g.ellipsis + "}"
 	}
 	return name + " = " + val
 }
 
-func truncW(s string, w int) string {
+func (m Model) truncW(s string, w int) string {
 	r := []rune(s)
 	if len(r) > w {
 		return string(r[:w])

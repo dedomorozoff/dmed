@@ -259,18 +259,18 @@ func (m Model) View() tea.View {
 	} else if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0 {
 		// Inline diff preview: show side-by-side diff of selected file/commit
 		// in the editor area while the git panel is open.
-		diffRows := renderSideBySide(m.diffHeadLines, m.diffRightLines, m.diffRows, m.diffOffsetY, m.diffOffsetX, m.editorAreaWidth(), h, m.diffHeadSyntax, m.diffRightSyntax)
+		diffRows := m.renderSideBySide(m.diffHeadLines, m.diffRightLines, m.diffRows, m.diffOffsetY, m.diffOffsetX, m.editorAreaWidth(), h, m.diffHeadSyntax, m.diffRightSyntax)
 		rows = append(rows, m.composeSidebar(diffRows)...)
 	} else if m.aiReviewMode {
-		rows = append(rows, renderSideBySide(m.aiReviewLeft, m.aiReviewRight, m.aiReviewRows, m.aiReviewOffY, m.aiReviewOffX, m.width, h, nil, nil)...)
+		rows = append(rows, m.renderSideBySide(m.aiReviewLeft, m.aiReviewRight, m.aiReviewRows, m.aiReviewOffY, m.aiReviewOffX, m.width, h, nil, nil)...)
 	} else if m.aiFixReviewMode {
-		rows = append(rows, renderSideBySide(m.aiFixReviewLeft, m.aiFixReviewRight, m.aiFixReviewRows, m.aiFixReviewOffY, m.aiFixReviewOffX, m.width, h, nil, nil)...)
+		rows = append(rows, m.renderSideBySide(m.aiFixReviewLeft, m.aiFixReviewRight, m.aiFixReviewRows, m.aiFixReviewOffY, m.aiFixReviewOffX, m.width, h, nil, nil)...)
 	} else if m.agentReviewMode {
-		rows = append(rows, renderSideBySide(m.agentReviewLeft, m.agentReviewRight, m.agentReviewRows, m.agentReviewOffY, m.agentReviewOffX, m.width, h, nil, nil)...)
+		rows = append(rows, m.renderSideBySide(m.agentReviewLeft, m.agentReviewRight, m.agentReviewRows, m.agentReviewOffY, m.agentReviewOffX, m.width, h, nil, nil)...)
 	} else if m.chatReviewMode {
-		rows = append(rows, renderSideBySide(m.chatReviewLeft, m.chatReviewRight, m.chatReviewRows, m.chatReviewOffY, m.chatReviewOffX, m.width, h, nil, nil)...)
+		rows = append(rows, m.renderSideBySide(m.chatReviewLeft, m.chatReviewRight, m.chatReviewRows, m.chatReviewOffY, m.chatReviewOffX, m.width, h, nil, nil)...)
 	} else if m.conflictOpen && len(m.conflictRows) > 0 {
-		rows = append(rows, renderSideBySide(m.conflictLeftLines, m.conflictRightLines, m.conflictRows, m.conflictOffY, m.conflictOffX, m.width, h, nil, nil)...)
+		rows = append(rows, m.renderSideBySide(m.conflictLeftLines, m.conflictRightLines, m.conflictRows, m.conflictOffY, m.conflictOffX, m.width, h, nil, nil)...)
 	} else if m.aiCfgOpen {
 		rows = append(rows, m.aiSettingsPanel(h)...)
 	} else if m.dapCfgOpen {
@@ -422,7 +422,7 @@ func (m Model) editorRows(h int) []string {
 			sepColor = "61" // highlight left pane separator
 		}
 		sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(sepColor))
-		sep := sepStyle.Render("│")
+		sep := sepStyle.Render(m.g.vline)
 		for row := 0; row < ch; row++ {
 			combined[row] = padTo(left[row], w0) + sep + padTo(right[row], w1)
 		}
@@ -449,7 +449,7 @@ func (m Model) editorRows(h int) []string {
 		sepColor = "61" // highlight top pane separator
 	}
 	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(sepColor))
-	sep := sepStyle.Render(strings.Repeat("─", m.editorAreaWidth()))
+	sep := sepStyle.Render(strings.Repeat(m.g.hline, m.editorAreaWidth()))
 	combined := make([]string, 0, h0+h1+1)
 	combined = append(combined, top...)
 	// Each pane docks its own status line at the bottom of its cell.
@@ -473,7 +473,7 @@ func (m Model) composeChatRail(editor []string) []string {
 	if m.chatFocus {
 		sepStyle = sepStyle.Foreground(lipgloss.Color("61"))
 	}
-	sep := sepStyle.Render("│")
+	sep := sepStyle.Render(m.g.vline)
 	out := make([]string, len(editor))
 	for row, line := range editor {
 		out[row] = padTo(line, m.width-w-1) + sep + panel[row]
@@ -568,7 +568,7 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 			}
 		}
 
-		diagMark, diagSev := diagMarkFor(tabDiags, ln)
+		diagMark, diagSev := m.diagMarkFor(tabDiags, ln)
 		diagMarkStyle := gutterStyle
 		switch diagSev {
 		case 1:
@@ -589,28 +589,28 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 		// make gutter clicks depend on which sub-column was hit).
 		mark := " "
 		if bmSet[ln+1] {
-			mark = "◆"
+			mark = m.g.bookmark
 		}
 		if bpSet[ln+1] {
-			mark = "●"
+			mark = m.g.breakpt
 			// The adapter explicitly rejected this line after a session ran:
 			// show it unverified instead of a solid breakpoint.
 			if v, ok := bpVerifSet[ln+1]; ok && !v {
-				mark = "○"
+				mark = m.g.breakptO
 			}
 		}
 		if dapStoppedHere && m.dapCurLine == ln+1 {
-			mark = "▶"
+			mark = m.g.stop
 		}
 		markStyle := gutterStyle
 		switch mark {
-		case "●":
+		case m.g.breakpt:
 			markStyle = bpStyle
-		case "○":
+		case m.g.breakptO:
 			markStyle = bpDimStyle
-		case "▶":
+		case m.g.stop:
 			markStyle = stopStyle
-		case "◆":
+		case m.g.bookmark:
 			markStyle = bmStyle
 		}
 
@@ -675,7 +675,7 @@ func (m Model) appendBlame(row string, t *tab, diff vcs.FileDiff, ln, contentW i
 	if ln >= len(diff.Lines) || diff.Lines[ln] != vcs.DiffNone || ln >= len(t.blame) {
 		return row
 	}
-	lab := blameLabel(t.blame[ln])
+	lab := m.blameLabel(t.blame[ln])
 	labW := lipgloss.Width(lab)
 	if labW < 1 {
 		return row
@@ -689,7 +689,7 @@ func (m Model) appendBlame(row string, t *tab, diff vcs.FileDiff, ln, contentW i
 }
 
 // blameLabel formats one blame line as "author · when".
-func blameLabel(b vcs.BlameLine) string {
+func (m Model) blameLabel(b vcs.BlameLine) string {
 	author := b.Author
 	if i := strings.IndexAny(author, "<"); i >= 0 {
 		author = strings.TrimSpace(author[:i])
@@ -700,7 +700,7 @@ func blameLabel(b vcs.BlameLine) string {
 	if len(author) > 12 {
 		author = author[:12]
 	}
-	return author + " · " + relWhen(b.Date)
+	return author + " " + m.g.dotSep + " " + relWhen(b.Date)
 }
 
 // relWhen renders a time as a compact relative human string.
@@ -738,7 +738,7 @@ func (m Model) renderLineWrap(p *pane, t *tab, ln, segStart, segEnd int, activeP
 // diagMarkFor returns the gutter marker for a line given the file's
 // diagnostics, and its severity (1: Error, 2: Warning, else Info/Hint). Empty
 // marker means the line has no diagnostics. Lower severity wins on overlap.
-func diagMarkFor(diags []lsp.Diagnostic, line int) (string, int) {
+func (m Model) diagMarkFor(diags []lsp.Diagnostic, line int) (string, int) {
 	mark, sev := "", 0
 	for _, d := range diags {
 		if d.Line != line {
@@ -748,7 +748,7 @@ func diagMarkFor(diags []lsp.Diagnostic, line int) (string, int) {
 			if d.Severity == 1 || d.Severity == 2 {
 				mark = "!"
 			} else {
-				mark = "•"
+				mark = m.g.diagInfo
 			}
 			sev = d.Severity
 		}
@@ -826,22 +826,22 @@ func (m Model) treePanel(h int) []string {
 				for _, isLast := range e.anc {
 					seg := "    "
 					if !isLast {
-						seg = "│   "
+						seg = m.g.vline + "   "
 					}
 					plain.WriteString(seg)
 					styled.WriteString(treeConnStyle.Render(seg))
 				}
-				seg := "├── "
+				seg := m.g.tee + m.g.hline + m.g.hline + " "
 				if e.last {
-					seg = "└── "
+					seg = m.g.corner + m.g.hline + m.g.hline + " "
 				}
 				plain.WriteString(seg)
 				styled.WriteString(treeConnStyle.Render(seg))
 			}
 			if e.isDir {
-				icon := "▸ "
+				icon := m.g.expand + " "
 				if m.expanded[e.rel] {
-					icon = "▾ "
+					icon = m.g.collapse + " "
 				}
 				plain.WriteString(icon)
 				styled.WriteString(treeIconStyle.Render(icon))
@@ -1130,13 +1130,13 @@ func (m Model) gitStatusLine() string {
 			if avail < 0 {
 				avail = 0
 			}
-			hint = fitStatusTail(hint, m.width-2)
+			hint = m.fitStatusTail(hint, m.width-2)
 		}
 		avail := m.width - lipgloss.Width(hint)
 		if avail < 0 {
 			avail = 0
 		}
-		line = statusStyle.Render(fitStatusTail(line, avail))
+		line = statusStyle.Render(m.fitStatusTail(line, avail))
 		fill = m.width - lipgloss.Width(hint) - lipgloss.Width(line)
 	}
 	if fill > 0 {
@@ -1146,7 +1146,7 @@ func (m Model) gitStatusLine() string {
 }
 
 // fitStatusTail strips styling and keeps the tail of s within w visible columns.
-func fitStatusTail(s string, w int) string {
+func (m Model) fitStatusTail(s string, w int) string {
 	r := []rune(stripANSI(s))
 	if len(r) <= w {
 		return s
@@ -1154,7 +1154,7 @@ func fitStatusTail(s string, w int) string {
 	if w < 1 {
 		return ""
 	}
-	return "…" + string(r[len(r)-(w-1):])
+	return m.g.ellipsis + string(r[len(r)-(w-1):])
 }
 
 func (m Model) gitLogStatusLine() string {
@@ -1195,7 +1195,7 @@ func (m Model) gitBranchLine() string {
 }
 
 // fitPath keeps the tail of long paths (the file name matters most).
-func fitPath(p string, w int) string {
+func (m Model) fitPath(p string, w int) string {
 	r := []rune(p)
 	if len(r) <= w {
 		return p
@@ -1203,7 +1203,7 @@ func fitPath(p string, w int) string {
 	if w < 1 {
 		return ""
 	}
-	return "…" + string(r[len(r)-(w-1):])
+	return m.g.ellipsis + string(r[len(r)-(w-1):])
 }
 
 func (m Model) gitPanel(h int) []string {
@@ -1219,7 +1219,7 @@ func (m Model) gitPanel(h int) []string {
 	for i := start; i < end && len(rows) < h; i++ {
 		fs := m.gitFiles[i]
 		marker := fmt.Sprintf("%c%c", fs.Staging, fs.Worktree)
-		path := fitPath(fs.Path, gitPanelWidth-5)
+		path := m.fitPath(fs.Path, gitPanelWidth-5)
 		plain := " " + marker + " " + path
 		pad := gitPanelWidth - 1 - lipgloss.Width(plain)
 		if pad < 0 {
@@ -1256,7 +1256,7 @@ func (m Model) gitLogPanel(h int) []string {
 		entry := m.gitLogEntries[i]
 		// Two-line entry: " hash  subject" on first line, "         author time" on second
 		hashStr := entry.Hash
-		subject := fitPath(entry.Subject, gitPanelWidth-lipgloss.Width(hashStr)-3)
+		subject := m.fitPath(entry.Subject, gitPanelWidth-lipgloss.Width(hashStr)-3)
 		first := " " + gitAddStyle.Render(hashStr) + " " + subject
 		// Pad first line
 		visW := lipgloss.Width(first)
@@ -1292,13 +1292,13 @@ func (m Model) gitLogPanel(h int) []string {
 // the old text, right column the current text. The diff rail is drawn over
 // the full editor width (no sidebar while the diff is open).
 func (m Model) diffViewRows(h int) []string {
-	return renderSideBySide(m.diffHeadLines, m.diffRightLines, m.diffRows, m.diffOffsetY, m.diffOffsetX, m.width, h, m.diffHeadSyntax, m.diffRightSyntax)
+	return m.renderSideBySide(m.diffHeadLines, m.diffRightLines, m.diffRows, m.diffOffsetY, m.diffOffsetX, m.width, h, m.diffHeadSyntax, m.diffRightSyntax)
 }
 
 // renderSideBySide renders a two-column diff view. Used by git diff, AI inline
 // review, and conflict preview. Pass nil for leftSyntax/rightSyntax to disable
 // syntax highlighting.
-func renderSideBySide(leftLines, rightLines []string, diffRows []vcs.DiffRow, offsetY, offsetX, w, h int, leftSyntax, rightSyntax []syntax.HighlightedLine) []string {
+func (m Model) renderSideBySide(leftLines, rightLines []string, diffRows []vcs.DiffRow, offsetY, offsetX, w, h int, leftSyntax, rightSyntax []syntax.HighlightedLine) []string {
 	half := (w - 1) / 2
 
 	numW := len(strconv.Itoa(maxInt(len(leftLines), len(rightLines)))) + 1
@@ -1311,7 +1311,7 @@ func renderSideBySide(leftLines, rightLines []string, diffRows []vcs.DiffRow, of
 	}
 
 	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
-	sep := sepStyle.Render("│")
+	sep := sepStyle.Render(m.g.vline)
 
 	rows := make([]string, h)
 	for row := 0; row < h; row++ {
@@ -1494,7 +1494,7 @@ func (m Model) chatPanel(h int) []string {
 	if model == "" {
 		model = m.t("ai.no_model")
 	}
-	header := statusHiStyle.Render(fmt.Sprintf(" AI · %s ", fitPath(model, w-6)))
+	header := statusHiStyle.Render(fmt.Sprintf(" AI "+m.g.dotSep+" %s ", m.fitPath(model, w-6)))
 	if m.chatBusy {
 		header += statusStyle.Render(m.t("ai.streaming"))
 	}
@@ -1579,7 +1579,7 @@ func (m Model) chatPanel(h int) []string {
 	for i, line := range inputLines {
 		var input string
 		if i == 0 {
-			input = statusHiStyle.Render(" ❯ ")
+			input = statusHiStyle.Render(" " + m.g.iconTerm + " ")
 		} else {
 			input = statusHiStyle.Render("   ")
 		}
@@ -1916,7 +1916,7 @@ func (m Model) folderPanel() []string {
 			}
 			for i := start; i < end; i++ {
 				e := m.folderEntries[i]
-				label := " ▸ " + e.name + "/"
+				label := " " + m.g.expand + " " + e.name + "/"
 				if !e.dir {
 					label = "   " + e.name
 				}

@@ -298,7 +298,8 @@ func TestChatThreadSwitchAndPersist(t *testing.T) {
 
 // TestChatThreadTitle derives readable titles from the first user message.
 func TestChatThreadTitle(t *testing.T) {
-	got := chatThreadTitle([]ai.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "  fix   the bug  please  "}})
+	m := New()
+	got := m.chatThreadTitle([]ai.Message{{Role: "system", Content: "sys"}, {Role: "user", Content: "  fix   the bug  please  "}})
 	if got != "fix the bug please" {
 		t.Fatalf("title = %q", got)
 	}

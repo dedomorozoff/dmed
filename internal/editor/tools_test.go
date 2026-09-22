@@ -177,8 +177,9 @@ func TestToolArgSummary(t *testing.T) {
 }
 
 func TestCompactLinesTruncatesLongOutput(t *testing.T) {
+	m := New()
 	in := "l0\nl1\nl2\nl3\nl4\nl5\nl6\nl7"
-	got := compactLines(in, 80, 4)
+	got := m.compactLines(in, 80, 4)
 	if len(got) != 5 {
 		t.Fatalf("want 4 lines + overflow marker, got %d: %v", len(got), got)
 	}
@@ -188,7 +189,8 @@ func TestCompactLinesTruncatesLongOutput(t *testing.T) {
 }
 
 func TestCompactLinesCapsWidth(t *testing.T) {
-	got := compactLines("abcdefghij", 5, 10)
+	m := New()
+	got := m.compactLines("abcdefghij", 5, 10)
 	if strings.ContainsAny(got[0], "fghij") {
 		t.Fatalf("line not capped to width: %q", got[0])
 	}

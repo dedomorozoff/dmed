@@ -95,7 +95,7 @@ func (m Model) statusIconsString() string {
 		if m.statusIconActive(d.act) || m.hoverIcon == d.act {
 			st = statusHiStyle
 		}
-		b.WriteString(st.Render(" " + d.glyph + " "))
+		b.WriteString(st.Render(" " + m.g.icon(d.act) + " "))
 	}
 	return b.String()
 }
@@ -106,7 +106,7 @@ func (m Model) statusIconsString() string {
 func (m Model) statusIconAt(x int) statusAction {
 	pos := 0
 	for _, d := range statusIconDefs {
-		w := lipgloss.Width(" " + d.glyph + " ")
+		w := lipgloss.Width(" " + m.g.icon(d.act) + " ")
 		if x >= pos && x < pos+w {
 			return d.act
 		}
@@ -119,7 +119,7 @@ func (m Model) statusIconAt(x int) statusAction {
 func (m Model) statusIconX(a statusAction) int {
 	pos := 0
 	for _, d := range statusIconDefs {
-		w := lipgloss.Width(" " + d.glyph + " ")
+		w := lipgloss.Width(" " + m.g.icon(d.act) + " ")
 		if d.act == a {
 			return pos
 		}
@@ -157,7 +157,7 @@ var splitIconGlyphs = []statusIcon{
 func (m Model) splitIconsWidth() int {
 	w := 0
 	for _, d := range splitIconGlyphs {
-		w += lipgloss.Width(" " + d.glyph + " ")
+		w += lipgloss.Width(" " + m.g.splitIcon(d.act) + " ")
 	}
 	return w
 }
@@ -183,7 +183,7 @@ func (m Model) splitIconsString() string {
 		if m.statusIconActive(d.act) || m.hoverSplit == d.act {
 			st = statusHiStyle
 		}
-		b.WriteString(st.Render(" " + d.glyph + " "))
+		b.WriteString(st.Render(" " + m.g.splitIcon(d.act) + " "))
 	}
 	return b.String()
 }
@@ -197,7 +197,7 @@ func (m Model) splitIconAt(x int) statusAction {
 	start := m.width - m.splitIconsWidth()
 	pos := start
 	for _, d := range splitIconGlyphs {
-		w := lipgloss.Width(" " + d.glyph + " ")
+		w := lipgloss.Width(" " + m.g.splitIcon(d.act) + " ")
 		if x >= pos && x < pos+w {
 			return d.act
 		}

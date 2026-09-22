@@ -31,7 +31,9 @@ func main() {
 			return
 		}
 	}
-	p := tea.NewProgram(editor.New(os.Args[1:]...))
+	model := editor.New(os.Args[1:]...)
+	model.ApplyTerminalCompat()
+	p := tea.NewProgram(model)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

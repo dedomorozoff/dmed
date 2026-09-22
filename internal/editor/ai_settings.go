@@ -103,7 +103,7 @@ func (m *Model) aiFieldValue(i int) string {
 		return m.cfg.AI.OllamaURL
 	case 3:
 		if m.cfg.AI.APIKey != "" {
-			return "••••••••"
+			return strings.Repeat(m.g.mask, 8)
 		}
 		return ""
 	case 4:
@@ -297,9 +297,9 @@ func (m Model) testStatusLine() string {
 	case m.aiCfgTest.running:
 		return hintStyle.Render("testing...")
 	case m.aiCfgTest.ok:
-		return okTestStyle.Render("✓ connected · " + m.aiCfgTest.status)
+		return okTestStyle.Render(m.g.check + " connected " + m.g.dotSep + " " + m.aiCfgTest.status)
 	case m.aiCfgTest.status != "":
-		return errTestStyle.Render("✗ " + m.aiCfgTest.status)
+		return errTestStyle.Render(m.g.cross + " " + m.aiCfgTest.status)
 	default:
 		return hintStyle.Render(m.t("ai.test_hint"))
 	}
@@ -310,7 +310,7 @@ func (m Model) aiCfgEditLine() string {
 	if m.aiCfgField == 3 {
 		masked := string(m.aiCfgIn)
 		if masked != "" {
-			masked = strings.Repeat("•", len(masked))
+			masked = strings.Repeat(m.g.mask, len(masked))
 		}
 		return statusHiStyle.Render(label) + statusStyle.Render(masked) + cursorStyle.Render(" ")
 	}

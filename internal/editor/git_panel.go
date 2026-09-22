@@ -351,7 +351,7 @@ func (m *Model) showLogDiff() {
 			rowsAll = append(rowsAll, vcs.DiffRow{Left: len(headAll) - 1, Right: len(rightAll) - 1, Type: vcs.DiffNone})
 		}
 		// File header line
-		header := "── " + d.Path + " ──"
+		header := m.g.hline + m.g.hline + " " + d.Path + " " + m.g.hline + m.g.hline
 		headAll = append(headAll, header)
 		rightAll = append(rightAll, "")
 		rowsAll = append(rowsAll, vcs.DiffRow{Left: len(headAll) - 1, Right: -1, Type: vcs.DiffNone})
@@ -454,7 +454,7 @@ func (m *Model) branchPanel(h int) []string {
 		isCur := name != "" && name == cur
 		prefix := "  "
 		if isCur {
-			prefix = "● "
+			prefix = m.g.stop + " "
 		}
 		plain := " " + prefix + name
 		pad := gitPanelWidth - 1 - lipgloss.Width(plain)

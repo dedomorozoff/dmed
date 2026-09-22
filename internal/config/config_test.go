@@ -47,6 +47,7 @@ ollama_url = http://localhost:11434
 [ui]
 tree_width = 30
 lang = ru
+ascii = on
 `
 	sections := parseINI(strings.NewReader(input))
 
@@ -67,6 +68,9 @@ lang = ru
 	}
 	if sections["ui"]["lang"] != "ru" {
 		t.Errorf("ui.lang = %q, want ru", sections["ui"]["lang"])
+	}
+	if sections["ui"]["ascii"] != "on" {
+		t.Errorf("ui.ascii = %q, want on", sections["ui"]["ascii"])
 	}
 }
 
@@ -406,6 +410,25 @@ launch_json = {"request": "launch", "type": "php"}
 	}
 	if cfg.Debug.LaunchJSON != `{"request": "launch", "type": "php"}` {
 		t.Errorf("launch_json = %q", cfg.Debug.LaunchJSON)
+	}
+}
+
+func TestLoadASCIISetting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	if err := os.WriteFile(path, []byte("[ui]\nascii = off\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if cfg.UI.Ascii != "off" {
+		t.Fatalf("ascii = %q, want off", cfg.UI.Ascii)
+	}
+	if err := os.WriteFile(path, []byte("[ui]\nascii = bogus\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg = Load(dir)
+	if cfg.UI.Ascii != "auto" {
+		t.Fatalf("ascii = %q, want default auto for invalid value", cfg.UI.Ascii)
 	}
 }
 
