@@ -11,6 +11,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"dmed/internal/debug"
 )
 
 // Bottom terminal panel: a persistent shell session rendered as the last
@@ -98,7 +100,7 @@ func (m *Model) ensureShell() {
 	// Reader: raw lines -> lineCh. Pump: batches lineCh -> ch so the UI
 	// gets output at most ~30ms late even when few new lines arrive.
 	lineCh := make(chan string, 512)
-	go func() {
+	go debug.CapturePanicReport(func() {
 		sc := bufio.NewScanner(outR)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for sc.Scan() {
@@ -106,8 +108,8 @@ func (m *Model) ensureShell() {
 		}
 		close(lineCh)
 		outW.Close()
-	}()
-	go func() {
+	})
+	go debug.CapturePanicReport(func() {
 		var batch []string
 		send := func() {
 			if len(batch) == 0 {
@@ -137,8 +139,8 @@ func (m *Model) ensureShell() {
 				send()
 			}
 		}
-	}()
-	go func() { _ = cmd.Wait() }()
+	})
+	go debug.CapturePanicReport(func() { _ = cmd.Wait() })
 }
 
 func (m *Model) toggleTerminal() tea.Cmd {
@@ -218,7 +220,7 @@ func (m *Model) handleTerm(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "pgup":
 		m.termScroll += m.termPanelHeight() / 2
-	case "pgdn":
+	case "pgdown":
 		m.termScroll -= m.termPanelHeight() / 2
 		if m.termScroll < 0 {
 			m.termScroll = 0

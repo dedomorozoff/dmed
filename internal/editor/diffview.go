@@ -104,7 +104,7 @@ func (m *Model) handleDiffView(msg tea.KeyPressMsg) tea.Cmd {
 		m.diffOffsetY++
 	case "pgup":
 		m.diffOffsetY -= h
-	case "pgdn":
+	case "pgdown":
 		m.diffOffsetY += h
 	case "home", "g":
 		m.diffOffsetY = 0

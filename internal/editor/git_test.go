@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"dmed/internal/i18n"
@@ -894,4 +895,133 @@ func TestGitPanelRussianLocale(t *testing.T) {
 	if !strings.Contains(m.msg, "закоммичено:") {
 		t.Fatalf("expected Russian commit message, got %q", m.msg)
 	}
+}
+
+func TestEditorGitFetchPushKeys(t *testing.T) {
+	dir, f := initTestGitRepo(t)
+	_ = dir
+
+	m := New(f)
+	m.width, m.height = 80, 24
+	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	if m.gitMode != gitModeStatus {
+		t.Fatal("setup: git panel must be in status mode")
+	}
+
+	// Without a remote, both keys must explain the failure inline.
+	before := m.msg
+	m2, cmd := m.Update(tea.KeyPressMsg{Text: "f"})
+	m = m2.(Model)
+	if cmd != nil {
+		t.Fatal("'f' without a remote must not spawn a background transfer")
+	}
+	if !strings.Contains(m.msg, "no remote") {
+		t.Fatalf("expected no-remote message on 'f', got %q", m.msg)
+	}
+	m.msg = before
+
+	// A bare repo acts as origin, then 'f' and 'p' run a real transfer.
+	bare := t.TempDir()
+	if _, err := git.PlainInit(bare, true); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := git.PlainOpen(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.CreateRemote(&config.RemoteConfig{Name: "origin", URLs: []string{bare}}); err != nil {
+		t.Fatal(err)
+	}
+	r := m.repoForCur()
+	// Seed the remote so push has a baseline; then modify, commit, push.
+	_ = r.Push()
+	if err := os.WriteFile(f, []byte("package main\n\nfunc main() { changed }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Stage(f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Commit("second"); err != nil {
+		t.Fatal(err)
+	}
+
+	m2, cmd = m.Update(tea.KeyPressMsg{Text: "p"})
+	m = m2.(Model)
+	if cmd == nil {
+		t.Fatal("'p' with a remote must return a transfer command")
+	}
+	prom := cmd().(gitTransferMsg)
+	if prom.err != "" {
+		t.Fatalf("push failed: %s", prom.err)
+	}
+	m2, _ = m.Update(prom)
+	m = m2.(Model)
+	if !strings.Contains(m.msg, "push: done") {
+		t.Fatalf("expected push-done message, got %q", m.msg)
+	}
+
+	m2, cmd = m.Update(tea.KeyPressMsg{Text: "f"})
+	m = m2.(Model)
+	if cmd == nil {
+		t.Fatal("'f' with a remote must return a transfer command")
+	}
+	if fmsg := cmd().(gitTransferMsg); fmsg.err != "" {
+		t.Fatalf("fetch failed: %s", fmsg.err)
+	}
+}
+
+func TestEditorGitBlameToggle(t *testing.T) {
+	dir, f := initTestGitRepo(t)
+
+	m := New(f)
+	m.width, m.height = 80, 24
+	r := m.repoForCur()
+
+	// Second commit from a second author so blame lines are distinguishable.
+	if err := os.WriteFile(f, []byte("package main\n\nfunc main() { changed }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Stage(f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Commit("second author edit"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Alt+B enables blame and returns a command that delivers the result.
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModAlt})
+	m = next.(Model)
+	if !m.blameOn {
+		t.Fatal("Alt+B must enable blame")
+	}
+	if cmd == nil {
+		t.Fatal("Alt+B must return a blame command")
+	}
+	msg := cmd()
+	next, _ = m.Update(msg)
+	m = next.(Model)
+	if m.cur().blame == nil {
+		t.Fatal("blame must be attached to the active tab")
+	}
+	if len(m.cur().blame) == 0 {
+		t.Fatal("expected blamed lines")
+	}
+
+	// The annotation renders into the view.
+	v := m.View()
+	plain := strings.Join(plainRows(v.Content), "\n")
+	if !strings.Contains(plain, "tester") {
+		t.Fatalf("expected blame author 'tester' in view:\n%s", plain)
+	}
+
+	// Alt+B again turns it off and clears the annotations.
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModAlt})
+	m = next.(Model)
+	if m.blameOn {
+		t.Fatal("Alt+B must toggle blame off")
+	}
+	if m.cur().blame != nil {
+		t.Fatal("blame must be cleared when toggled off")
+	}
+	_ = dir
 }

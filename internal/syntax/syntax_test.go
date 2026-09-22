@@ -54,6 +54,22 @@ func TestCommentTokens(t *testing.T) {
 	}
 }
 
+func TestLang(t *testing.T) {
+	cases := []struct{ file, want string }{
+		{"main.go", "go"},
+		{"index.php", "php"},
+		{"server.py", "python"},
+		{"app.ts", "ts"},
+		{"notes.txt", "text"},
+		{"README", ""},
+	}
+	for _, c := range cases {
+		if got := Lang(c.file); got != c.want {
+			t.Errorf("Lang(%q) = %q, want %q", c.file, got, c.want)
+		}
+	}
+}
+
 func TestCommentTokensUnknown(t *testing.T) {
 	p, s := CommentTokens("blob.unknownext", "some text")
 	if p != "" || s != "" {

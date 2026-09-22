@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"dmed/internal/ai"
+	"dmed/internal/debug"
 	"dmed/internal/vcs"
 )
 
@@ -119,7 +120,7 @@ func (m *Model) submitFixRequest() tea.Cmd {
 
 	ch := make(chan chatEvent, 64)
 	m.aiFixCh = ch
-	go func() {
+	go debug.CapturePanicReport(func() {
 		defer close(ch)
 		msgs := m.fixRequestMessages(t.path, m.aiFixOriginal, systemPrompt)
 		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs, Options: m.aiRequestOptions()}, ai.Handler{
@@ -136,7 +137,7 @@ func (m *Model) submitFixRequest() tea.Cmd {
 			case <-ctx.Done():
 			}
 		}
-	}()
+	})
 	return waitForFixOutput(ch)
 }
 
@@ -248,7 +249,7 @@ func (m *Model) handleFixReview(msg tea.KeyPressMsg) tea.Cmd {
 		if m.aiFixReviewOffY < 0 {
 			m.aiFixReviewOffY = 0
 		}
-	case "pgdn":
+	case "pgdown":
 		m.aiFixReviewOffY += m.paneViewHeight(m.activePane) / 2
 		if maxOff := len(m.aiFixReviewRows) - 1; m.aiFixReviewOffY > maxOff {
 			m.aiFixReviewOffY = maxOff

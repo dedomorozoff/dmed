@@ -19,6 +19,7 @@ import (
 	"dmed/internal/ai"
 	"dmed/internal/buffer"
 	"dmed/internal/config"
+	"dmed/internal/dap"
 	"dmed/internal/events"
 	"dmed/internal/i18n"
 	"dmed/internal/lsp"
@@ -36,8 +37,9 @@ type tab struct {
 	syntaxText   string
 	diffCached   vcs.FileDiff
 	diffText     string
-	lineEnding   string // "lf" or "crlf"
-	encoding     string // "utf-8", "utf-16le", "utf-16be", "latin-1"
+	blame        []vcs.BlameLine // git blame of HEAD lines; nil = not computed
+	lineEnding   string          // "lf" or "crlf"
+	encoding     string          // "utf-8", "utf-16le", "utf-16be", "latin-1"
 	wrapSegs     []wrapSeg
 	wrapW        int
 	wrapTabW     int
@@ -279,7 +281,16 @@ type Model struct {
 	finderHits  []string
 	finderSel   int
 
-	helpOpen bool
+	// Folder browser: a native TUI picker so "File: Open Folder..." works the
+	// same on every platform (no zenity/kdialog/PowerShell dependency).
+	folderOpen    bool
+	folderPath    string // current directory being browsed
+	folderEntries []folderEntry
+	folderSel     int
+	folderOffset  int
+
+	helpOpen   bool
+	helpScroll int // help panel scroll offset (the list overflows small screens)
 
 	aiCfgOpen  bool
 	aiCfgField int
@@ -335,6 +346,9 @@ type Model struct {
 	gitLogSel     int
 	gitLogOffset  int
 
+	// Inline git blame annotations (Alt+B)
+	blameOn bool
+
 	// Git branch management
 	gitBranchIn     []rune
 	gitBranchList   []string
@@ -363,6 +377,43 @@ type Model struct {
 	termCmd     *exec.Cmd
 	termStdin   io.WriteCloser
 	termCh      <-chan []string
+
+	// DAP debug panel (Delve) — the backend is a DAP client or the DBGp
+	// Xdebug client, either of which serves the same panel interface.
+	dapClient             debugBackend
+	dapCh                 chan dapEventMsg
+	dapOpen               bool
+	dapRunState           string
+	dapReason             string
+	dapThreads            []dap.Thread
+	dapFrames             []dap.StackFrame
+	dapSelThread          int
+	dapSelFrame           int
+	dapFocus              int // 0=threads, 1=frames, 2=variables
+	dapVarStack           [][]dapVarRow
+	dapVarSel             int
+	dapScopes             []dap.Scope
+	dapConsole            []string
+	dapIn                 []rune
+	dapBreak              map[string]map[int]bool // abs path → line → true
+	dapBPVerif            map[string]map[int]bool // adapter-verified breakpoints
+	bookmarks             map[string]map[int]bool // abs path → line (1-based) → true
+	dapCurPath            string
+	dapCurLine            int
+	dapBusy               bool
+	dapGen                int  // session generation; drops stale start/launch msgs
+	dapFollowPending      bool // reveal the stopped location on the next Update
+	dapConsolePeek        bool
+	dapConsoleScroll      int // console lines scrolled back from the newest
+	dapPanelRows          int // panel height override; 0 = a quarter of the terminal
+	dapSupportsConfigDone bool
+	dapDeduced            *config.DebugConfig // language-detected [debug] for the live session
+
+	// DAP settings wizard (debug/launch configuration dialog)
+	dapCfgOpen  bool
+	dapCfgField int
+	dapCfgEdit  bool
+	dapCfgIn    []rune
 
 	// Command palette & Clipboard
 	paletteOpen   bool
@@ -511,7 +562,9 @@ type Model struct {
 	agentReviewOffX   int
 
 	// Mouse state
-	mouseDown bool
+	mouseDown  bool
+	hoverIcon  statusAction // status-bar icon under the cursor (actNone if none)
+	hoverSplit statusAction // top-right split icon under the cursor
 
 	// Double-click detection: last click position/time plus a validity flag so
 	// a third quick click starts a fresh pair instead of chaining.
@@ -519,6 +572,12 @@ type Model struct {
 	lastClickY     int
 	lastClickTime  time.Time
 	lastClickValid bool
+
+	// Double-Shift detection (JetBrains-style "search everywhere"): the time of
+	// the previous bare Shift press so two rapid taps open the palette. Only
+	// terminals with the Kitty protocol / Windows Console API report bare
+	// modifier presses, so this degrades gracefully elsewhere.
+	lastShiftTime time.Time
 }
 
 var debugKeys = os.Getenv("DMED_DEBUG_KEYS") != ""
@@ -573,6 +632,10 @@ func New(paths ...string) Model {
 		diagCh:                make(chan lspDiagMsg, 64),
 		diags:                 map[string][]lsp.Diagnostic{},
 		pendingPluginRemovals: map[string]bool{},
+		dapCh:                 make(chan dapEventMsg, 64),
+		dapBreak:              map[string]map[int]bool{},
+		dapBPVerif:            map[string]map[int]bool{},
+		bookmarks:             map[string]map[int]bool{},
 		chatThreadPos:         -1,
 		chatPromptIdx:         -1,
 	}
@@ -705,7 +768,7 @@ func (m *Model) openPath(rawPath string) {
 	}
 	// Hint when this file's language needs an LSP server that isn't installed.
 	if err == nil {
-		if hint := lspMissingHint(t.path); hint != "" {
+		if hint := m.lspMissingHintFor(t.path); hint != "" {
 			m.msg = m.t("msg.lsp_missing", hint)
 		}
 	}
@@ -856,9 +919,21 @@ func (m *Model) refind() {
 	}
 }
 
+// normalizePaste converts CRLF / lone CR line endings in pasted text to LF.
+// Windows terminals and the system clipboard deliver "\r\n", and a literal
+// "\r" inside buffer content would both garble the terminal rendering (the
+// terminal treats it as a carriage return) and pollute the saved file.
+func normalizePaste(s string) string {
+	if !strings.ContainsRune(s, '\r') {
+		return s
+	}
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+}
+
 // pasteInput inserts pasted text into the active field, mirroring where typed
 // keys land (see handleKey routing), and falls back to the editor buffer.
 func (m *Model) pasteInput(text string) {
+	text = normalizePaste(text)
 	switch {
 	case m.aiCfgEdit:
 		m.aiCfgIn = append(m.aiCfgIn, []rune(text)...)
@@ -940,8 +1015,37 @@ func (m *Model) handleHelp(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc", "f1", "ctrl+e", "q":
 		m.helpOpen = false
+	case "j", "down", "pgdown":
+		m.scrollHelp(1)
+	case "k", "up", "pgup":
+		m.scrollHelp(-1)
+	case "g", "home":
+		m.helpScroll = 0
+	case "G", "end":
+		m.helpScroll = m.helpMaxScroll()
 	}
 	return nil
+}
+
+// scrollHelp moves the help panel by d rows (negative = up) and clamps it.
+func (m *Model) scrollHelp(d int) {
+	m.helpScroll += d
+	if m.helpScroll < 0 {
+		m.helpScroll = 0
+	}
+	if max := m.helpMaxScroll(); m.helpScroll > max {
+		m.helpScroll = max
+	}
+}
+
+// helpMaxScroll is the maximum help scroll offset so the last row stays
+// visible; 0 when everything already fits.
+func (m Model) helpMaxScroll() int {
+	n := len(helpEntries) + 1 // title row + entries
+	if h := m.viewHeight(); n > h {
+		return n - h
+	}
+	return 0
 }
 
 func (m *Model) focusOrOpen(rawPath string) {
@@ -1134,7 +1238,7 @@ func waitForFileEvent(ch <-chan string) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh))
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh), waitForDAPEvent(m.dapCh))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1279,6 +1383,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case AgentRefreshMsg:
 		return m, waitForAgentRefresh(m.agentCh)
+	case gitTransferMsg:
+		if msg.err != "" {
+			m.msg = m.t("git.transfer_error", m.t("git.op_"+msg.op), msg.err)
+			return m, nil
+		}
+		m.msg = m.t("git.transfer_done", m.t("git.op_"+msg.op))
+		if m.gitOpen {
+			m.refreshGitFiles()
+		}
+	case gitBlameMsg:
+		if msg.err != "" {
+			m.msg = m.t("git.blame_error", msg.err)
+			m.blameOn = false
+			return m, nil
+		}
+		for i := range m.tabs {
+			t := &m.tabs[i]
+			abs, _ := filepath.Abs(t.path)
+			if abs == msg.path {
+				t.blame = msg.lines
+				if len(msg.lines) == 0 {
+					m.msg = m.t("msg.blame_none")
+				} else {
+					m.msg = m.t("msg.blame_on", len(msg.lines))
+				}
+				break
+			}
+		}
 	case tea.MouseClickMsg:
 		cmd := m.handleMouseClick(msg)
 		return m, cmd
@@ -1292,6 +1424,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.handleMouseMotion(msg)
 			return m, cmd
 		}
+		m.updateStatusHover(msg)
 	case tea.PasteMsg:
 		if text := msg.String(); text != "" {
 			m.pasteInput(text)
@@ -1309,12 +1442,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case lspCompletionMsg:
 		if m.complOpen && msg.path == m.cur().path {
-			m.mergeLSPCompletion(msg.items)
+			if msg.err != nil {
+				m.msg = "lsp: " + msg.err.Error()
+				if len(m.complItems) == 0 {
+					m.closeCompletion()
+				}
+			} else {
+				m.mergeLSPCompletion(msg.items)
+				if len(m.complItems) == 0 {
+					m.closeCompletion()
+				}
+			}
 		}
 	case lspDiagMsg:
 		abs, _ := filepath.Abs(msg.path)
 		m.diags[abs] = msg.diags
 		return m, waitForLSPDiag(m.diagCh)
+	case lspDefinitionMsg:
+		if msg.err != nil {
+			m.msg = "goto def: " + msg.err.Error()
+		} else if msg.loc == nil {
+			m.msg = m.t("msg.no_definition")
+		} else {
+			m.focusOrOpen(msg.loc.Path)
+			if t := m.cur(); t != nil {
+				t.buf.SetCursor(msg.loc.Line, msg.loc.Col)
+				t.buf.Deselect()
+			}
+			m.clampScroll()
+		}
 	case pluginStoreMsg:
 		m.storeLoading = false
 		if msg.err != nil {
@@ -1340,6 +1496,73 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.plugins != nil {
 			m.installFromSource(msg.file, msg.src)
 		}
+	case dapEventMsg:
+		return m, m.handleDAPEventUpdate(msg)
+	case dapStartMsg:
+		if msg.gen != m.dapGen {
+			// A newer stop/restart superseded this start; drop the late adapter.
+			if msg.cl != nil {
+				msg.cl.Close()
+			}
+			return m, nil
+		}
+		m.dapBusy = false
+		if msg.err != nil {
+			m.dapRunState = dapIdle
+			m.msg = msg.err.Error()
+			return m, nil
+		}
+		m.dapClient = msg.cl
+		m.dapSupportsConfigDone = msg.supports
+		m.msg = "debug: " + msg.adapter + " attached"
+		return m, m.dapLaunchCmd()
+	case dapLaunchMsg:
+		if msg.gen != m.dapGen {
+			return m, nil // stale launch result from a superseded session
+		}
+		m.dapBusy = false
+		m.applyDapBPSyncs(msg.bps)
+		if msg.err != nil {
+			m.dapRunState = dapIdle
+			m.msg = "debug launch: " + msg.err.Error()
+			// The adapter never produced a debuggee. Release it so F5 can
+			// launch again: leaving the client attached while the state reads
+			// idle made the "session already attached" guard swallow every
+			// later F5 press.
+			return m, m.dapRelease()
+		}
+		m.dapRunState = dapRunning
+		m.msg = "debug: running"
+	case dapStepMsg:
+		if msg.err != nil {
+			m.msg = "debug step: " + msg.err.Error()
+		} else {
+			m.dapRunState = dapRunning
+			m.dapCurPath = ""
+			m.dapCurLine = 0
+		}
+	case dapRefreshMsg:
+		m.applyDAPRefresh(msg)
+		if m.dapFollowPending {
+			m.dapFollowPending = false
+			return m, m.dapFollowCmd()
+		}
+		return m, nil
+	case dapFollowMsg:
+		return m, m.handleDapFollowMsg()
+	case dapEvalMsg:
+		m.dapAppendConsole("> " + msg.expr)
+		if msg.err != nil {
+			m.dapAppendConsole("! " + msg.err.Error())
+		} else {
+			m.dapAppendConsole("= " + msg.out)
+		}
+	case dapBPSyncMsg:
+		if msg.err != nil {
+			m.msg = "debug breakpoints: " + msg.err.Error()
+			return m, nil
+		}
+		m.applyDapBPSyncs([]dapBPSyncMsg{msg})
 	}
 	m.clampScroll()
 	return m, nil
@@ -1375,10 +1598,35 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		msg.Code = normalizeKey(msg.Code)
 	}
 	s := msg.String()
+	// Some terminal stacks bundle the letter as Text even for Ctrl/Alt chords
+	// (notably the Windows Console API on non-US keyboard layouts, where a
+	// pressed Ctrl+<physical key> arrives with the Cyrillic Code/Text). String()
+	// returns that Text verbatim and drops the modifier, so such a chord would
+	// match the plain letter — and fall through to the buffer, typing "g" after
+	// Ctrl+G. Rebuild the key name from the modifiers instead (uv's Keystroke)
+	// whenever Ctrl or Alt is involved; Shift-only events keep their Text form
+	// so the bare "G" ⇄ "g" top/bottom distinction is preserved.
+	if (msg.Mod&(tea.ModCtrl|tea.ModAlt)) != 0 && msg.Text != "" {
+		s = msg.Keystroke()
+	}
 	// Restore original text so text-input handlers (chat, search, prompt,
 	// etc.) receive the actual typed characters instead of the normalized
 	// English equivalents used only for keybinding matching.
 	msg.Text = origText
+
+	// JetBrains-style double Shift opens the palette ("search everywhere").
+	// Bare modifier presses are only reported by terminals with the Kitty
+	// keyboard protocol / Windows Console API; elsewhere this is a no-op.
+	if !msg.IsRepeat && (msg.Code == tea.KeyLeftShift || msg.Code == tea.KeyRightShift) {
+		now := time.Now()
+		if now.Sub(m.lastShiftTime) <= doubleShiftInterval && !m.lastShiftTime.IsZero() {
+			m.lastShiftTime = time.Time{}
+			m.startPalette()
+			return nil
+		}
+		m.lastShiftTime = now
+		return nil
+	}
 
 	// While the completion popup is open, navigation keys control it.
 	if m.complOpen && m.handleCompletionKey(s) {
@@ -1458,10 +1706,56 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "f1", "ctrl+e":
 		m.helpOpen = !m.helpOpen
+		if m.helpOpen {
+			m.helpScroll = 0
+		}
 		return nil
 	case "ctrl+b", "f9":
 		m.toggleTree()
 		return nil
+	case "f12":
+		return m.gotoDefinition()
+	case "f4":
+		return m.toggleDebugBreakpoint()
+	case "alt+m":
+		m.toggleBookmarkAt(m.cur().buf.CurLine())
+		return nil
+	case "alt+n":
+		m.jumpBookmark(1)
+		return nil
+	case "alt+shift+n":
+		m.jumpBookmark(-1)
+		return nil
+	case "f5":
+		return m.startDebugging()
+	case "shift+f5":
+		return m.stopDebugging()
+	case "f6":
+		// With the debug panel open the F-keys step (F10/F11 are far from the
+		// home row); with the panel closed F6 falls through to the vertical
+		// split binding.
+		if m.dapOpen {
+			if m.dapRunState == dapStopped {
+				return m.dapStepCmd("next")
+			}
+			return nil
+		}
+	case "f7":
+		if m.dapOpen {
+			if m.dapRunState == dapStopped {
+				return m.dapStepCmd("stepIn")
+			}
+			return nil
+		}
+	case "shift+f7":
+		if m.dapOpen {
+			if m.dapRunState == dapStopped {
+				return m.dapStepCmd("stepOut")
+			}
+			return nil
+		}
+	case "ctrl+alt+d":
+		return m.toggleDebugPanel()
 	}
 	if m.conflictOpen {
 		switch s {
@@ -1500,7 +1794,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			if m.conflictOffY < 0 {
 				m.conflictOffY = 0
 			}
-		case "pgdn":
+		case "pgdown":
 			m.conflictOffY += m.paneViewHeight(m.activePane) / 2
 			maxOff := len(m.conflictRows) - 1
 			if m.conflictOffY > maxOff {
@@ -1550,8 +1844,14 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.paletteOpen {
 		return m.handlePalette(msg)
 	}
+	if m.folderOpen {
+		return m.handleFolderBrowser(msg)
+	}
 	if m.aiCfgOpen {
 		return m.handleAISettings(msg)
+	}
+	if m.dapCfgOpen {
+		return m.handleDAPCfg(msg)
 	}
 	if m.helpOpen {
 		return m.handleHelp(msg)
@@ -1573,6 +1873,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.treeFocus {
 		return m.handleTree(msg)
+	}
+	if m.dapOpen {
+		return m.handleDap(msg)
 	}
 	if m.searchOpen {
 		if m.replaceOpen {
@@ -1666,6 +1969,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.toggleComment()
 	case "alt+z":
 		m.toggleWordWrap()
+	case "alt+b":
+		return m.toggleBlame()
 	case "ctrl+z":
 		if m.cur().buf.Undo() {
 			m.msg = ""
@@ -1697,7 +2002,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.closePane()
 	case "ctrl+v":
 		if sysClip, err := clipboard.ReadAll(); err == nil && sysClip != "" {
-			m.clipboard = sysClip
+			m.clipboard = normalizePaste(sysClip)
 		}
 		if m.clipboard != "" {
 			if m.cur().buf.HasMultipleCursors() {
@@ -1842,6 +2147,9 @@ func (m *Model) shutdown() {
 	}
 	if m.lspClient != nil {
 		m.lspClient.Close()
+	}
+	if m.dapClient != nil {
+		m.dapClient.Close()
 	}
 	m.saveSession()
 }
@@ -2441,6 +2749,29 @@ func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
 	ln, rawCol := m.clickPosToLineCol(m.activePane, editorRow, x)
 
 	m.cur().buf.DragSelect(ln, rawCol)
+	return nil
+}
+
+// updateStatusHover tracks which status-bar icon the cursor is over so the
+// hovered cell can highlight and a callout can be drawn. Called for motion
+// events with no button pressed (requires MouseModeAllMotion).
+func (m *Model) updateStatusHover(msg tea.MouseMotionMsg) {
+	m.updateSplitHover(msg)
+	if m.statusIconsVisible() && msg.Y == m.statusBarRow() {
+		m.hoverIcon = m.statusIconAt(msg.X)
+		return
+	}
+	m.hoverIcon = actNone
+}
+
+// toggleDebugPanel mirrors the Ctrl+Alt+D shortcut so the status-bar icon and
+// the key behave identically.
+func (m *Model) toggleDebugPanel() tea.Cmd {
+	m.dapOpen = !m.dapOpen
+	if m.dapOpen {
+		m.termOpen = false
+		m.msg = m.t("msg.debug_panel_opened")
+	}
 	return nil
 }
 

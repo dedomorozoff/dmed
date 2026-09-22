@@ -139,7 +139,7 @@ func (m Model) treeEntryRows(h int) int {
 	if h <= 0 {
 		return 0
 	}
-	inner := m.cfg.UI.TreeWidth - 2
+	inner := m.cfg.UI.TreeWidth - 1
 	if inner < 1 {
 		inner = 1
 	}

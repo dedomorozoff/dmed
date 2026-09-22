@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"dmed/internal/ai"
+	"dmed/internal/debug"
 )
 
 // Runner executes queued tasks against an LLM provider, streaming progress
@@ -91,7 +92,7 @@ func (r *Runner) Run(parent context.Context, task *Task, targets []TargetFile) {
 	}
 
 	ch := make(chan runEvent, 64)
-	go r.stream(ctx, task.ID, msgs, ch)
+	go debug.CapturePanicReport(func() { r.stream(ctx, task.ID, msgs, ch) })
 
 	var sb strings.Builder
 	var bytes int

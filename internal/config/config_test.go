@@ -299,6 +299,116 @@ restrict_to_root = true
 	}
 }
 
+func TestLoadDebugSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[debug]
+mode = test
+program = ./pkg
+args = -run TestFoo
+stop_on_entry = true
+dlv_path = C:\tools\dlv.exe
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if cfg.Debug.Mode != "test" {
+		t.Errorf("mode = %q, want test", cfg.Debug.Mode)
+	}
+	if cfg.Debug.Program != "./pkg" {
+		t.Errorf("program = %q, want ./pkg", cfg.Debug.Program)
+	}
+	if cfg.Debug.Args != "-run TestFoo" {
+		t.Errorf("args = %q, want -run TestFoo", cfg.Debug.Args)
+	}
+	if !cfg.Debug.StopOnEntry {
+		t.Error("stop_on_entry = false, want true")
+	}
+	// Legacy dlv_path aliases adapter_cmd.
+	if cfg.Debug.AdapterCmd != `C:\tools\dlv.exe` {
+		t.Errorf("adapter_cmd = %q, want C:\\tools\\dlv.exe", cfg.Debug.AdapterCmd)
+	}
+
+	// Arbitrary modes pass through (non-Delve adapters use their own modes).
+	if err := os.WriteFile(path, []byte("[debug]\nmode = bogus\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg = Load(dir)
+	if cfg.Debug.Mode != "bogus" {
+		t.Errorf("mode = %q, want pass-through bogus", cfg.Debug.Mode)
+	}
+}
+
+func TestLoadDebugGenericAdapter(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[debug]
+adapter_cmd = debugpy-adapter
+adapter_mode = stdio
+adapter_args = --log-dir /tmp/dap
+launch_type = python
+launch_request = attach
+launch_json = {"justMyCode": false, "console": "integratedTerminal"}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if cfg.Debug.AdapterCmd != "debugpy-adapter" {
+		t.Errorf("adapter_cmd = %q, want debugpy-adapter", cfg.Debug.AdapterCmd)
+	}
+	if cfg.Debug.AdapterMode != "stdio" {
+		t.Errorf("adapter_mode = %q, want stdio", cfg.Debug.AdapterMode)
+	}
+	if cfg.Debug.AdapterArgs != "--log-dir /tmp/dap" {
+		t.Errorf("adapter_args = %q", cfg.Debug.AdapterArgs)
+	}
+	if cfg.Debug.LaunchType != "python" {
+		t.Errorf("launch_type = %q, want python", cfg.Debug.LaunchType)
+	}
+	if cfg.Debug.LaunchRequest != "attach" {
+		t.Errorf("launch_request = %q, want attach", cfg.Debug.LaunchRequest)
+	}
+	if cfg.Debug.LaunchJSON != `{"justMyCode": false, "console": "integratedTerminal"}` {
+		t.Errorf("launch_json = %q", cfg.Debug.LaunchJSON)
+	}
+	if err := os.WriteFile(path, []byte("[debug]\nadapter_mode = bogus\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg = Load(dir)
+	if cfg.Debug.AdapterMode != "reverse" {
+		t.Errorf("adapter_mode = %q, want default reverse for invalid value", cfg.Debug.AdapterMode)
+	}
+}
+
+func TestLoadDebugConnectMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[debug]
+adapter_mode = connect
+adapter_args = 127.0.0.1:9003
+launch_type = php
+launch_json = {"request": "launch", "type": "php"}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if cfg.Debug.AdapterMode != "connect" {
+		t.Errorf("adapter_mode = %q, want connect", cfg.Debug.AdapterMode)
+	}
+	if cfg.Debug.AdapterArgs != "127.0.0.1:9003" {
+		t.Errorf("adapter_args = %q", cfg.Debug.AdapterArgs)
+	}
+	if cfg.Debug.LaunchType != "php" {
+		t.Errorf("launch_type = %q, want php", cfg.Debug.LaunchType)
+	}
+	if cfg.Debug.LaunchJSON != `{"request": "launch", "type": "php"}` {
+		t.Errorf("launch_json = %q", cfg.Debug.LaunchJSON)
+	}
+}
+
 func TestWriteLang(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".dmed.conf")

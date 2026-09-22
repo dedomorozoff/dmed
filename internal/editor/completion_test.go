@@ -96,20 +96,26 @@ func TestCompletionFloatsUnderCursor(t *testing.T) {
 	v := m.View()
 	lines := strings.Split(strings.TrimRight(v.Content, "\n"), "\n")
 
-	// The popup title must sit right below the cursor line, inline with the
-	// editor text — not pinned to the bottom of the screen.
-	title := m.t("compl.title")
+	// The popup (without any title row) must sit right below the cursor line,
+	// inline with the editor text — not pinned to the bottom of the screen.
+	first := m.complItems[m.complSel]
 	caught := false
 	for i, ln := range lines {
 		plain := stripANSI(ln)
-		if strings.Contains(plain, title) {
+		if strings.Contains(plain, first) {
 			if i != sy+1 {
-				t.Fatalf("completion title on screen row %d, want %d (under cursor)", i, sy+1)
+				t.Fatalf("completion candidate on screen row %d, want %d (under cursor)", i, sy+1)
 			}
 			caught = true
 		}
 	}
 	if !caught {
 		t.Fatal("completion popup missing from view")
+	}
+	// No title row above the candidates.
+	for i, ln := range lines {
+		if plain := stripANSI(ln); i == sy+1 && strings.Trim(plain, " ") == "" {
+			t.Fatal("popup rendered without candidates")
+		}
 	}
 }

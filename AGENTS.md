@@ -6,11 +6,13 @@ Guidance for AI coding agents working on this repository.
 
 dmed is a terminal code editor (Bubbletea/TUI in Go) with AI agents as
 first-class participants. It is well past the original "single-file skeleton":
-milestones M0–M5 of [ROADMAP.md](ROADMAP.md) are done (version 0.6.5) — the
+milestones M0–M7 of [ROADMAP.md](ROADMAP.md) are done (version 0.7.x) — the
 editor has splits, multi-cursor, rope-based buffers, syntax highlighting,
 file watching, git integration, AI chat/inline/ghost, a background agent
-queue with diff-review, LSP client, autocompletion, Lua plugins, and more.
-Update ROADMAP checkboxes when you complete work.
+queue with diff-review, LSP client, autocompletion, Lua plugins, an AI
+onboarding wizard, and DAP debugging (Go/Delve by default, any DAP adapter
+wired through `[debug]` config). Update ROADMAP checkboxes when you complete
+work.
 
 The architectural rule of the project — now implemented, not aspirational —
 is that agent-proposed changes always pass through **diff review → atomic
@@ -20,9 +22,9 @@ directly; they emit `Change`s that land through `internal/agent.Applier`
 
 ## Toolchain gotchas (this machine)
 
-- Use plain `go` from PATH (1.25.0, installed at `D:\go\bin`). No special
+- Use plain `go` from PATH (1.26.0, installed at `D:\go\bin`). No special
   path needed; the old `/usr/lib/go/bin/go` (1.22) is gone. `go.mod` requires
-  `go 1.25.0`.
+  `go 1.26.0`.
 - A stale `GOROOT` used to be exported pointing at Go 1.15; it is clean now,
   but the Makefile still does `GOROOT :=` plus a value-less `export GOROOT`
   as insurance — leave it. The exports and phony lists are written in a form
@@ -69,7 +71,10 @@ The code is split into focused internal packages:
   (AI chat), `ai_inline.go` (inline rewrite → diff review), `ghost.go`
   (Copilot-style ghost text), `agent_panel.go` (agent task queue UI),
   `git_panel.go`, `diffview.go`, `plugins.go`, `plugin_store.go`, `lsp.go`,
-  `ai_settings.go`, `transform.go`, `tools.go` (agent READ/SEARCH/RUN/EDIT).
+  `ai_settings.go`, `transform.go`, `tools.go` (agent READ/SEARCH/RUN/EDIT),
+  `dap.go` (DAP session lifecycle: async adapter start, launch/attach,
+  breakpoints, continue/step, panel state), `dap_panel.go`
+  (threads/stack/variables/console panel rendering).
 - `internal/agent/` — background AI agents (the project-rule core).
   `queue.go` — thread-safe task queue with progress/cancel; `runner.go` runs
   tasks; `apply.go` is the **atomic Applier**: it validates that every
@@ -80,8 +85,25 @@ The code is split into focused internal packages:
 - `internal/ai/` — LLM providers: `provider.go` interface, `ollama.go`
   (local), `openai.go` (OpenAI-compatible, SSE streaming). `[ai]` config.
 - `internal/config/` — INI `.dmed.conf` loader (`[editor]`, `[ai]`, `[agent]`,
-  `[ui]`, `[plugins]`); priority defaults < global < project < env vars;
-  hot-reload on save; `WriteAI`/`WriteLang` merge helpers.
+  `[ui]`, `[plugins]`, `[debug]`); priority defaults < global < project < env
+  vars; hot-reload on save; `WriteAI`/`WriteLang` merge helpers.
+- `internal/dap/` — own DAP client (no external deps): Content-Length framed
+  JSON-RPC 2.0 over any stream, stdio and reverse-connect (`--client-addr`)
+  launchers, initialize/launch/configurationDone, breakpoints,
+  continue/next/stepIn/stepOut, threads/stackTrace/scopes/variables/evaluate,
+  and event dispatch. The transport and protocol are adapter-agnostic; the
+  Go/Delve wiring lives in `internal/editor/dap.go`.
+- `internal/dbgp/` — own DBGp client for engines that do not speak DAP
+  (Xdebug/PHP): NUL-framed XML over TCP, the `<init>` handshake, breakpoints,
+  run/step, stack/context/property variables, and eval, all exposed through the
+  same method surface as `internal/dap.Client` so the existing panel drives it.
+  Wire details that each cost a real bug and are easy to get wrong: every
+  engine → IDE document is framed `<byte length>\0<xml>\0`, documents declare
+  `iso-8859-1`, `breakpoint_set` returns its id as a response attribute,
+  failures arrive as an `<error>` child with no `success="0"`, and the `eval`
+  expression must be sent base64-encoded. `TestRealXdebugSession` drives a real
+  interpreter and skips when PHP/Xdebug is absent — keep it, the mock engine
+  cannot catch this class of drift. Set `DMED_DBGP_DEBUG=1` to trace the wire.
 - `internal/lsp/` — JSON-RPC 2.0 LSP client over stdin/stdout (diagnostics,
   definition, didOpen/didChange); wired into autocompletion and the gutter.
 - `internal/plugin/` — gopher-lua plugin framework (`dmed.*` API); plugins
@@ -103,19 +125,27 @@ Conventions:
   holds no editable state of its own.
 - No global mutable state; models are values, mutations happen through
   pointer receivers on small, named methods.
+- Every goroutine spawned by the app runs its body under
+  `debug.CapturePanicReport` (`internal/debug`), so a panic is logged to
+  stderr instead of terminating the whole process with a Windows exit code 2.
 - Files are stored with a trailing newline; dirty check compares against the
   normalized saved snapshot (`MarkSaved`/`Dirty`).
 - Agent edits go through `internal/agent.Applier`: validate all
   `Change.Orig` against current content, then write atomically with rollback;
   an approved series becomes one git commit (`agent: <prompt first line>`).
   Do not bypass this for AI-produced edits.
+- DAP adapter sessions are async: the adapter is spawned in the background
+  (`dapStartCmd`) and results are stamped with a session generation
+  (`dapGen`). Stale events/disconnects from superseded sessions are dropped so
+  they never clobber a newer live session; keep that guard if you touch the
+  DAP message flow.
 - New packages get focused unit tests; TUI behavior is verified manually.
 
 ## Manual verification
 
 Unit tests cover the buffer core, rope, agent applier/queue/commit, AI
-providers, LSP, plugins, git, and editor panels. There is no automated TUI
-test yet.
+providers, DAP client and editor debug flow, config, LSP, plugins, git, and
+editor panels. There is no automated TUI test yet.
 
 Known-broken on this machine: the old cygwin recipe
 `printf ... | script -qec './dmed f' /dev/null` does not work with the native

@@ -15,6 +15,7 @@ import (
 
 	"dmed/internal/agent"
 	"dmed/internal/ai"
+	"dmed/internal/debug"
 	"dmed/internal/vcs"
 
 	"github.com/atotto/clipboard"
@@ -211,7 +212,7 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 	case "pgup":
 		m.chatScroll += m.paneViewHeight(m.activePane) / 2
 		m.clampChatScroll()
-	case "pgdn":
+	case "pgdown":
 		m.chatScroll -= m.paneViewHeight(m.activePane) / 2
 		m.clampChatScroll()
 	case "up": // recall a previously sent prompt
@@ -368,7 +369,7 @@ func (m *Model) startChatTurn() tea.Cmd {
 
 	ch := make(chan chatEvent, 64)
 	m.chatCh = ch
-	go func() {
+	go debug.CapturePanicReport(func() {
 		defer close(ch)
 		var tools []ai.ToolCall
 		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs, Tools: chatToolDefs(), Options: m.aiRequestOptions()}, ai.Handler{
@@ -393,7 +394,7 @@ func (m *Model) startChatTurn() tea.Cmd {
 		case ch <- chatEvent{done: true, tools: tools}:
 		case <-ctx.Done():
 		}
-	}()
+	})
 	return waitForChatOutput(ch, gen)
 }
 
@@ -713,7 +714,7 @@ func (m *Model) handleChatReview(msg tea.KeyPressMsg) tea.Cmd {
 		if m.chatReviewOffY < 0 {
 			m.chatReviewOffY = 0
 		}
-	case "pgdn":
+	case "pgdown":
 		m.chatReviewOffY += m.paneViewHeight(m.activePane) / 2
 		if maxOff := len(m.chatReviewRows) - 1; m.chatReviewOffY > maxOff {
 			m.chatReviewOffY = maxOff
@@ -915,7 +916,7 @@ func (m *Model) rebuildChatRows() {
 	}
 	if len(rows) == 0 {
 		add("hint", " AI works through presets: Ollama, OpenAI, DeepSeek,")
-		add("hint", " Groq, LM Studio, vLLM or any OpenAI-compatible server.")
+		add("hint", " Groq, LM Studio, vLLM, Unsloth or any OpenAI-compatible server.")
 		if m.chatModel == "" {
 			add("hint", " No model yet — quick fix: Ctrl+P → 'AI: Preferences',")
 			add("hint", " pick a provider, press t to test, Ctrl+S to save.")

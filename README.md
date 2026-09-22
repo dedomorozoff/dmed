@@ -43,7 +43,7 @@ AI agents can read, propose, and apply changes directly to your codebase — but
   model reported by the server is picked automatically
 - Built-in provider presets (wizard cycles them with `←`/`→`):
   **Ollama** (local, free), **OpenAI**, **DeepSeek**, **Groq**,
-  **LM Studio** (local), **vLLM** (local), or any OpenAI-compatible server
+  **LM Studio** (local), **vLLM** (local), **Unsloth** (local), or any OpenAI-compatible server
 - **First-time setup, three ways**:
   - `dmed setup-ai` — interactive CLI wizard (provider → key → test → saved)
   - In the editor: `Ctrl+P` → `AI: Preferences...` — pick a preset with
@@ -63,6 +63,8 @@ DMED_PROVIDER=DeepSeek DMED_API_KEY=sk-... DMED_MODEL=deepseek-chat dmed
   - Gutter indicators: added `+`, modified `~`, deleted `_`
   - Side-by-side diff view vs HEAD
   - Stage/unstage/commit from the Git panel (`Ctrl+G`)
+  - Fetch / push to `origin` from the Git panel (`f` / `p`, in the status line)
+  - Inline per-line blame (`Alt+B`): who changed each line and when, like Zed
   - Hunk navigation (`Alt+[` / `Alt+]`)
 
 ### Developer Tools
@@ -70,6 +72,7 @@ DMED_PROVIDER=DeepSeek DMED_API_KEY=sk-... DMED_MODEL=deepseek-chat dmed
 - Built-in **terminal** (`Alt+T`) — persistent shell session at the bottom
 - **LSP client** — diagnostics (rendered in the gutter), completion, go-to-definition; hints the install command when a language server is missing
 - **Autocompletion** (`Ctrl+Space`, auto-trigger) — buffer words + LSP sources for Go, Python, TS/JS, Rust, C/C++, Lua, Ruby, PHP, Zig, JSON, YAML, CSS, HTML
+- **Debugger** (`Ctrl+Alt+D`) — DAP-based debugging: gutter breakpoints (`F4`), run/continue (`F5`, which pauses a running debuggee), step over/in/out (`F6`/`F7`/`Shift+F7`), stop (`Shift+F5`); a threads/stack/variables panel that is fully mouse-driven (click a thread, frame or variable to select it, double-click a `▸` variable to expand, the wheel walks the focused column, `l` peeks at the process console with scroll-back), an opt-in expression eval (`Tab`), and one shared gutter marker column — left click toggles a breakpoint, middle click (the wheel) toggles a bookmark; the panel itself scrolls like a pager (`↑↓`, `PgUp`/`PgDn`, `Home`/`End`; the wheel works too, and over the console column it walks the backlog), `l` peeks at the process console with scroll-back, `+`/`-` resize the panel, and the selected entry is drawn across the full panel width so a long frame path or variable value is readable; Go/Delve out of the box, any other DAP adapter (debugpy, lldb-dap, node, ...) via `[debug]` config, and PHP out of the box as well — Xdebug has no DAP, so dmed speaks its DBGp protocol directly (spawns `php` on the active file, sets breakpoints, steps, and walks the variables tree)
 - **Lua plugins** — keybindings, palette commands and events; hot-reload on edit, plus a built-in store (`Plugins: Install...`) with embedded and GitHub-hosted plugins
 - **Localization** — English/Russian UI, switchable from the palette
 - **Sessions** — auto-save/restore open files across restarts
@@ -83,7 +86,7 @@ Install the latest release with a single command:
 curl -fsSL https://raw.githubusercontent.com/dedomorozoff/dmed/main/install.sh | sh
 ```
 
-> Requires a Go toolchain **>= 1.24** for building from source; the one-liner
+> Requires a Go toolchain **>= 1.26** for building from source; the one-liner
 > installs a prebuilt binary (no Go needed).
 
 **Alternative — build from source:**
@@ -122,6 +125,7 @@ dmed a.txt b.txt               # multiple files → tabs
 | `Home` / `End` | Line start / end |
 | `PgUp` / `PgDn` | Page up / down |
 | `Ctrl+↑/↓` | Scroll without moving cursor |
+| `Ctrl+L` | Go to line (N, N:C, or `+N`/`-N` relative) |
 
 ### Editing
 
@@ -130,7 +134,10 @@ dmed a.txt b.txt               # multiple files → tabs
 | `Shift+Arrows` | Select text |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |
 | `Ctrl+Z` / `Ctrl+R` | Undo / redo |
-| `Ctrl+Y` | Delete line |
+| `Ctrl+Y` / `Ctrl+D` | Delete / duplicate line |
+| `Ctrl+/` | Toggle comment |
+| `Alt+Z` | Toggle word wrap |
+| `Alt+B` | Toggle inline git blame (author · when per line) |
 | `Alt+↑` / `Alt+↓` | Move line up / down |
 | `Alt+D` | Add multi-cursor at next word occurrence |
 | `Alt+Click` | Add cursor at click position |
@@ -162,12 +169,32 @@ dmed a.txt b.txt               # multiple files → tabs
 | `Ctrl+G` | Git panel |
 | `Alt+T` | Toggle terminal |
 
+The status bar's bottom-left icons (`▤` tree, `⎇` git, `✦` AI, `◉` debug, `❯`
+terminal) are clickable; hovering one shows a callout with its shortcut.
+
+### Debug
+
+| Keys | Action |
+|------|--------|
+| `Ctrl+Alt+D` | Toggle debug panel |
+| `F4` | Toggle breakpoint at cursor line (or left-click the gutter) |
+| Middle click (gutter) | Toggle bookmark |
+| `F5` | Run / continue / pause a running debuggee |
+| `Shift+F5` | Stop session |
+| `F6` | Step over (while the debug panel is open) |
+| `F7` | Step in (while the debug panel is open) |
+| `Shift+F7` | Step out (while the debug panel is open) |
+| `Tab` (in panel) | Cycle threads / stack / variables / eval input |
+| Click / wheel (in panel) | Select a thread, frame or variable; `Backspace` leaves an expanded variable |
+
 ### AI
 
 | Keys | Action |
 |------|--------|
 | `Alt+A` | Toggle AI chat panel |
 | `Alt+I` | Inline rewrite (select text first) |
+| `Alt+G` | Inline ghost suggestion (Tab accept, Esc dismiss) |
+| `Alt+L` | Agent panel — background task queue, progress, cancel |
 | `Ctrl+U` | Clear chat history (in chat panel) |
 
 ### Search
@@ -189,7 +216,8 @@ dmed a.txt b.txt               # multiple files → tabs
 
 | Keys | Action |
 |------|--------|
-| `Ctrl+P` / `F2` | Command palette |
+| `F12` / `Ctrl+Click` | Go to definition (LSP) |
+| `Ctrl+P` / `F2` / double `Shift` | Command palette |
 | `F1` / `Ctrl+E` | Help overlay |
 | `Ctrl+Q` / `Ctrl+C` | Quit |
 
@@ -203,10 +231,11 @@ Settings hot-reload on save.
 tab_width = 4
 syntax_theme = monokai      # any chroma style name
 line_numbers = true
+word_wrap = false           # wrap long lines to pane width (Alt+Z toggles)
 skipped_dirs = .git,node_modules,vendor
 
 [ai]
-provider = Ollama (local)   # wizard preset: Ollama (local) | OpenAI | DeepSeek | Groq | LM Studio (local) | vLLM (local) | Custom
+provider = Ollama (local)   # wizard preset: Ollama (local) | OpenAI | DeepSeek | Groq | LM Studio (local) | vLLM (local) | Unsloth (local) | Custom
                             # legacy values "ollama"/"openai" still work
 model =                      # empty = first model reported by the server
 ollama_url = http://localhost:11434   # base URL, no /v1 suffix (it is appended automatically)
@@ -216,18 +245,46 @@ temperature = 0              # generation temperature in tenths (7 => 0.7); 0 = 
 num_ctx = 0                  # context window in tokens for Ollama (num_ctx); 0 = default
 num_predict = 0              # max output tokens; 0 = provider default
 tool_rounds = 0              # chat tool-calling loop cap; 0 = built-in (6)
-allow_run = always           # always | never — let the model run shell commands (RUN tool)
+allow_run = always           # always | never | ask — let the model run shell commands (RUN tool)
 restrict_to_root = false     # true bounds READ/EDIT/REPLACE paths to the project root
 system_prompt = You are a helpful coding assistant...
+
+[agent]                       # background agent tasks (M4): defaults are fine for most users
+system_prompt =               # instruction override for agents producing edits; empty = built-in
+context_max = 262144          # total bytes of file context gathered for the task
 
 [ui]
 tree_width = 25
 chat_width_pct = 40          # percentage of screen width
+lang = en                    # UI language: en | ru
 
 [plugins]                     # remote source for the plugin store
 repo = dedomorozoff/dmed     # "owner/repo"
 dir = plugins                # directory holding .lua plugins
 branch = main
+
+[debug]                       # DAP debugger (Go/Delve by default)
+mode = debug                  # launch mode passed to the adapter (debug/test/exec for Delve)
+program =                     # package dir / executable / module entry; empty = active file dir
+args =                        # whitespace-separated arguments for the debuggee
+stop_on_entry = false         # pause at program start
+adapter_cmd = dlv             # adapter binary (dlv, debugpy-adapter, lldb-dap, node, ...); dlv_path is a legacy alias
+adapter_mode = reverse        # reverse (adapter dials us back) | stdio (stdin/stdout DAP)
+adapter_args =                # extra CLI args for the adapter process
+launch_type = go              # DAP launch "type" field
+launch_request = launch       # launch | attach
+launch_json =                 # raw JSON merged into the launch body (adapter-specific keys win)
+```
+
+Example: debug a Python module through debugpy (a stdio DAP adapter):
+
+```ini
+[debug]
+adapter_cmd = debugpy-adapter
+adapter_mode = stdio
+launch_type = python
+program = /path/to/app
+launch_json = {"justMyCode": false}
 ```
 
 ## Documentation
@@ -248,6 +305,7 @@ internal/bundled/    embedded official plugins for the plugin store
 internal/i18n/       en/ru localization catalogs
 internal/ai/         provider interface: Ollama + OpenAI-compatible
 internal/config/     INI parser, hot-reload, defaults
+internal/dap/        DAP client (debugging): framing, stdio/reverse launchers
 internal/syntax/     Chroma-based highlighting
 internal/vcs/        pure-Go git operations (go-git)
 internal/lsp/        JSON-RPC 2.0 LSP client
@@ -264,8 +322,10 @@ main.go              CLI entry point
 | M1 — Multi-file, tabs, splits, finder, tree, move lines | ✅ Done |
 | M2 — fsnotify, git gutter, event bus | ✅ Done |
 | M3 — AI chat, inline rewrite, OpenAI-compatible providers | ✅ Done |
-| M4 — Background agents (multi-file tasks, task queue) | 🔜 Next |
+| M4 — Background agents (multi-file tasks, task queue) | ✅ Done |
 | M5 — LSP, terminal, plugins, sessions, config | ✅ Done |
+| M6 — AI onboarding (provider presets, setup wizard) | ✅ Done |
+| M7 — Debugging (DAP/Delve + generic adapters) | ✅ Done |
 
 See [ROADMAP.md](ROADMAP.md) for full details.
 

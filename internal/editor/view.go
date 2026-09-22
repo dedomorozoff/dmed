@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -21,6 +22,7 @@ var (
 	cursorStyle     = lipgloss.NewStyle().Reverse(true)
 	statusStyle     = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("250"))
 	statusHiStyle   = lipgloss.NewStyle().Background(lipgloss.Color("61")).Foreground(lipgloss.Color("255")).Bold(true)
+	langStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
 	hintStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	activePaneStyle = lipgloss.NewStyle().Background(lipgloss.Color("235"))
 	matchStyle      = lipgloss.NewStyle().Background(lipgloss.Color("214")).Foreground(lipgloss.Color("0"))
@@ -31,6 +33,11 @@ var (
 	diagErrStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
 	diagWarnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	diagInfoStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
+	bpStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	bpDimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	bmStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
+	stopStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	dapLineStyle    = lipgloss.NewStyle().Background(lipgloss.Color("236"))
 	okTestStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
 	errTestStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	diffAddBg       = lipgloss.NewStyle().Background(lipgloss.Color("22"))
@@ -38,6 +45,7 @@ var (
 	diffModBg       = lipgloss.NewStyle().Background(lipgloss.Color("58"))
 	selectionStyle  = lipgloss.NewStyle().Background(lipgloss.Color("60")).Foreground(lipgloss.Color("255"))
 	ghostStyle      = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("243"))
+	blameStyle      = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("244"))
 )
 
 type helpEntry struct {
@@ -48,7 +56,7 @@ type helpEntry struct {
 var helpEntries = []helpEntry{
 	{"Ctrl+S", "help.save"},
 	{"", ""},
-	{"Ctrl+P / F2", "help.palette"},
+	{"Ctrl+P / F2 / Shift+Shift", "help.palette"},
 	{"Shift+Arrows", "help.select"},
 	{"Ctrl+C / Ctrl+X / Ctrl+V", "help.clipboard"},
 	{"", ""},
@@ -56,9 +64,15 @@ var helpEntries = []helpEntry{
 	{"Ctrl+H", "help.replace"},
 	{"Ctrl+L", "help.goto_line"},
 	{"Alt+Z", "help.word_wrap"},
+	{"Alt+B", "help.blame"},
 	{"Ctrl+G", "help.git_panel"},
+	{"Ctrl+Alt+D", "help.debug"},
+	{"F4 / F5 / F6 / F7 / S+F5 / S+F7", "help.debug_keys"},
+	{"↑↓/PgUp/PgDn/Home/End, +/-", "help.debug_panel"},
+	{"F12 / Ctrl+Click", "help.goto_def"},
 	{"D (in Git panel)", "help.git_diff"},
 	{"Alt+[ / Alt+]", "help.hunk"},
+	{"Alt+M / Alt+N / S+Alt+N", "help.bookmark"},
 	{"Ctrl+O", "help.finder"},
 	{"Ctrl+T", "help.open"},
 	{"Alt+T", "help.terminal"},
@@ -108,6 +122,25 @@ func (m Model) paletteExtraRows() int {
 	return len(hits) + 1
 }
 
+// folderExtraRows is how many rows the built-in folder picker occupies below
+// the status bar, reserving their height so the panel stays on screen.
+func (m Model) folderExtraRows() int {
+	if !m.folderOpen {
+		return 0
+	}
+	n := 3 // header + parent row + hint
+	if len(m.folderEntries) == 0 {
+		n++ // — empty directory —
+		return n
+	}
+	if len(m.folderEntries) > folderVisible {
+		n += folderVisible
+	} else {
+		n += len(m.folderEntries)
+	}
+	return n
+}
+
 func (m Model) termPanelHeight() int {
 	h := m.height / 3
 	if h < 6 {
@@ -124,6 +157,57 @@ func (m Model) termExtraRows() int {
 		return 0
 	}
 	return m.termPanelHeight()
+}
+
+// dapPanelMinRows is the smallest usable debug panel: header, column titles
+// and a few entries. dapPanelAutoMax caps the height derived from the terminal;
+// a height the user picked with +/- is only bounded by the terminal itself.
+const (
+	dapPanelMinRows = 6
+	dapPanelAutoMax = 14
+)
+
+// debugPanelHeight is the height of the docked debug panel: a quarter of the
+// terminal by default, or the height the user resized it to with +/-.
+func (m Model) debugPanelHeight() int {
+	if m.dapPanelRows > 0 {
+		return m.clampDapPanelRows(m.dapPanelRows)
+	}
+	h := m.height / 4
+	if h < dapPanelMinRows {
+		h = dapPanelMinRows
+	}
+	if h > dapPanelAutoMax {
+		h = dapPanelAutoMax
+	}
+	return h
+}
+
+// clampDapPanelRows keeps a requested panel height usable for the current
+// terminal: at least dapPanelMinRows, at most the terminal minus those same
+// rows, so the buffer and the status bar stay on screen.
+func (m Model) clampDapPanelRows(h int) int {
+	if max := m.height - dapPanelMinRows; h > max {
+		h = max
+	}
+	if h < dapPanelMinRows {
+		h = dapPanelMinRows
+	}
+	return h
+}
+
+// growDapPanel resizes the debug panel by d rows (positive grows). It starts
+// from the height currently in effect, so the first press never jumps on a
+// terminal whose automatic height differs from the default quarter.
+func (m *Model) growDapPanel(d int) {
+	m.dapPanelRows = m.clampDapPanelRows(m.debugPanelHeight() + d)
+}
+
+func (m Model) debugExtraRows() int {
+	if !m.dapOpen {
+		return 0
+	}
+	return m.debugPanelHeight()
 }
 
 func (m Model) langChooserExtraRows() int {
@@ -145,7 +229,7 @@ func (m Model) pluginStoreExtraRows() int {
 }
 
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.finderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows()
+	h := m.height - 2 - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -153,6 +237,7 @@ func (m Model) viewHeight() int {
 }
 
 func (m Model) gutterWidthForTab(t *tab) int {
+	// Line number + one shared marker column (breakpoint ● / bookmark ◆).
 	w := len(strconv.Itoa(t.buf.LineCount())) + 3
 	if w < 6 {
 		w = 6
@@ -188,10 +273,17 @@ func (m Model) View() tea.View {
 		rows = append(rows, renderSideBySide(m.conflictLeftLines, m.conflictRightLines, m.conflictRows, m.conflictOffY, m.conflictOffX, m.width, h, nil, nil)...)
 	} else if m.aiCfgOpen {
 		rows = append(rows, m.aiSettingsPanel(h)...)
+	} else if m.dapCfgOpen {
+		rows = append(rows, m.dapCfgPanel(h)...)
 	} else if m.helpOpen {
 		rows = append(rows, m.helpPanel(h)...)
 	} else {
 		rows = append(rows, m.editorRows(h)...)
+	}
+	if m.dapOpen {
+		// The debug panel docks between the content and the status bar so the
+		// status bar never moves away from the bottom of the screen.
+		rows = append(rows, m.debugPanel()...)
 	}
 	bottom := m.statusBar()
 	if m.diffViewOpen {
@@ -267,6 +359,9 @@ func (m Model) View() tea.View {
 	if m.finderOpen {
 		rows = append(rows, m.finderPanel()...)
 	}
+	if m.folderOpen {
+		rows = append(rows, m.folderPanel()...)
+	}
 	if m.paletteOpen {
 		rows = append(rows, m.palettePanel()...)
 	}
@@ -282,17 +377,30 @@ func (m Model) View() tea.View {
 	// The completion popup floats under the edit line instead of being pinned
 	// to the bottom of the screen.
 	rows = m.overlayCompletion(rows)
+	// The status-icon hover callout floats just above the status bar.
+	rows = m.overlayStatusTooltip(rows)
+	// The split-icon hover callout floats just under the tab bar.
+	rows = m.overlaySplitTooltip(rows)
 	var v tea.View
 	v.SetContent(lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n")))
 	v.AltScreen = true
 	v.WindowTitle = "dmed — " + m.activeTab().name(m.baseDir())
-	v.MouseMode = tea.MouseModeCellMotion
+	// All-motion mode is required so hover (no button held) reaches the app;
+	// this powers the status-bar icon callout. Terminals without any-event
+	// tracking simply never deliver hover.
+	v.MouseMode = tea.MouseModeAllMotion
 
-	// Terminal cursor: positioned at the editor cursor location.
-	if !m.gitOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode && !m.paletteOpen && !m.langChooserOpen && !m.pluginStoreOpen && !m.helpOpen && !m.aiCfgOpen && !m.searchOpen && !m.gotoOpen && !m.promptOpen && !m.termOpen && !m.chatOpen {
-		cx, cy := m.cursorScreenPos()
-		v.Cursor = tea.NewCursor(cx, cy)
-	}
+	// Request the Kitty keyboard protocol so the terminal reports bare
+	// modifier presses and every physical key as an escape code. This is what
+	// makes double-Shift (JetBrains-style palette) possible. Terminals without
+	// support ignore the request, so this degrades gracefully.
+	v.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
+
+	// The editor draws its own static reverse-video cursor at every caret
+	// (including the main one), so the terminal cursor must be hidden. Otherwise
+	// the blinking terminal block overlaps the static reverse cell and looks
+	// like two cursors stacked on the same position.
+	v.Cursor = nil
 
 	return v
 }
@@ -305,8 +413,9 @@ func (m Model) editorRows(h int) []string {
 	} else if m.layout == splitVert {
 		w0 := m.paneTotalWidth(0)
 		w1 := m.paneTotalWidth(1)
-		left := m.renderPaneRows(0, h, w0)
-		right := m.renderPaneRows(1, h, w1)
+		ch := m.paneContentHeight(0)
+		left := m.renderPaneRows(0, ch, w0)
+		right := m.renderPaneRows(1, ch, w1)
 		combined := make([]string, h)
 		sepColor := "238"
 		if m.activePane == 0 {
@@ -314,9 +423,11 @@ func (m Model) editorRows(h int) []string {
 		}
 		sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(sepColor))
 		sep := sepStyle.Render("│")
-		for row := 0; row < h; row++ {
+		for row := 0; row < ch; row++ {
 			combined[row] = padTo(left[row], w0) + sep + padTo(right[row], w1)
 		}
+		// The shared bottom row is the status bar of both panes, one per column.
+		combined[ch] = padTo(m.paneStatusBar(0), w0) + sep + padTo(m.paneStatusBar(1), w1)
 		rows = m.composeSidebar(combined)
 		return m.composeChatRail(rows)
 	}
@@ -325,8 +436,8 @@ func (m Model) editorRows(h int) []string {
 	h1 := m.paneViewHeight(1)
 	w0 := m.paneTotalWidth(0)
 	w1 := m.paneTotalWidth(1)
-	top := m.renderPaneRows(0, h0, w0)
-	bottom := m.renderPaneRows(1, h1, w1)
+	top := m.renderPaneRows(0, m.paneContentHeight(0), w0)
+	bottom := m.renderPaneRows(1, m.paneContentHeight(1), w1)
 	for row := range top {
 		top[row] = padTo(top[row], w0)
 	}
@@ -341,8 +452,11 @@ func (m Model) editorRows(h int) []string {
 	sep := sepStyle.Render(strings.Repeat("─", m.editorAreaWidth()))
 	combined := make([]string, 0, h0+h1+1)
 	combined = append(combined, top...)
+	// Each pane docks its own status line at the bottom of its cell.
+	combined = append(combined, padTo(m.paneStatusBar(0), w0))
 	combined = append(combined, sep)
 	combined = append(combined, bottom...)
+	combined = append(combined, padTo(m.paneStatusBar(1), w1))
 	rows = m.composeSidebar(combined)
 	return m.composeChatRail(rows)
 }
@@ -402,6 +516,10 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	diff := t.getDiff(m.repo)
 	diagPath, _ := filepath.Abs(t.path)
 	tabDiags := m.diags[diagPath]
+	bpSet := m.dapBreak[diagPath]
+	bpVerifSet := m.dapBPVerif[diagPath]
+	bmSet := m.bookmarks[diagPath]
+	dapStoppedHere := m.dapRunState == dapStopped && m.dapCurPath == diagPath
 
 	wrap := p.wordWrap && contentW > 0
 	var segs []wrapSeg
@@ -466,7 +584,37 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 			diagMark = " "
 		}
 
-		numPad := gw - 2 - len(num)
+		// One shared marker column: the current stop marker ▶ and breakpoints
+		// ● / ○ take precedence over a bookmark ◆ (their own columns used to
+		// make gutter clicks depend on which sub-column was hit).
+		mark := " "
+		if bmSet[ln+1] {
+			mark = "◆"
+		}
+		if bpSet[ln+1] {
+			mark = "●"
+			// The adapter explicitly rejected this line after a session ran:
+			// show it unverified instead of a solid breakpoint.
+			if v, ok := bpVerifSet[ln+1]; ok && !v {
+				mark = "○"
+			}
+		}
+		if dapStoppedHere && m.dapCurLine == ln+1 {
+			mark = "▶"
+		}
+		markStyle := gutterStyle
+		switch mark {
+		case "●":
+			markStyle = bpStyle
+		case "○":
+			markStyle = bpDimStyle
+		case "▶":
+			markStyle = stopStyle
+		case "◆":
+			markStyle = bmStyle
+		}
+
+		numPad := gw - 3 - len(num)
 		if numPad < 0 {
 			numPad = 0
 		}
@@ -474,11 +622,17 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 		gutStr := numStr
 		if active && ln == cur && ln < t.buf.LineCount() {
 			gutStr = curGutterStyle.Render(numStr)
+		} else if dapStoppedHere && m.dapCurLine == ln+1 {
+			// The debuggee is stopped on this line: render its number like the
+			// cursor line so the execution point stays easy to spot while
+			// stepping through code far from the editing cursor.
+			gutStr = curGutterStyle.Render(numStr)
 		} else {
 			gutStr = gutterStyle.Render(numStr)
 		}
 		gutStr += diagMarkStyle.Render(diagMark)
 		gutStr += gitMarkStyle.Render(gitMark)
+		gutStr += markStyle.Render(mark)
 
 		if active && !wrap && m.ghostVisible && len(m.ghostLines) > 1 && ln > m.ghostRow {
 			// Multi-line ghost: subsequent ghost lines appear on their own rows.
@@ -505,9 +659,69 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 			rows[row] = gutStr + m.renderLineWrap(p, t, ln, segStart, segEnd, active, syntaxLines)
 		} else {
 			rows[row] = gutStr + m.renderLine(p, t, ln, contentW, active, syntaxLines)
+			rows[row] = m.appendBlame(rows[row], t, diff, ln, contentW)
 		}
 	}
 	return rows
+}
+
+// appendBlame right-aligns a "author · when" git blame annotation on a row.
+// It only annotates unchanged lines (buffer line == HEAD line) so the label
+// stays truthful, and only when there is room on the row.
+func (m Model) appendBlame(row string, t *tab, diff vcs.FileDiff, ln, contentW int) string {
+	if !m.blameOn || t.blame == nil {
+		return row
+	}
+	if ln >= len(diff.Lines) || diff.Lines[ln] != vcs.DiffNone || ln >= len(t.blame) {
+		return row
+	}
+	lab := blameLabel(t.blame[ln])
+	labW := lipgloss.Width(lab)
+	if labW < 1 {
+		return row
+	}
+	rowW := lipgloss.Width(row)
+	pad := contentW - rowW - labW
+	if pad < 2 {
+		return row
+	}
+	return row + strings.Repeat(" ", pad) + blameStyle.Render(lab)
+}
+
+// blameLabel formats one blame line as "author · when".
+func blameLabel(b vcs.BlameLine) string {
+	author := b.Author
+	if i := strings.IndexAny(author, "<"); i >= 0 {
+		author = strings.TrimSpace(author[:i])
+	}
+	if author == "" {
+		author = "?"
+	}
+	if len(author) > 12 {
+		author = author[:12]
+	}
+	return author + " · " + relWhen(b.Date)
+}
+
+// relWhen renders a time as a compact relative human string.
+func relWhen(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < 0:
+		return "now"
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	case d < 365*24*time.Hour:
+		return fmt.Sprintf("%dmo", int(d.Hours()/(24*30)))
+	default:
+		return fmt.Sprintf("%dy", int(d.Hours()/(24*365)))
+	}
 }
 
 // renderLineWrap renders one wrap segment (expanded rune range [segStart,
@@ -584,15 +798,16 @@ func (m Model) tabBar() string {
 		}
 	}
 	line := strings.Join(parts, "")
-	fill := m.width - lipgloss.Width(line)
+	icons := m.splitIconsString()
+	fill := m.width - lipgloss.Width(line) - lipgloss.Width(icons)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
-	return line
+	return line + icons
 }
 
 func (m Model) treePanel(h int) []string {
-	inner := m.cfg.UI.TreeWidth - 2
+	inner := m.cfg.UI.TreeWidth - 1
 	hint := m.treeHint(inner)
 	if len(hint) > h {
 		hint = hint[:h]
@@ -637,18 +852,20 @@ func (m Model) treePanel(h int) []string {
 				styled.WriteString(treeFileStyle.Render(e.name))
 			}
 			line := styled.String()
+			plainS := plain.String()
 			pad := inner - lipgloss.Width(line)
 			if pad < 0 {
 				// Truncate to the available width.
-				runes := []rune(plain.String())
-				line = string(runes[:maxInt(0, len(runes)+pad)])
+				runes := []rune(plainS)
+				plainS = string(runes[:maxInt(0, len(runes)+pad)])
+				line = plainS
 				pad = 0
 			}
 			fill := strings.Repeat(" ", pad)
 			if i == m.treeSel && m.treeFocus {
-				cell = statusHiStyle.Render(plain.String() + fill)
+				cell = statusHiStyle.Render(plainS + fill)
 			} else if i == m.treeSel {
-				cell = statusStyle.Render(plain.String() + fill)
+				cell = statusStyle.Render(plainS + fill)
 			} else {
 				cell = line + fill
 			}
@@ -727,18 +944,39 @@ func padTo(s string, w int) string {
 }
 
 func (m Model) helpPanel(h int) []string {
-	rows := make([]string, 0, h)
-	rows = append(rows, statusHiStyle.Render(m.t("help.title"))+" "+hintStyle.Render(m.t("help.close_hint")))
+	all := make([]string, 0, len(helpEntries)+1)
+	title := statusHiStyle.Render(m.t("help.title")) + " " + hintStyle.Render(m.t("help.close_hint"))
+	if m.helpMaxScroll() > 0 {
+		title += hintStyle.Render(m.t("help.scroll_hint"))
+	}
+	all = append(all, title)
 	for _, e := range helpEntries {
 		if e.keys == "" {
-			rows = append(rows, "")
+			all = append(all, "")
 			continue
 		}
 		key := e.keys
 		if len(key) < 26 {
 			key += strings.Repeat(" ", 26-len(key))
 		}
-		rows = append(rows, " "+statusStyle.Render(key)+m.t(e.desc))
+		all = append(all, " "+statusStyle.Render(key)+m.t(e.desc))
+	}
+	// Window the list so it never overflows the terminal; j/k/PgUp/PgDn and
+	// the mouse wheel scroll it.
+	off := m.helpScroll
+	if max := len(all) - h; off > max {
+		off = max
+	}
+	if off < 0 {
+		off = 0
+	}
+	end := off + h
+	if end > len(all) {
+		end = len(all)
+	}
+	rows := all[off:end]
+	for len(rows) < h {
+		rows = append(rows, "")
 	}
 	return rows
 }
@@ -868,9 +1106,9 @@ func (m Model) gitStatusLine() string {
 	} else {
 		hint = m.t("git.hints")
 	}
-	line := ""
+	line := m.statusIconsString()
 	if r == nil {
-		line = statusHiStyle.Render(" git: ") + statusStyle.Render(m.t("git.no_repo"))
+		line += statusHiStyle.Render(" git: ") + statusStyle.Render(m.t("git.no_repo"))
 	} else {
 		summary := r.StatusSummary()
 		staged := 0
@@ -879,7 +1117,7 @@ func (m Model) gitStatusLine() string {
 				staged++
 			}
 		}
-		line = statusHiStyle.Render(m.t("git.prefix_status")) +
+		line += statusHiStyle.Render(m.t("git.prefix_status")) +
 			hintStyle.Render("("+r.Branch()+" "+summary+")") +
 			statusStyle.Render(fmt.Sprintf(" %s", m.t("git.status_count", len(m.gitFiles), staged)))
 	}
@@ -920,11 +1158,11 @@ func fitStatusTail(s string, w int) string {
 }
 
 func (m Model) gitLogStatusLine() string {
-	var line string
+	line := m.statusIconsString()
 	if len(m.gitLogEntries) == 0 {
-		line = statusHiStyle.Render(m.t("git.prefix_log")) + statusStyle.Render(m.t("git.no_commits"))
+		line += statusHiStyle.Render(m.t("git.prefix_log")) + statusStyle.Render(m.t("git.no_commits"))
 	} else {
-		line = statusHiStyle.Render(m.t("git.prefix_log")) + hintStyle.Render(m.t("git.commit_count", len(m.gitLogEntries)))
+		line += statusHiStyle.Render(m.t("git.prefix_log")) + hintStyle.Render(m.t("git.commit_count", len(m.gitLogEntries)))
 	}
 	hint := m.t("git.log_hint")
 	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
@@ -1648,6 +1886,62 @@ func (m Model) finderPanel() []string {
 	return rows
 }
 
+// folderPanel renders the built-in folder picker: a path header, the
+// directory listing (row 0 is always the parent), and a hint line.
+func (m Model) folderPanel() []string {
+	rows := make([]string, 0, folderVisible+2)
+	head := statusHiStyle.Render(" " + m.t("folder.title") + m.folderPath + " ")
+	fill := m.width - lipgloss.Width(head)
+	if fill > 0 {
+		head += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	rows = append(rows, head)
+
+	// Row 0: parent directory.
+	upLabel := m.t("folder.up")
+	if m.folderSel == 0 {
+		rows = append(rows, statusHiStyle.Render(padTo(" "+upLabel+" ", m.width)))
+	} else {
+		rows = append(rows, statusStyle.Render(padTo(" "+upLabel+" ", m.width)))
+	}
+
+	// Rows 1+: entries from the current directory.
+	if len(m.folderEntries) == 0 {
+		rows = append(rows, statusStyle.Render(padTo(" "+m.t("folder.empty")+" ", m.width)))
+	} else {
+		end := m.folderOffset + folderVisible
+		if start := m.folderOffset; start < len(m.folderEntries) {
+			if end > len(m.folderEntries) {
+				end = len(m.folderEntries)
+			}
+			for i := start; i < end; i++ {
+				e := m.folderEntries[i]
+				label := " ▸ " + e.name + "/"
+				if !e.dir {
+					label = "   " + e.name
+				}
+				label = padTo(label+" ", m.width)
+				if m.folderSel == i+1 {
+					rows = append(rows, statusHiStyle.Render(label))
+				} else if e.dir {
+					rows = append(rows, statusStyle.Render(label))
+				} else {
+					rows = append(rows, hintStyle.Render(label))
+				}
+			}
+		}
+	}
+
+	// Hint line.
+	hint := statusStyle.Render(m.t("folder.hint"))
+	fill = m.width - lipgloss.Width(hint)
+	if fill > 0 {
+		hint += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	rows = append(rows, hint)
+	return rows
+}
+
 func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLines []syntax.HighlightedLine) string {
 	if w <= 0 || ln >= t.buf.LineCount() {
 		return ""
@@ -1657,6 +1951,11 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 	if ln < len(syntaxLines) {
 		rawStyles = syntaxLines[ln]
 	}
+
+	// Highlight the line the debuggee is stopped on, so the execution point is
+	// visible at a glance (not just the ▶ gutter mark). dapCurLine is 1-based.
+	isDebugLine := activePane && m.dapRunState == dapStopped && m.dapCurPath != "" &&
+		m.dapCurPath == t.path && m.dapCurLine > 0 && ln == m.dapCurLine-1
 
 	// Expand tabs
 	exp := make([]rune, 0, len(raw))
@@ -1680,6 +1979,14 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 		}
 	}
 	rawToExp[len(raw)] = len(exp)
+
+	// Apply the execution-point line highlight under the existing syntax
+	// foreground so the stopped line glows without muting its colors.
+	if isDebugLine {
+		for i := range expStyles {
+			expStyles[i] = dapLineStyle.Inherit(expStyles[i])
+		}
+	}
 
 	// Search match highlighting
 	type matchInfo struct {
@@ -1799,9 +2106,13 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 	}
 
 	// Cursor(s) at end of line
+	drawn := false
 	for _, cc := range carets {
 		if cc == len(exp) && cc >= start && cc < start+w {
-			out.WriteString(cursorStyle.Render(" "))
+			if !drawn {
+				out.WriteString(cursorStyle.Render(" "))
+			}
+			drawn = true
 		}
 	}
 
@@ -1818,6 +2129,16 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 		// Show ghost only when the cursor is at the end of the ghost start line.
 		if t.buf.CurLine() == ln && t.buf.Col() == prefixLen && rem != "" {
 			out.WriteString(ghostStyle.Render(rem))
+		}
+	}
+
+	// Extend the execution-point highlight to the full row width so the glow
+	// isn't clipped on short lines; search/selection/cursor overrides still win
+	// for their respective cells above.
+	if isDebugLine && w > 0 {
+		written := end - start
+		if written < w {
+			out.WriteString(dapLineStyle.Render(strings.Repeat(" ", w-written)))
 		}
 	}
 
@@ -1914,20 +2235,14 @@ func (m Model) palettePanel() []string {
 
 func (m Model) statusBar() string {
 	t := m.activeTab()
-	base := m.baseDir()
-	dirty := ""
-	if t.buf.Dirty() {
-		dirty = " *"
-	}
-	paneMark := ""
-	if m.layout != splitNone {
-		paneMark = fmt.Sprintf("[%d] ", m.activePane+1)
-	}
-	left := statusHiStyle.Render(" " + paneMark + t.name(base) + dirty)
+	// In a split each pane draws its own status line (name, Ln/Col, file
+	// format) at the bottom of its cell, so the app-wide line must not repeat
+	// that per-file state.
+	perPane := m.layout != splitNone
+	branchSuffix := ""
 	if m.repo != nil {
-		b := m.repo.Branch()
-		if b != "" {
-			left += hintStyle.Render(" (" + b + ")")
+		if b := m.repo.Branch(); b != "" {
+			branchSuffix = " (" + b + ")"
 		}
 	}
 
@@ -1935,12 +2250,19 @@ func (m Model) statusBar() string {
 	if m.msg != "" {
 		mid = statusStyle.Render("  " + m.msg)
 	}
-	right := m.t("status.lncol", t.buf.CurLine()+1, t.buf.Col()+1)
+	right := ""
+	if !perPane {
+		right = m.t("status.lncol", t.buf.CurLine()+1, t.buf.Col()+1)
+	}
 	fileInfo := ""
-	if t.path != "" {
+	langTag := ""
+	if !perPane && t.path != "" {
 		endings := map[string]string{"lf": "LF", "crlf": "CRLF"}
 		enc := strings.ToUpper(t.encoding)
-		fileInfo = fmt.Sprintf("%s %s ", endings[t.lineEnding], enc)
+		fileInfo = endings[t.lineEnding] + " " + enc + " "
+		if lang := syntax.Lang(t.path); lang != "" {
+			langTag = lang + " "
+		}
 	}
 	hint := ""
 	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gotoOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
@@ -1949,7 +2271,18 @@ func (m Model) statusBar() string {
 			hint += m.t("status.f8_pane")
 		}
 	}
-	rightBar := hintStyle.Render(hint) + statusStyle.Render(fileInfo) + statusStyle.Render(right)
+	rightBar := hintStyle.Render(hint) + langStyle.Render(langTag) + statusStyle.Render(fileInfo) + statusStyle.Render(right)
+
+	// The active file name already lives in the tab bar, so the status line
+	// only carries the icon strip, the split marker and the git branch.
+	left := m.statusIconsString()
+	if m.layout != splitNone {
+		left += statusHiStyle.Render(fmt.Sprintf(" [%d] ", m.activePane+1))
+	}
+	if !perPane && branchSuffix != "" {
+		left += hintStyle.Render(branchSuffix)
+	}
+
 	fill := m.width - lipgloss.Width(left) - lipgloss.Width(mid) - lipgloss.Width(rightBar)
 	if fill > 0 {
 		return left + mid + statusStyle.Render(strings.Repeat(" ", fill)) + rightBar

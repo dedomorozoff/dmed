@@ -1,10 +1,10 @@
-# dmed — терминальный редактор с AI-агентами
+# dmed — terminal editor with AI agents
 
-Терминальный редактор с AI-агентами как первоклассными участниками.
-участники редактирования, полный трекинг изменений файлов, человек утверждает
-каждое изменение через diff-review.
+A terminal editor with AI agents as first-class participants in editing,
+full file change tracking, and humans approving every change through
+diff review.
 
-## Архитектура
+## Architecture
 
 ```
 ┌─────────────────────────────────────┐
@@ -15,198 +15,284 @@
 │  buffers (rope) │ undo │ multi-file │
 ├─────────────────────────────────────┤
 │ Change tracking                     │
-│  fsnotify + git + внутренние события│
+│  fsnotify + git + internal events   │
 ├─────────────────────────────────────┤
 │ Agent layer                         │
 │  LLM clients │ task queue │ diffs   │
 └─────────────────────────────────────┘
 ```
 
-Ключевой принцип: изменения от агентов идут через diff → review → apply,
-никогда напрямую в буфер.
+Key principle: changes from agents go through diff → review → apply,
+never directly into a buffer.
 
-## Стек
+## Stack
 
-- Go 1.25 (`D:\go\bin`, обычный `go` из PATH)
+- Go 1.26 (`D:\go\bin`, plain `go` from PATH)
 - bubbletea + lipgloss — TUI
 - fsnotify — file watching
-- chroma → tree-sitter — подсветка (позже)
+- chroma → tree-sitter — highlighting (later)
 
 ## Milestones
 
-### M0 — скелет редактора
-- [x] Каркас проекта, модуль `dmed`
-- [x] Buffer: insert/delete/backspace/newline, курсор, undo/redo (с группировкой набора)
-- [x] Открытие/сохранение файла (`dmed <file>`)
-- [x] TUI: рендер, курсор, скролл, статус-бар, gutter с номерами строк
-- [x] Биндинги: стрелки, home/end/pgup/pgdn, C-S save, C-Q/C-C quit, C-Z undo, C-Y redo
-- [x] Юнит-тесты buffer + pty smoke-тесты (ввод, сохранение, навигация)
+### M0 — editor skeleton
+- [x] Project scaffolding, `dmed` module
+- [x] Buffer: insert/delete/backspace/newline, cursor, undo/redo (typing-run grouping)
+- [x] Open/save file (`dmed <file>`)
+- [x] TUI: rendering, cursor, scroll, status bar, gutter with line numbers
+- [x] Bindings: arrows, home/end/pgup/pgdn, C-S save, C-Q/C-C quit, C-Z undo, C-Y redo
+- [x] Unit tests for buffer + pty smoke tests (input, saving, navigation)
 
-Запуск: `make build && ./dmed file.txt` (Go ≥ 1.24 из PATH; GOROOT сбрасывается
-в Makefile как страховка).
+Run: `make build && ./dmed file.txt` (Go ≥ 1.26 from PATH; GOROOT is reset
+in the Makefile as insurance).
 
-### M1 — нормальный редактор
-- [x] Мультифайл: табы (`C-T` открыть через промпт, `C-W` закрыть,
-      `Alt+←/→` переключение, `Alt+1..9` прыжок на вкладку)
-- [x] Мультифайл: сплиты (вертикальный/горизонтальный, `C-\`/`F6` и `Ctrl+Alt+H`/`F7`,
-      переключение пейнов `Ctrl+Alt+P`/`F8`, закрытие `Ctrl+Alt+W`)
-- [x] Fuzzy finder по файлам (`C-O` или `F3`; subsequence-скоринг,
-      фокус уже открытого таба вместо дубликата)
-- [x] Открытие папки (`dmed dir/`): дерево проекта в сайдбаре (`C-B`/`F9`
-      фокус, `Esc` — в редактор), finder ищет внутри открытой папки.
-      Операции над файлами в дереве: `n`/`N` — новый файл/папка, `r` —
-      переименовать, `d` — копия, `Del` — удалить, `t` — в корзину
-      (подсказка клавиш внизу панели)
-- [x] Перемещение строк (`Alt+↑/↓`): текущая строка или выделение вверх-вниз, undo
-- [x] Мультикурсор: несколько курсоров (`Alt+Click`, `Alt+D` — следующее вхождение),
-      редактирование/навигация по всем курсорам одновременно (ввод, backspace,
-      delete, newline, вставка; стрелки двигают все курсоры; `Esc` — сброс)
-- [x] Rope-структура вместо `[][]rune`: буфер хранится как persistent
-      сбалансированное дерево строк (`internal/buffer/doc.go`), доступ и правки
-      O(log n), undo/redo по указателю корня (O(1), без клонирования).
-      Мультикурсор работает на материализованном виде. + `internal/rope` —
-      базовый рун-rope (фундамент).
-- [x] Подсветка синтаксиса (chroma), поиск/замена (`Ctrl+F` поиск, `Ctrl+H` замена, `F3`/`Shift+F3` навигация)
+### M1 — a real editor
+- [x] Multi-file: tabs (`C-T` open via prompt, `C-W` close,
+      `Alt+←/→` switch, `Alt+1..9` jump to tab)
+- [x] Multi-file: splits (vertical/horizontal, `C-\`/`F6` and `Ctrl+Alt+H`/`F7`,
+      switch panes `Ctrl+Alt+P`/`F8`, close `Ctrl+Alt+W`)
+- [x] Fuzzy file finder (`C-O` or `F3`; subsequence scoring,
+      focuses an already-open tab instead of duplicating)
+- [x] Open a folder (`dmed dir/`): project tree in the sidebar (`C-B`/`F9`
+      focus, `Esc` — back to the editor), finder searches inside the opened
+      folder. File operations in the tree: `n`/`N` — new file/folder, `r` —
+      rename, `d` — copy, `Del` — delete, `t` — move to trash
+      (key hints at the bottom of the panel)
+- [x] Move lines (`Alt+↑/↓`): current line or selection up/down, undo
+- [x] Multi-cursor: multiple cursors (`Alt+Click`, `Alt+D` — next occurrence),
+      editing/navigation across all cursors simultaneously (typing, backspace,
+      delete, newline, paste; arrows move all cursors; `Esc` — reset)
+- [x] Rope structure instead of `[][]rune`: the buffer is stored as a persistent
+      balanced line tree (`internal/buffer/doc.go`), access and edits
+      O(log n), undo/redo by root pointer (O(1), no cloning).
+      Multi-cursor operates on the materialized view. + `internal/rope` —
+      the base rune-rope (foundation).
+- [x] Syntax highlighting (chroma), find/replace (`Ctrl+F` find, `Ctrl+H` replace, `F3`/`Shift+F3` navigation)
 
-### M2 — tracking изменений
-- [x] fsnotify: внешние изменения → prompt на reload / авто-мердж чистых буферов
-- [x] Git из коробки (репозиторий определяется автоматически, zero-config,
-  работает сразу при открытии файла внутри репо):
-  - статус в gutter (добавлено/изменено/удалено: `+`, `~`, `_`),
-  - diff-вид изменённых строк + навигация по хункам (`Alt+[` / `Alt+]`),
-  - базовые операции: stage/unstage, коммит через Git панель (`Ctrl+G`).
-  Реализация: go-git (pure Go) — не требуем установленный git.
-  - [x] Inline diff preview в git-панели: side-by-side diff выбранного файла
-        отображается автоматически при навигации по списку файлов.
-  - [x] Подсветка синтаксиса в diff view (chroma): обе стороны diff
-        окрашиваются по лексемам языка файла.
-  - [x] Фокус diff: Tab/right переключает на diff-область (прокрутка),
-        left/Esc обратно на файлы. Мышь: клик = фокус, колёсико = скролл.
-  - [x] История коммитов (`l` в git-панели): список 50 последних коммитов,
-        side-by-side diff каждого коммита, навигация j/k, Tab→diff focus.
-  - [x] Ветки (`b` в git-панели): просмотр веток, переключение (Enter),
-        создание новой ветки (N → имя → Enter).
-  - [x] Git init (`i` в git-панели): инициализация репозитория, если его нет;
-        подсказки действий в статусной строке git-панели.
-- [x] Внутренняя шина событий (`internal/events`) (buffers ← watchers ← agents)
+### M2 — change tracking
+- [x] fsnotify: external changes → prompt to reload / auto-merge clean buffers
+- [x] Git out of the box (repository detected automatically, zero-config,
+  works immediately when opening a file inside a repo):
+  - status in the gutter (added/modified/deleted: `+`, `~`, `_`),
+  - diff view of changed lines + hunk navigation (`Alt+[` / `Alt+]`),
+  - basic operations: stage/unstage, commit via the Git panel (`Ctrl+G`).
+  Implementation: go-git (pure Go) — does not require an installed git.
+  - [x] Inline diff preview in the git panel: side-by-side diff of the selected
+        file is shown automatically while navigating the file list.
+  - [x] Syntax highlighting in the diff view (chroma): both sides of the diff
+        are colored by the file language's lexemes.
+  - [x] Diff focus: Tab/right switches to the diff area (scrolling),
+        left/Esc back to the files. Mouse: click = focus, wheel = scroll.
+  - [x] Commit history (`l` in the git panel): list of the last 50 commits,
+        side-by-side diff of each commit, j/k navigation, Tab→diff focus.
+  - [x] Branches (`b` in the git panel): view branches, switch (Enter),
+        create a new branch (N → name → Enter).
+  - [x] Git init (`i` in the git panel): initialize a repository if missing;
+        action hints in the git panel's status line.
+  - [x] Fetch / push (`f` / `p` in the git panel, status mode): background
+        sync to/from `origin` (go-git, embedded credentials, idempotent).
+  - [x] Inline git blame (`Alt+B`): author · when annotations, right-aligned
+        per line like Zed; only on unchanged lines and when no wrap.
+- [x] Internal event bus (`internal/events`) (buffers ← watchers ← agents)
 
 ### M3 — AI v1
-- [x] Чат-панель со стримингом, контекст файла/выделения
-      (`Alt+A` — панель справа; бэкенды — пресеты провайдеров: локальный
-      Ollama, OpenAI, DeepSeek, Groq, LM Studio, vLLM; `DMED_PROVIDER`/
-      `DMED_API_KEY`/`DMED_MODEL`/`DMED_OLLAMA_URL` переопределяют настройки;
-      модель при пустом конфиге берётся первая с сервера; Enter — отправить,
-      Esc — закрыть, PgUp/PgDn — скролл, Ctrl+U — новый поток с подсказкой
-      внизу панели)
-- [x] Inline-запросы («перепиши это») → diff-превью → accept/reject
-      (`Alt+I` — ввод инструкции, Accept/Reject после стриминга)
-- [x] Провайдеры: Ollama (local) + OpenAI-compatible (SSE streaming).
-      Конфиг: `provider`, `model`, `api_key`, `ollama_url`.
-      Совместимо с OpenAI, DeepSeek, Groq, Together, vLLM, LM Studio.
-- [x] Чат с инструментами (native tool calling): AI вызывает READ/SEARCH/RUN/EDIT
-      через структурированные JSON-функции (не текстовые маркеры), результаты
-      возвращаются в диалог (loop до 6 итераций). EDIT-предложения показываются
-      как side-by-side diff (y принять / 
- отклонить, Tab — следующий файл)
-      и применяются атомарно через agent Applier с перезагрузкой/открытием табов;
-      результаты инструментов рендерятся компактными карточками, затронутые
-      файлы автоматически открываются вкладками.
-- [x] История чата: диалоги-потоки сохраняются в `.dmed_chat.json` (последние 20)
-      и восстанавливаются при открытии панели; навигация `Ctrl+P`/`Ctrl+N`
-      (с крайнего — новый поток, `Ctrl+U`), счётчик потоков в шапке;
-      история промптов в поле ввода по `↑`/`↓` с черновиком.
+- [x] Chat panel with streaming, file/selection context
+      (`Alt+A` — right panel; backends — provider presets: local
+      Ollama, OpenAI, DeepSeek, Groq, LM Studio, vLLM, Unsloth; `DMED_PROVIDER`/
+      `DMED_API_KEY`/`DMED_MODEL`/`DMED_OLLAMA_URL` override settings;
+      with an empty config the first model from the server is used; Enter —
+      send, Esc — close, PgUp/PgDn — scroll, Ctrl+U — new thread with a hint
+      at the bottom of the panel)
+- [x] Inline requests ("rewrite this") → diff preview → accept/reject
+      (`Alt+I` — enter the instruction, Accept/Reject after streaming)
+- [x] Providers: Ollama (local) + OpenAI-compatible (SSE streaming).
+      Config: `provider`, `model`, `api_key`, `ollama_url`.
+      Compatible with OpenAI, DeepSeek, Groq, Together, vLLM, LM Studio, Unsloth.
+- [x] Chat with tools (native tool calling): the AI calls READ/SEARCH/RUN/EDIT
+      via structured JSON functions (not text markers), results
+      are returned to the dialog (loop up to 6 iterations). EDIT proposals are
+      shown as a side-by-side diff (y accept / n reject, Tab — next file)
+      and applied atomically via the agent Applier with reload/opening of tabs;
+      tool results are rendered as compact cards, affected
+      files are opened in tabs automatically.
+- [x] Chat history: dialogs/threads are saved to `.dmed_chat.json` (last 20)
+      and restored when the panel opens; navigation `Ctrl+P`/`Ctrl+N`
+      (from the last — new thread, `Ctrl+U`), thread counter in the header;
+      prompt history in the input field via `↑`/`↓` with a draft.
 
-### M4 — агенты
-> План реализации: [docs/M4-AGENTS.md](docs/M4-AGENTS.md) (выполнен)
-> Пакет `internal/agent` (queue/runner/applier/committer) + TUI: `Alt+L` или
-> палитра «Agent: New Task» — фоновая задача, очередь с прогрессом и отменой,
-> diff-review серии (`Tab` по файлам, `y` принять / `n` отклонить), атомарный
-> apply + git-commit + перезагрузка чистых буферов. Конфиг `[agent]`.
-- [x] Фоновые задачи над несколькими файлами («рефакторни модуль X»)
-- [x] Очередь задач, прогресс, отмена
-- [x] Agent edits = серия патчей с атомарным apply
+### M4 — agents
+> Implementation plan: [docs/M4-AGENTS.md](docs/M4-AGENTS.md) (done)
+> Package `internal/agent` (queue/runner/applier/committer) + TUI: `Alt+L` or
+> the "Agent: New Task" palette — background task, queue with progress and
+> cancellation, series diff-review (`Tab` across files, `y` accept / `n`
+> reject), atomic apply + git commit + reload of clean buffers. Config `[agent]`.
+- [x] Background tasks over multiple files ("refactor module X")
+- [x] Task queue, progress, cancellation
+- [x] Agent edits = a series of patches with atomic apply
 
-### M5 — полировка
-- [x] Выделение текста (`Shift+стрелки`, `Shift+Home/End`) с визуальной подсветкой
-- [x] Буфер обмена: копирование (`Ctrl+C`), вставка (`Ctrl+V`), вырезание (`Ctrl+X`)
-      (`Ctrl+X` без выделения — закрытие вкладки, как раньше).
-      Нативный системный буфер (`atotto/clipboard`): копирование/вырезание пишут
-      в системный буфер, вставка читает из системного + fallback на внутренний.
-- [x] Терминальный курсор (bubbletea v2 `View.Cursor`): моргание, позиция по
-      экрану с учётом gutter, scroll, split-лейаута.
-- [x] Заголовок окна: `dmed — <имя файла>` в заголовке терминала.
-- [x] Поддержка мыши (bubbletea v2 `MouseModeCellMotion`): клик = перемещение
-      курсора, колёсико = скролл, drag = выделение текста.
-- [x] Палитра команд (`Ctrl+P` / `F2`) — fuzzy-поиск по всем командам редактора
-- [x] Сессии: автосохранение и восстановление открытых файлов при перезапуске
-- [x] LSP клиент (`internal/lsp`): JSON-RPC 2.0 over stdin/stdout, диагностика,
-      `Definition`, `DidOpen`/`DidChange` (интеграция с `gopls`/`pyright`)
-- [x] Автодополнение: попап (`Ctrl+Space`, авто-триггер), источники — слова из
-      буфера + LSP (gopls/pyright/typescript/rust-analyzer/clangd/lua/ruby/php/
-      zls/json/yaml/css/html), асинхронно, с fallback на слова. Доки в
-      `docs/AUTOCOMPLETION.md`. Диагностика LSP выводится в gutter.
-- [x] Плагины/скрипты
-      — Lua-фреймворк (`internal/plugin`, gopher-lua): `.lua` в
-      `~/.dmed/plugins` и `<проект>/.dmed/plugins`, API `dmed.*`
+### M5 — polish
+- [x] Text selection (`Shift+arrows`, `Shift+Home/End`) with visual highlighting
+- [x] Clipboard: copy (`Ctrl+C`), paste (`Ctrl+V`), cut (`Ctrl+X`)
+      (`Ctrl+X` without a selection — close the tab, as before).
+      Native system clipboard (`atotto/clipboard`): copy/cut write
+      to the system clipboard, paste reads from the system + fallback to the
+      internal one.
+- [x] Terminal cursor (bubbletea v2 `View.Cursor`): blinking, on-screen
+      position accounting for the gutter, scroll, split layout.
+- [x] Window title: `dmed — <file name>` in the terminal title.
+- [x] Mouse support (bubbletea v2 `MouseModeAllMotion`): click = move the
+      cursor, wheel = scroll, drag = select text; gutter click = breakpoint
+      (left) / bookmark (middle); hover over the status-bar
+      panel icons (`▤` tree, `⎇` git, `✦` AI, `◉` debug, `❯` terminal) shows a
+      callout and click toggles the panel.
+- [x] Command palette (`Ctrl+P` / `F2`) — fuzzy search across all editor commands
+- [x] Sessions: auto-save and restore open files on restart
+- [x] LSP client (`internal/lsp`): JSON-RPC 2.0 over stdin/stdout, diagnostics,
+      `Definition`, `DidOpen`/`DidChange` (integration with `gopls`/`pyright`)
+- [x] "Go to definition" navigation: `F12` and `Ctrl+Click` on an identifier
+      via LSP `textDocument/definition` (opens the file and places the cursor)
+- [x] Command palette opens on double `Shift` (like JetBrains), in addition to
+      `Ctrl+P`/`F2`; on terminals with the Kitty protocol / Windows Console API
+- [x] Autocompletion: popup (`Ctrl+Space`, auto-trigger), sources — buffer
+      words + LSP (gopls/pyright/typescript/rust-analyzer/clangd/lua/ruby/php/
+      zls/json/yaml/css/html), asynchronous, with a fallback to words. Docs in
+      `docs/AUTOCOMPLETION.md`. LSP diagnostics are rendered in the gutter.
+- [x] Plugins/scripts
+      — Lua framework (`internal/plugin`, gopher-lua): `.lua` in
+      `~/.dmed/plugins` and `<project>/.dmed/plugins`, API `dmed.*`
       (on_key/command/on + text/set_text/cursor/insert/status/save).
-      Авто-перезагрузка при изменении `.lua` на диске. Магазин плагинов
-      («Plugins: Install...»): встроенные (Emmet, сниппеты) + удалённые из
-      `plugins/` на GitHub (`[plugins] repo/dir/branch`), установка/удаление,
-      без сети — встроенный набор. Uppercase встроен в редактор (Ctrl+U).
-      Доки в `docs/PLUGINS.md`. Осталось: больше событий/API.
-- [x] Конфигурация (`.dmed.conf` INI): tab_width, syntax_theme, line_numbers,
+      Auto-reload when a `.lua` file changes on disk. Plugin store
+      ("Plugins: Install..."): built-in (Emmet, snippets) + remote from
+      `plugins/` on GitHub (`[plugins] repo/dir/branch`), install/uninstall,
+      without network — the built-in set. Uppercase is built into the editor (Ctrl+U).
+      Docs in `docs/PLUGINS.md`. Remaining: more events/API.
+- [x] Configuration (`.dmed.conf` INI): tab_width, syntax_theme, line_numbers,
       skipped_dirs, model, ollama_url, system_prompt, context_max,
-      tree_width, chat_width_pct. `Settings: Open Config` в палитре,
-      горячая перезагрузка при сохранении конфига.
-- [x] Встроенный терминал (`Alt+T`): постоянная сессия cmd внизу редактора,
-      история команд по ↑/↓, скроллбэк PgUp/PgDn, `Esc` закрыть (сессия живёт).
-      Pipe-based: интерактивные TUI-программы внутри не запускаются.
-- [x] Переход к строке (`Ctrl+L` в редакторе / палитра «Go to Line»): формат
-      `N` (абсолютный), `N:C`, относительный `+N`/`-N` (с колонкой `+N:C`).
-- [x] Дублирование строк: `Ctrl+D` (копия ниже), `Alt+Shift+Down`/`Up`
-      (копия ниже/выше), с выделением — блочное дублирование.
-- [x] Комментарии строк (`Ctrl+/`): по типу файла через chroma-лексер
-      (`//`, `#`, `;`, `%`, `--`, `'`, `!`, `/* */`, `<!-- -->`), блок по
-      выделению, независимо по мульти-курсору.
-- [x] `internal/agent`: очередь задач будит воркер по каналу
-      (`Queue.Wake`), без polling-ожидания.
-- [x] Перенос по словам (`Alt+Z` / палитра «Toggle Word Wrap»): длинные строки
-      рендерятся сегментами по ширине панели, разрыв по словам; настройка
-      `[editor] word_wrap`; wrap-aware скролл, каретка, клик/драг/колесо мыши.
+      tree_width, chat_width_pct. `Settings: Open Config` in the palette,
+      hot-reload on config save.
+- [x] Built-in terminal (`Alt+T`): persistent cmd session at the bottom of the
+      editor, command history via ↑/↓, PgUp/PgDn scrollback, `Esc` to close
+      (the session keeps running). Pipe-based: interactive TUI programs cannot
+      run inside it.
+- [x] Go to line (`Ctrl+L` in the editor / "Go to Line" palette): formats
+      `N` (absolute), `N:C`, relative `+N`/`-N` (with a `+N:C` column).
+- [x] Duplicate lines: `Ctrl+D` (copy below), `Alt+Shift+Down`/`Up`
+      (copy below/above), with a selection — block duplication.
+- [x] Line comments (`Ctrl+/`): by file type via the chroma lexer
+      (`//`, `#`, `;`, `%`, `--`, `'`, `!`, `/* */`, `<!-- -->`), block based on
+      the selection, independent per multi-cursor.
+- [x] `internal/agent`: the task queue wakes the worker via a channel
+      (`Queue.Wake`), without polling.
+- [x] Word wrap (`Alt+Z` / "Toggle Word Wrap" palette): long lines
+      are rendered in segments by pane width, breaking at words; setting
+      `[editor] word_wrap`; wrap-aware scroll, caret, mouse click/drag/wheel.
+- [x] Crash-safety of goroutines (`internal/debug.CapturePanicReport`):
+      every spawned goroutine is wrapped so that a panic is logged to
+      stderr instead of crashing the whole process (Windows exit status 2).
 
 ### M6 — AI onboarding
-- [x] Пресеты провайдеров в wizard AI: Preferences (`←`/`→`): Ollama (local),
-      OpenAI, DeepSeek, Groq, LM Studio (local), vLLM (local), Custom — выбор
-      подставляет base URL и модель; провайдер хранится человекочитаемой
-      меткой пресета, старые значения `ollama`/`openai` нормализуются
-- [x] Кнопка Test в wizard (`t`/Enter): фоновый опрос `Models()` с таймаутом
-      3с, результат ✓ connected · N models / ✗ с человеческой подсказкой
-      (refused → запусти ollama, 401 → проверь ключ, unreachable → проверь URL)
-- [x] Нормализация base URL в `internal/ai`: хвостовой `/v1` срезается, чтобы
-      вставленный из доков провайдера endpoint не превращался в `/v1/v1/...`
-- [x] Env-переменные `DMED_PROVIDER` и `DMED_API_KEY` (поверх конфигов)
-- [x] Онбординг-подсказка в пустом чате: путь к wizard + быстрый локальный
-      маршрут `ollama pull llama3.2`
-- [x] CLI-мастер `dmed setup-ai`: провайдер → ключ → тест → запись в
-      `~/.dmed.conf` через `config.WriteAI` (`internal/setup`)
+- [x] Provider presets in the AI: Preferences wizard (`←`/`→`): Ollama (local),
+      OpenAI, DeepSeek, Groq, LM Studio (local), vLLM (local), Unsloth (local), Custom — the
+      choice fills in the base URL and model; the provider is stored as the
+      human-readable preset label, old `ollama`/`openai` values are normalized
+- [x] Test button in the wizard (`t`/Enter): background polling of `Models()`
+      with a 3s timeout, result ✓ connected · N models / ✗ with a human hint
+      (refused → start ollama, 401 → check the key, unreachable → check the URL)
+- [x] Base URL normalization in `internal/ai`: a trailing `/v1` is stripped so
+      that an endpoint pasted from a provider's docs does not turn into `/v1/v1/...`
+- [x] Env variables `DMED_PROVIDER` and `DMED_API_KEY` (over the configs)
+- [x] Onboarding hint in the empty chat: the path to the wizard + a quick local
+      route `ollama pull llama3.2`
+- [x] CLI wizard `dmed setup-ai`: provider → key → test → write to
+      `~/.dmed.conf` via `config.WriteAI` (`internal/setup`)
 
-## Инфраструктура: CI и релизы
+### M7 — debugging (DAP/Delve)
+- [x] DAP client (`internal/dap`): its own transport over
+      Content-Length framing (no external dependencies), reverse-connect
+      mode (`dlv dap --client-addr`), initialize/launch/configurationDone,
+      breakpoints, continue/next/stepIn/stepOut, threads/stackTrace/scopes/
+      variables/evaluate, stopped/continued/output/exited/terminated/
+      breakpoint/disconnected events. Unit tests on a small mock adapter over net.Pipe.
+- [x] Debug panel (`Ctrl+Alt+D`): state header, columns
+      threads / stack / variables (tree with expansion on Enter, Backspace —
+      back out), process console (`l` — view with scroll-back, `Ctrl+L` —
+      clear, eval line `> expr`). Fully mouse-driven: a click selects a
+      thread/frame/variable (reloading the derived columns), a double click
+      expands an expandable variable, the wheel walks the focused column. The
+      lists scroll so the selection always stays on screen.
+- [x] Breakpoints in the gutter (`F4`): `●` confirmed by the adapter; the
+      current stop line is `▶`; one shared marker column with bookmarks (`◆`) —
+      left click toggles a breakpoint, middle click (the wheel) a bookmark.
+- [x] Controls: `F5` run/continue (and pause a running debuggee),
+      `Shift+F5` stop, `F6` step over,
+      `F7` step in, `Shift+F7` step out (panel-local; with the panel closed
+      `F6`/`F7` keep the split bindings); auto-navigation to the file and line
+      of the stop.
+- [x] `[debug]` config: mode (debug/test/exec), program, args, stop_on_entry,
+      dlv_path; "Debug: Toggle Debug Panel" palette command; i18n en/ru.
+- [x] Generic adapters: `adapter_cmd`/`adapter_mode` (reverse|stdio|connect|
+      dbgp)/`adapter_args`/`launch_type`/`launch_request`/`launch_json` — any
+      DAP adapter (debugpy, lldb-dap, node, ...); Go/Delve is the default.
+      `connect` dials a listening DAP endpoint instead of spawning an adapter
+      process; `dbgp` spawns the interpreter and serves the session over the
+      DBGp wire protocol, which is how PHP is debugged (Xdebug has no DAP).
+      Asynchronous
+      adapter start without blocking the UI, restart after the session ends,
+      eval line with focus (Tab), unconfirmed breakpoints `○`.
 
-- [x] GitHub Actions CI (`ci.yml`): vet + unit-тесты + кросс-сборка 8 платформ
-      на каждый push в `main` и на каждый PR.
-- [x] Авторелиз (`release.yml`): на пуш тега `v*` автоматически
-      - собирает бинари для 8 платформ (с версией из тега),
-      - собирает пакеты в дистро-контейнерах: `.deb` (Ubuntu), `.rpm` (Fedora),
-        `.pkg.tar.zst` (Arch, makepkg под не-root пользователем),
+### Post-M7 — polish
+- [x] F1 help scrolls (`j`/`k`, PgUp/PgDn, Home/End, mouse wheel): the window
+      is sized to the terminal height instead of being clipped; debug
+      combinations were added to the help (Ctrl+Alt+D, F4/F5/F6/F7/S+F7/S+F5).
+- [x] Debugger correctness pass: the launch sequence now sends launch →
+      setBreakpoints → configurationDone (Delve rejects breakpoints before
+      launch with "No debug session started", which used to abort the launch
+      and leave every later F5 swallowed by the "session already attached"
+      guard); `F5` pauses a running debuggee; the panel takes mouse clicks and
+      its own scroll offsets; the status bar / hovered tooltip / overlay start
+      rows account for the docked panel. Real-Delve integration tests cover a
+      breakpoint hit and a pause.
+- [x] PHP debugging through Xdebug: `internal/dbgp`, a DBGp client (a second
+      protocol behind the same panel, since Xdebug does not speak DAP) —
+      breakpoints, run/step, threads/stack/scopes/variables with expandable
+      arrays, expression eval, and clean end-of-session handling. Detected from
+      the active `.php` file; `php` is spawned with the session env and dials
+      back over 9003. Verified against a real interpreter by
+      `TestRealXdebugSession` and `TestPHPXdebugBreakpointHit` (both skip
+      without PHP/Xdebug), which caught the wire details a mock had gotten
+      wrong: the `<length>\0<xml>\0` framing of every engine document, the
+      `iso-8859-1` XML prolog, the breakpoint id being a response attribute,
+      errors arriving as an `<error>` child with no `success="0"`, and the
+      base64-encoded `eval` expression.
+- [x] Debug panel scrolling and fit: `PgUp`/`PgDn` move a screenful (clamped —
+      they were a fixed six entries that wrapped around and lost the place),
+      `Home`/`End` jump to the ends, and `+`/`-` resize the panel so a deep
+      stack or a long variable list is not squeezed into a quarter of the
+      screen. The console peek scrolls from the keyboard too (`↑↓`/`PgUp`/`PgDn`/
+      `Home`/`End`, wheel direction fixed) and keeps its place while new output
+      arrives. The row holding the focused selection is drawn across the whole
+      panel, since a column is far too narrow for a long value or path.
+- [x] Fixed PgDn across the whole application: in bubbletea v2 the key string is
+      `pgdown`, while handlers matched the outdated `pgdn` (dead branches in chat,
+      DAP, git, terminal, diff, AI panels, completion).
+
+## Infrastructure: CI and releases
+
+- [x] GitHub Actions CI (`ci.yml`): vet + unit tests + cross-build for 8 platforms
+      on every push to `main` and every PR.
+- [x] Auto-release (`release.yml`): on a `v*` tag push it automatically
+      - builds binaries for 8 platforms (with the version from the tag),
+      - builds packages in distro containers: `.deb` (Ubuntu), `.rpm` (Fedora),
+        `.pkg.tar.zst` (Arch, makepkg under a non-root user),
         Termux `.deb`, Windows `.zip`,
-      - публикует GitHub Release со всеми артефактами и автогенерацией заметок.
-- [ ] Публикация пакетов во внешние репозитории (AUR / COPR / PPA) — пока не требуется.
+      - publishes a GitHub Release with all artifacts and auto-generated notes.
+- [ ] Publishing packages to external repositories (AUR / COPR / PPA) — not needed yet.
 
-## Правило развития
+## Development rule
 
-M0–M1 делаем без какого-либо AI: сначала крепкое ядро редактора,
-потом интеграция. Слабое место таких проектов — редактор, не LLM.
+M0–M1 are done without any AI: first a solid editor core,
+then integration. The weak spot of such projects is the editor, not the LLM.
 
-## Открытые вопросы
+## Open questions
 
-- [ ] i18n интерфейса (en/ru) — отложить до стабилизации UI, строки ещё меняются.
+- [x] UI i18n (en/ru) — done (`internal/i18n`); the catalogs will keep
+      changing as the UI changes.

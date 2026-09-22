@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/atotto/clipboard"
 )
 
 // The editor test suite asserts English UI strings, so pin the language to
@@ -200,6 +202,7 @@ func TestViewShowsTabNames(t *testing.T) {
 	f2 := writeTemp(t, dir, "bb.txt", "y\n")
 
 	m := New(f1, f2)
+	m.root = dir // basenames in the tab bar, so both fit at width 80
 	m.width, m.height = 80, 24
 	v := m.View()
 	if !strings.Contains(v.Content, "aa.txt") || !strings.Contains(v.Content, "bb.txt") {
@@ -357,6 +360,54 @@ func TestPasteIntoBuffer(t *testing.T) {
 	m = next.(Model)
 	if m.cur().buf.Text() != "INSERTEDalpha\n" {
 		t.Fatalf("buffer = %q, want pasted text before existing content", m.cur().buf.Text())
+	}
+}
+
+func TestPasteCRLFNormalized(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "a.txt", "start\n")
+	m := New(f1)
+	m.width, m.height = 80, 24
+	m.cur().buf.SetCursor(0, 5)
+
+	want := "start\nline one\nline two\n\n"
+	if got := m.cur().buf.Text(); got != "start\n" {
+		t.Fatalf("setup: %q", got)
+	}
+
+	// Bracketed-paste path: Windows terminals / clipboard deliver \r\n.
+	next, _ := m.Update(tea.PasteMsg{Content: "\r\nline one\r\nline two\r\n"})
+	m = next.(Model)
+	if got := m.cur().buf.Text(); got != want {
+		t.Fatalf("PasteMsg CRLF: buffer = %q, want %q", got, want)
+	}
+	if strings.ContainsRune(m.cur().buf.Text(), '\r') {
+		t.Fatal("PasteMsg CRLF: stray \\r leaked into buffer")
+	}
+
+	// Ctrl+V path with a CRLF system clipboard. The Windows clipboard is a
+	// global resource and Open() can transiently fail while another process
+	// holds it, so retry before giving up.
+	m = New(f1)
+	m.width, m.height = 80, 24
+	m.cur().buf.SetCursor(0, 5)
+	var clipErr error
+	for i := 0; i < 10; i++ {
+		clipErr = clipboard.WriteAll("\r\nline one\r\nline two\r\n")
+		if clipErr == nil {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if clipErr != nil {
+		t.Fatalf("clipboard write: %v", clipErr)
+	}
+	m = press(m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
+	if got := m.cur().buf.Text(); got != want {
+		t.Fatalf("ctrl+v CRLF: buffer = %q, want %q", got, want)
+	}
+	if strings.ContainsRune(m.cur().buf.Text(), '\r') {
+		t.Fatal("ctrl+v CRLF: stray \\r leaked into buffer")
 	}
 }
 
@@ -745,5 +796,45 @@ func TestToggleWordWrapResetsOffsetX(t *testing.T) {
 	m = press(m, tea.KeyPressMsg{Code: 'z', Mod: tea.ModAlt})
 	if m.panes[0].offsetX != 0 {
 		t.Fatalf("offsetX after wrap toggle: %d, want 0", m.panes[0].offsetX)
+	}
+}
+
+func TestDoubleShiftOpensPalette(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "a.txt", "hi\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	// A single Shift tap must not open the palette.
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyLeftShift})
+	if m.paletteOpen {
+		t.Fatal("single shift must not open the palette")
+	}
+
+	// A second Shift tap within the interval opens it (JetBrains-style).
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyRightShift})
+	if !m.paletteOpen {
+		t.Fatal("double shift must open the palette")
+	}
+}
+
+func TestDoubleShiftIgnoresHeldRepeat(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "a.txt", "hi\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	// First tap records the time; a held (auto-repeat) Shift is ignored and
+	// must not trigger the palette on its own.
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyLeftShift})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyLeftShift, IsRepeat: true})
+	if m.paletteOpen {
+		t.Fatal("held repeat shift must not open the palette")
+	}
+
+	// A real second tap after the (ignored) repeat still works.
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyRightShift})
+	if !m.paletteOpen {
+		t.Fatal("double shift after held repeat must open the palette")
 	}
 }
