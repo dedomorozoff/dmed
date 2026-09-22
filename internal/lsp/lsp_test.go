@@ -98,7 +98,7 @@ func TestEnsureOpenedOnce(t *testing.T) {
 	c.stdin = r
 	c.opened = make(map[string]bool)
 
-	p := "C:\\proj\\main.go"
+	p, _ := filepath.Abs("main.go") // host-native, so the URI is cwd-independent on every OS
 	done := make(chan error, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
@@ -111,7 +111,7 @@ func TestEnsureOpenedOnce(t *testing.T) {
 		}
 	}
 	n := r.buf.Len()
-	if !strings.Contains(r.buf.String(), "didOpen") || !strings.Contains(r.buf.String(), "C:/proj/main.go") {
+	if !strings.Contains(r.buf.String(), "didOpen") || !strings.Contains(r.buf.String(), strings.ReplaceAll(p, "\\", "/")) {
 		t.Fatalf("didOpen frame missing:\n%s", r.buf.String())
 	}
 	// Second call must be a no-op: no extra frame was written.

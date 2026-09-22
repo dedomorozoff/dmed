@@ -400,7 +400,9 @@ func TestPasteCRLFNormalized(t *testing.T) {
 		time.Sleep(250 * time.Millisecond)
 	}
 	if clipErr != nil {
-		t.Fatalf("clipboard write: %v", clipErr)
+		// Headless CI (no xsel/xclip/wl-clipboard) legitimately has nothing
+		// to paste from; the PasteMsg path above already proves CRLF handling.
+		t.Skipf("system clipboard unavailable: %v", clipErr)
 	}
 	m = press(m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if got := m.cur().buf.Text(); got != want {

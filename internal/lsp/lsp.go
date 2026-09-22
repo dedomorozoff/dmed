@@ -122,7 +122,10 @@ func Start(serverCmd string, args []string, rootDir string, onDiag func(path str
 }
 
 func pathToURI(path string) string {
-	path = filepath.ToSlash(path)
+	// Replace backslashes on every host: filepath.ToSlash only does so under
+	// Windows, and drive-letter paths must map to file:///C:/... identically
+	// regardless of where the editor or a test runs.
+	path = strings.ReplaceAll(path, "\\", "/")
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
