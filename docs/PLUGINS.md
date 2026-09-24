@@ -24,6 +24,30 @@ again after each reload so it can re-initialize. If the edited source fails to
 parse, the previous version stays active and the error is shown in the status
 line.
 
+## Built-in store
+
+The **Plugins: Install...** palette command (`Ctrl+P`) opens a store that
+lists plugins with their install state; press `Enter` to install or remove one.
+Two sources are merged:
+
+- **Embedded** — a small always-available set baked into the binary (works
+  offline): Emmet, Snippets.
+- **Remote** — any `*.lua` under the `plugins/` directory of the configured
+  GitHub repo, fetched live on open.
+
+Remote source is set with `[plugins]` config keys (defaults shown):
+
+```ini
+[plugins]
+repo   = dedomorozoff/dmed   # "owner/repo"
+dir    = plugins             # directory holding .lua plugins
+branch = main
+```
+
+`DMED_PLUGIN_REPO` overrides `repo`. Installed store plugins behave like any
+other `.lua` plugin and hot-reload the same way. Add a new official plugin by
+placing its `.lua` in the repo's `plugins/` directory.
+
 ## API
 
 ### Keybindings

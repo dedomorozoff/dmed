@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"dmed/internal/debug"
 	"dmed/internal/syntax"
 	"dmed/internal/vcs"
 )
@@ -107,6 +108,19 @@ func gitKeyName(msg tea.KeyPressMsg) string {
 			return string(c)
 		}
 	}
+	// Special keys: match on Code directly because String() may return the
+	// raw control character (e.g. "\r") when Text is non-empty (Enter sends
+	// "\r" as text on most terminals).
+	switch msg.Code {
+	case tea.KeyEnter, tea.KeyKpEnter:
+		return "enter"
+	case tea.KeyEsc:
+		return "esc"
+	case tea.KeyBackspace:
+		return "backspace"
+	case tea.KeyTab:
+		return "tab"
+	}
 	return msg.String()
 }
 
@@ -125,10 +139,12 @@ func (m Model) t(key string, args ...any) string { return m.tr.T(key, args...) }
 
 func (m *Model) openGitPanel() {
 	m.gitOpen = true
+	m.gitFocus = true
 	m.gitMode = gitModeStatus
 	m.gitCommitIn = nil
 	m.gitDiffFocused = false
 	m.treeFocus = false
+	m.chatFocus = false
 	m.refreshGitFiles()
 	m.refreshGitDiffPreview()
 }
@@ -335,7 +351,7 @@ func (m *Model) showLogDiff() {
 			rowsAll = append(rowsAll, vcs.DiffRow{Left: len(headAll) - 1, Right: len(rightAll) - 1, Type: vcs.DiffNone})
 		}
 		// File header line
-		header := "── " + d.Path + " ──"
+		header := m.g.hline + m.g.hline + " " + d.Path + " " + m.g.hline + m.g.hline
 		headAll = append(headAll, header)
 		rightAll = append(rightAll, "")
 		rowsAll = append(rowsAll, vcs.DiffRow{Left: len(headAll) - 1, Right: -1, Type: vcs.DiffNone})
@@ -438,7 +454,7 @@ func (m *Model) branchPanel(h int) []string {
 		isCur := name != "" && name == cur
 		prefix := "  "
 		if isCur {
-			prefix = "● "
+			prefix = m.g.stop + " "
 		}
 		plain := " " + prefix + name
 		pad := gitPanelWidth - 1 - lipgloss.Width(plain)
@@ -560,6 +576,7 @@ func (m *Model) handleGit(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "ctrl+b", "f9":
 		m.gitOpen = false
+		m.gitFocus = false
 		m.msg = ""
 		m.showTree()
 		return nil
@@ -590,6 +607,7 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 	switch keyL {
 	case "esc", "ctrl+g":
 		m.gitOpen = false
+		m.gitFocus = false
 		m.gitDiffFocused = false
 		m.msg = ""
 		return nil
@@ -599,6 +617,7 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		m.gitOpen = false
+		m.gitFocus = false
 		m.gitDiffFocused = false
 		m.msg = ""
 		return nil
@@ -617,7 +636,7 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 			m.diffOffsetY++
 		case "pgup":
 			m.diffOffsetY -= h
-		case "pgdn":
+		case "pgdown":
 			m.diffOffsetY += h
 		case "home", "g":
 			m.diffOffsetY = 0
@@ -719,8 +738,99 @@ func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
 			break
 		}
 		m.gitInit()
+	case "f":
+		return m.gitTransfer("fetch")
+	case "p":
+		return m.gitTransfer("push")
 	}
 	return nil
+}
+
+// gitTransferMsg reports the outcome of a background fetch/push (gitTransfer).
+type gitTransferMsg struct {
+	op  string // "fetch" | "push"
+	err string // non-empty on failure
+}
+
+// gitBlameMsg delivers the computed line blame for one file (requestBlame).
+type gitBlameMsg struct {
+	path  string // absolute file path
+	lines []vcs.BlameLine
+	err   string
+}
+
+// gitTransfer runs a fetch or push in the background so a slow network call
+// never blocks the editor, and reports the result through gitTransferMsg.
+func (m *Model) gitTransfer(op string) tea.Cmd {
+	r := m.repoForCur()
+	if r == nil {
+		m.msg = m.t("git.norepo_msg")
+		return nil
+	}
+	if !r.HasRemote() {
+		m.msg = m.t("git.no_remote")
+		return nil
+	}
+	m.msg = m.t("git.transferring", m.t("git.op_"+op))
+	return func() tea.Msg {
+		defer debug.CapturePanicReport(func() {
+			// nothing to do; errors are reported through the message
+		})
+		var err error
+		if op == "fetch" {
+			err = r.Fetch()
+		} else {
+			err = r.Push()
+		}
+		if err != nil {
+			return gitTransferMsg{op: op, err: err.Error()}
+		}
+		return gitTransferMsg{op: op}
+	}
+}
+
+// toggleBlame switches the inline git blame annotations for the active file.
+func (m *Model) toggleBlame() tea.Cmd {
+	m.blameOn = !m.blameOn
+	if !m.blameOn {
+		for i := range m.tabs {
+			m.tabs[i].blame = nil
+		}
+		m.msg = m.t("msg.blame_off")
+		return nil
+	}
+	return m.requestBlame()
+}
+
+// requestBlame computes the blame of the active file's HEAD version in the
+// background and delivers gitBlameMsg. It matches tabs by absolute path, so
+// tabs opened with relative paths still receive their annotation.
+func (m *Model) requestBlame() tea.Cmd {
+	t := m.cur()
+	if t == nil || t.path == "" {
+		m.blameOn = false
+		return nil
+	}
+	r := m.repoForCur()
+	if r == nil {
+		m.blameOn = false
+		m.msg = m.t("git.norepo_msg")
+		return nil
+	}
+	abs, err := filepath.Abs(t.path)
+	if err != nil {
+		abs = t.path
+	}
+	t.blame = nil
+	m.msg = m.t("msg.blame_loading")
+	return func() tea.Msg {
+		defer debug.CapturePanicReport(func() {})
+		lines, berr := r.Blame(abs)
+		if berr != nil {
+			return gitBlameMsg{path: abs, err: berr.Error()}
+		}
+		return gitBlameMsg{path: abs, lines: lines}
+	}
 }
 
 // gitInit initializes a git repository at the current file's directory.
@@ -751,7 +861,8 @@ func (m *Model) gitInit() {
 
 func (m *Model) handleGitCommit(msg tea.KeyPressMsg) tea.Cmd {
 	r := m.repoForCur()
-	switch msg.String() {
+	key := gitKeyName(msg)
+	switch key {
 	case "esc":
 		m.gitMode = gitModeStatus
 		m.gitCommitIn = nil
@@ -772,6 +883,7 @@ func (m *Model) handleGitCommit(msg tea.KeyPressMsg) tea.Cmd {
 			m.gitCommitIn = nil
 			m.gitMode = gitModeStatus
 			m.gitOpen = false
+			m.gitFocus = false
 			for i := range m.tabs {
 				m.tabs[i].diffText = ""
 			}
@@ -826,7 +938,7 @@ func (m *Model) handleGitLog(msg tea.KeyPressMsg) tea.Cmd {
 			m.diffOffsetY++
 		case "pgup":
 			m.diffOffsetY -= h
-		case "pgdn":
+		case "pgdown":
 			m.diffOffsetY += h
 		case "home", "g":
 			m.diffOffsetY = 0
@@ -867,7 +979,7 @@ func (m *Model) handleGitLog(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		m.clampGitLogScroll()
 		m.showLogDiff()
-	case "pgdn":
+	case "pgdown":
 		m.gitLogSel += m.viewHeight()
 		if m.gitLogSel >= len(m.gitLogEntries) {
 			m.gitLogSel = maxInt(0, len(m.gitLogEntries)-1)

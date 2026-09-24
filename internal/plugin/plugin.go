@@ -226,6 +226,17 @@ func (m *Manager) removePlugin(i int) {
 	p.L.Close()
 }
 
+// Remove drops the plugin loaded from path (if any), including its commands.
+func (m *Manager) Remove(path string) {
+	path = filepath.Clean(path)
+	for i, p := range m.plugins {
+		if filepath.Clean(p.path) == path {
+			m.removePlugin(i)
+			return
+		}
+	}
+}
+
 // invoke runs a Lua function after binding the `dmed` API to the given host.
 func (m *Manager) invoke(p *Plugin, host Host, fn lua.LValue) {
 	installHostAPI(p, host)

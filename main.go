@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"dmed/internal/editor"
+	"dmed/internal/setup"
 )
 
 // version is set via ldflags: -X main.version=0.3.0
@@ -17,13 +18,22 @@ func main() {
 		switch os.Args[1] {
 		case "-h", "--help":
 			fmt.Println("usage: dmed [dir | files...]")
+			fmt.Println("       dmed setup-ai    interactive AI provider setup (writes ~/.dmed.conf)")
 			return
 		case "-v", "--version":
 			fmt.Printf("dmed %s\n", version)
 			return
+		case "setup-ai":
+			if err := setup.Run(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
 		}
 	}
-	p := tea.NewProgram(editor.New(os.Args[1:]...))
+	model := editor.New(os.Args[1:]...)
+	model.ApplyTerminalCompat()
+	p := tea.NewProgram(model)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

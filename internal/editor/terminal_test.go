@@ -7,11 +7,10 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/hinshun/vt10x"
 )
 
-func altT() tea.KeyPressMsg {
-	return tea.KeyPressMsg{Code: 't', Mod: tea.ModAlt}
-}
+func altT() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 't', Mod: tea.ModAlt} }
 
 func TestTerminalShellSelection(t *testing.T) {
 	m := New()
@@ -24,163 +23,87 @@ func TestTerminalShellSelection(t *testing.T) {
 	if got == "" || strings.Contains(got, "/bin/") && runtime.GOOS == "windows" {
 		t.Fatalf("platform default shell must be usable, got %q", got)
 	}
-	if termNewline() == "" {
-		t.Fatal("newline must not be empty")
-	}
 }
 
 func TestStripANSI(t *testing.T) {
-	in := "\x1b[32mgreen\x1b[0m plain \x1b[1;34mblue\x1b[m tail"
-	want := "green plain blue tail"
-	if got := stripANSI(in); got != want {
-		t.Fatalf("stripANSI = %q, want %q", got, want)
-	}
-	if got := stripANSI("no escapes"); got != "no escapes" {
-		t.Fatalf("plain text mangled: %q", got)
+	if got := stripANSI("\x1b[32mgreen\x1b[0m plain"); got != "green plain" {
+		t.Fatalf("got %q", got)
 	}
 }
 
-func TestTerminalToggleAndInput(t *testing.T) {
-	m := New()
-	m.width, m.height = 80, 24
+func TestTerminalScreenParsesANSI(t *testing.T) {
+	term := vt10x.New(vt10x.WithSize(20, 3))
+	_, _ = term.Write([]byte("one\x1b[2;3Htwo\x1b[31mred\x1b[0m"))
+	rows := captureTerminalRows(term)
+	if got := rows[0].text; got != "one" {
+		t.Fatalf("row 0 = %q", got)
+	}
+	if got := rows[1].text; got != "  twored" {
+		t.Fatalf("cursor addressing failed: %q", got)
+	}
+}
 
-	hBefore := m.viewHeight()
-	next, cmd := m.Update(altT())
-	m = next.(Model)
-	if !m.termOpen {
-		t.Fatal("alt+t must open the terminal panel")
+func TestTerminalKeyEncoding(t *testing.T) {
+	tests := []struct {
+		msg  tea.KeyPressMsg
+		want string
+	}{
+		{tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}, "\x03"},
+		{tea.KeyPressMsg{Code: tea.KeyEnter}, "\r"},
+		{tea.KeyPressMsg{Code: tea.KeyUp}, "\x1b[A"},
+		{tea.KeyPressMsg{Text: "я"}, "я"},
+		{tea.KeyPressMsg{Text: "x", Mod: tea.ModAlt}, "\x1bx"},
 	}
-	if cmd == nil {
-		t.Fatal("opening the terminal must arm the output listener")
-	}
-	if h := m.viewHeight(); h >= hBefore {
-		t.Fatalf("editor area must shrink when terminal is open: %d (was %d)", h, hBefore)
-	}
-	if len(m.termLines) != 0 {
-		t.Fatalf("expected no output yet, got %v", m.termLines)
-	}
-
-	// Typing goes to the input line; Enter echoes and submits
-	m = typeStr(m, "echo dmed_term_ok")
-	if string(m.termIn) != "echo dmed_term_ok" {
-		t.Fatalf("input line = %q", string(m.termIn))
-	}
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if string(m.termIn) != "" {
-		t.Fatal("enter must clear the input line")
-	}
-	found := false
-	for _, l := range m.termLines {
-		if strings.Contains(l, "> echo dmed_term_ok") {
-			found = true
+	for _, tt := range tests {
+		if got := string(terminalKeyBytes(tt.msg)); got != tt.want {
+			t.Fatalf("key %v = %q, want %q", tt.msg, got, tt.want)
 		}
 	}
-	if !found {
-		t.Fatalf("submitted command must be echoed, lines=%v", m.termLines)
-	}
-
-	// Esc closes the panel but keeps the session
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.termOpen {
-		t.Fatal("esc must close the terminal panel")
-	}
-	if m.termCmd == nil {
-		t.Fatal("shell session should stay alive after closing the panel")
-	}
-	m.killTerminal()
 }
 
-func TestTerminalRunsCommand(t *testing.T) {
+func TestTerminalToggleAndCommand(t *testing.T) {
 	m := New()
 	m.width, m.height = 80, 24
-
-	next, _ := m.Update(altT())
+	next, cmd := m.Update(altT())
 	m = next.(Model)
-
-	m.termIn = []rune("echo dmed_term_ok")
-	m.termSubmit()
-
+	defer m.killTerminal()
+	if !m.termOpen || m.termSession == nil || cmd == nil {
+		t.Fatal("Alt+T must open a live PTY")
+	}
+	if h := m.viewHeight(); h >= 24 {
+		t.Fatalf("editor did not shrink: %d", h)
+	}
+	for _, key := range []tea.KeyPressMsg{{Text: "echo dmed_term_ok"}, {Code: tea.KeyEnter}} {
+		m = press(m, key)
+	}
 	deadline := time.After(10 * time.Second)
 	for {
 		select {
-		case batch, ok := <-m.termCh:
-			if !ok {
-				t.Fatal("shell output channel closed before command result")
-			}
-			m.termLines = append(m.termLines, batch...)
-			for _, l := range batch {
-				if strings.Contains(l, "dmed_term_ok") && !strings.HasPrefix(l, ">") {
-					m.killTerminal()
-					return
-				}
+		case msg := <-m.termCh:
+			m.termRows = msg.rows
+			if strings.Contains(strings.Join(rowTexts(m.termRows), "\n"), "dmed_term_ok") {
+				return
 			}
 		case <-deadline:
-			m.killTerminal()
-			t.Fatalf("timed out waiting for echo output, lines=%v", m.termLines)
+			t.Fatalf("timed out; rows=%v", rowTexts(m.termRows))
 		}
 	}
 }
 
-func TestTerminalHistory(t *testing.T) {
-	m := New()
-	m.width, m.height = 80, 24
-
-	m.termIn = []rune("first")
-	m.termSubmit()
-	m.termIn = []rune("second")
-	m.termSubmit()
-
-	m.termHistory(1) // one back
-	if string(m.termIn) != "second" {
-		t.Fatalf("history up = %q, want %q", string(m.termIn), "second")
+func rowTexts(rows []terminalRow) []string {
+	out := make([]string, len(rows))
+	for i := range rows {
+		out[i] = rows[i].text
 	}
-	m.termHistory(1)
-	if string(m.termIn) != "first" {
-		t.Fatalf("history up = %q, want %q", string(m.termIn), "first")
-	}
-	m.termHistory(1)
-	if string(m.termIn) != "first" {
-		t.Fatalf("history must clamp at oldest, got %q", string(m.termIn))
-	}
-	m.termHistory(-1)
-	if string(m.termIn) != "second" {
-		t.Fatalf("history down = %q, want %q", string(m.termIn), "second")
-	}
+	return out
 }
 
 func TestTerminalPanelRows(t *testing.T) {
 	m := New()
 	m.width, m.height = 80, 24
-	next, _ := m.Update(altT())
-	m = next.(Model)
-	defer m.killTerminal()
-
-	for i := 0; i < 50; i++ {
-		m.termLines = append(m.termLines, "line")
-	}
+	m.termOpen = true
 	rows := plainRows(strings.Join(m.terminalPanel(), "\n"))
-	want := m.termPanelHeight()
-	if len(rows) != want {
-		t.Fatalf("panel renders %d rows, want exactly %d", len(rows), want)
-	}
-	// Input line is always the last row
-	last := rows[len(rows)-1]
-	var b strings.Builder
-	inEsc := false
-	for _, r := range last { // strip styles for the check below
-		if r == 0x1b {
-			inEsc = true
-			continue
-		}
-		if inEsc {
-			if r == 'm' {
-				inEsc = false
-			}
-			continue
-		}
-		b.WriteRune(r)
-	}
-	if !strings.Contains(b.String(), ">") {
-		t.Fatalf("last panel row must be the input line, got %q", b.String())
+	if len(rows) != m.termPanelHeight() {
+		t.Fatalf("got %d rows", len(rows))
 	}
 }

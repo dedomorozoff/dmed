@@ -26,8 +26,9 @@ func TestDiagMarkFor(t *testing.T) {
 		{5, "•", 4},
 		{6, "!", 2},
 	}
+	m := New()
 	for _, c := range cases {
-		mark, sev := diagMarkFor(diags, c.line)
+		mark, sev := m.diagMarkFor(diags, c.line)
 		if mark != c.mark || sev != c.sev {
 			t.Errorf("line %d: got (%q, %d) want (%q, %d)", c.line, mark, sev, c.mark, c.sev)
 		}
@@ -39,7 +40,8 @@ func TestDiagMarkForErrorWins(t *testing.T) {
 		{Line: 0, Severity: 2},
 		{Line: 0, Severity: 1},
 	}
-	mark, sev := diagMarkFor(diags, 0)
+	m := New()
+	mark, sev := m.diagMarkFor(diags, 0)
 	if mark != "!" || sev != 1 {
 		t.Fatalf("error must win over warning on the same line, got (%q, %d)", mark, sev)
 	}

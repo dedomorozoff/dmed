@@ -148,3 +148,29 @@ func TestSnapshotIsIndependent(t *testing.T) {
 		t.Fatalf("expected 2 tasks in snapshot, got %d", len(snap))
 	}
 }
+
+func TestWakeSignalsOnEnqueue(t *testing.T) {
+	q := NewQueue(nil)
+	// Drain any stale token so the check below starts clean.
+	select {
+	case <-q.Wake():
+	default:
+	}
+	select {
+	case <-q.Wake():
+		t.Fatalf("wake should not be signaled before any enqueue")
+	default:
+	}
+	q.Enqueue("a")
+	select {
+	case <-q.Wake():
+	default:
+		t.Fatalf("expected a wake signal after first enqueue")
+	}
+	q.Enqueue("b")
+	select {
+	case <-q.Wake():
+	default:
+		t.Fatalf("expected a wake signal after second enqueue")
+	}
+}

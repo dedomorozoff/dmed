@@ -9,6 +9,9 @@ import (
 
 func TestDefaults(t *testing.T) {
 	cfg := Defaults()
+	if cfg.Editor.WordWrap {
+		t.Error("word_wrap should default to false")
+	}
 	if cfg.Editor.TabWidth != 4 {
 		t.Errorf("tab_width = %d, want 4", cfg.Editor.TabWidth)
 	}
@@ -34,6 +37,7 @@ func TestParseINI(t *testing.T) {
 tab_width = 2
 syntax_theme = dracula
 line_numbers = false
+word_wrap = true
 skipped_dirs = .git,node_modules,vendor
 
 [ai]
@@ -43,11 +47,15 @@ ollama_url = http://localhost:11434
 [ui]
 tree_width = 30
 lang = ru
+ascii = on
 `
 	sections := parseINI(strings.NewReader(input))
 
 	if sections["editor"]["tab_width"] != "2" {
 		t.Errorf("editor.tab_width = %q, want 2", sections["editor"]["tab_width"])
+	}
+	if sections["editor"]["word_wrap"] != "true" {
+		t.Errorf("editor.word_wrap = %q, want true", sections["editor"]["word_wrap"])
 	}
 	if sections["editor"]["syntax_theme"] != "dracula" {
 		t.Errorf("editor.syntax_theme = %q, want dracula", sections["editor"]["syntax_theme"])
@@ -60,6 +68,9 @@ lang = ru
 	}
 	if sections["ui"]["lang"] != "ru" {
 		t.Errorf("ui.lang = %q, want ru", sections["ui"]["lang"])
+	}
+	if sections["ui"]["ascii"] != "on" {
+		t.Errorf("ui.ascii = %q, want on", sections["ui"]["ascii"])
 	}
 }
 
@@ -81,6 +92,7 @@ func TestLoadFile(t *testing.T) {
 	content := `[editor]
 tab_width = 2
 syntax_theme = dracula
+word_wrap = true
 
 [ai]
 model = llama3
@@ -94,6 +106,9 @@ model = llama3
 
 	if cfg.Editor.TabWidth != 2 {
 		t.Errorf("tab_width = %d, want 2", cfg.Editor.TabWidth)
+	}
+	if !cfg.Editor.WordWrap {
+		t.Errorf("word_wrap = %v, want true", cfg.Editor.WordWrap)
 	}
 	if cfg.Editor.SyntaxTheme != "dracula" {
 		t.Errorf("syntax_theme = %q, want dracula", cfg.Editor.SyntaxTheme)
@@ -152,6 +167,27 @@ func TestAgentDefaults(t *testing.T) {
 	}
 }
 
+func TestPluginsDefaults(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Plugins.Repo != "dedomorozoff/dmed" || cfg.Plugins.Dir != "plugins" || cfg.Plugins.Branch != "main" {
+		t.Errorf("default plugins = %+v", cfg.Plugins)
+	}
+}
+
+func TestLoadPluginsSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := "[plugins]\nrepo = someone/else\ndir = lua\nbranch = dev\n"
+	os.WriteFile(path, []byte(content), 0o644)
+
+	cfg := Defaults()
+	loadFile(path, &cfg)
+
+	if cfg.Plugins.Repo != "someone/else" || cfg.Plugins.Dir != "lua" || cfg.Plugins.Branch != "dev" {
+		t.Errorf("plugins = %+v", cfg.Plugins)
+	}
+}
+
 func TestWriteAIUpdatesSectionPreservesOthers(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".dmed.conf")
@@ -176,8 +212,8 @@ tree_width = 20
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 5 {
-		t.Errorf("wrote %d keys, want 5", n)
+	if n != 10 {
+		t.Errorf("wrote %d keys, want 10", n)
 	}
 
 	data, _ := os.ReadFile(path)
@@ -207,8 +243,8 @@ func TestWriteAIRetainsMissingKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 5 {
-		t.Errorf("wrote %d keys, want 5 (3 existing + 2 added)", n)
+	if n != 10 {
+		t.Errorf("wrote %d keys, want 10 (2 existing + 8 added)", n)
 	}
 	data, _ := os.ReadFile(path)
 	out := string(data)
@@ -229,6 +265,170 @@ func TestWriteAICreatesSectionInEmptyFile(t *testing.T) {
 	out := string(data)
 	if !strings.Contains(out, "[ai]") || !strings.Contains(out, "context_max = 6000") {
 		t.Errorf("missing [ai] section or defaults:\n%s", out)
+	}
+}
+
+func TestLoadAINewKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[ai]
+temperature = 8
+num_ctx = 32768
+num_predict = 512
+tool_rounds = 3
+allow_run = never
+restrict_to_root = true
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if cfg.AI.Temperature != 8 {
+		t.Errorf("temperature = %d, want 8", cfg.AI.Temperature)
+	}
+	if cfg.AI.NumCtx != 32768 {
+		t.Errorf("num_ctx = %d, want 32768", cfg.AI.NumCtx)
+	}
+	if cfg.AI.NumPredict != 512 {
+		t.Errorf("num_predict = %d, want 512", cfg.AI.NumPredict)
+	}
+	if cfg.AI.ToolRounds != 3 {
+		t.Errorf("tool_rounds = %d, want 3", cfg.AI.ToolRounds)
+	}
+	if cfg.AI.AllowRun != "never" {
+		t.Errorf("allow_run = %q, want never", cfg.AI.AllowRun)
+	}
+	if !cfg.AI.RestrictToRoot {
+		t.Error("restrict_to_root = false, want true")
+	}
+}
+
+func TestLoadDebugSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[debug]
+mode = test
+program = ./pkg
+args = -run TestFoo
+stop_on_entry = true
+dlv_path = C:\tools\dlv.exe
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if cfg.Debug.Mode != "test" {
+		t.Errorf("mode = %q, want test", cfg.Debug.Mode)
+	}
+	if cfg.Debug.Program != "./pkg" {
+		t.Errorf("program = %q, want ./pkg", cfg.Debug.Program)
+	}
+	if cfg.Debug.Args != "-run TestFoo" {
+		t.Errorf("args = %q, want -run TestFoo", cfg.Debug.Args)
+	}
+	if !cfg.Debug.StopOnEntry {
+		t.Error("stop_on_entry = false, want true")
+	}
+	// Legacy dlv_path aliases adapter_cmd.
+	if cfg.Debug.AdapterCmd != `C:\tools\dlv.exe` {
+		t.Errorf("adapter_cmd = %q, want C:\\tools\\dlv.exe", cfg.Debug.AdapterCmd)
+	}
+
+	// Arbitrary modes pass through (non-Delve adapters use their own modes).
+	if err := os.WriteFile(path, []byte("[debug]\nmode = bogus\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg = Load(dir)
+	if cfg.Debug.Mode != "bogus" {
+		t.Errorf("mode = %q, want pass-through bogus", cfg.Debug.Mode)
+	}
+}
+
+func TestLoadDebugGenericAdapter(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[debug]
+adapter_cmd = debugpy-adapter
+adapter_mode = stdio
+adapter_args = --log-dir /tmp/dap
+launch_type = python
+launch_request = attach
+launch_json = {"justMyCode": false, "console": "integratedTerminal"}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if cfg.Debug.AdapterCmd != "debugpy-adapter" {
+		t.Errorf("adapter_cmd = %q, want debugpy-adapter", cfg.Debug.AdapterCmd)
+	}
+	if cfg.Debug.AdapterMode != "stdio" {
+		t.Errorf("adapter_mode = %q, want stdio", cfg.Debug.AdapterMode)
+	}
+	if cfg.Debug.AdapterArgs != "--log-dir /tmp/dap" {
+		t.Errorf("adapter_args = %q", cfg.Debug.AdapterArgs)
+	}
+	if cfg.Debug.LaunchType != "python" {
+		t.Errorf("launch_type = %q, want python", cfg.Debug.LaunchType)
+	}
+	if cfg.Debug.LaunchRequest != "attach" {
+		t.Errorf("launch_request = %q, want attach", cfg.Debug.LaunchRequest)
+	}
+	if cfg.Debug.LaunchJSON != `{"justMyCode": false, "console": "integratedTerminal"}` {
+		t.Errorf("launch_json = %q", cfg.Debug.LaunchJSON)
+	}
+	if err := os.WriteFile(path, []byte("[debug]\nadapter_mode = bogus\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg = Load(dir)
+	if cfg.Debug.AdapterMode != "reverse" {
+		t.Errorf("adapter_mode = %q, want default reverse for invalid value", cfg.Debug.AdapterMode)
+	}
+}
+
+func TestLoadDebugConnectMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[debug]
+adapter_mode = connect
+adapter_args = 127.0.0.1:9003
+launch_type = php
+launch_json = {"request": "launch", "type": "php"}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if cfg.Debug.AdapterMode != "connect" {
+		t.Errorf("adapter_mode = %q, want connect", cfg.Debug.AdapterMode)
+	}
+	if cfg.Debug.AdapterArgs != "127.0.0.1:9003" {
+		t.Errorf("adapter_args = %q", cfg.Debug.AdapterArgs)
+	}
+	if cfg.Debug.LaunchType != "php" {
+		t.Errorf("launch_type = %q, want php", cfg.Debug.LaunchType)
+	}
+	if cfg.Debug.LaunchJSON != `{"request": "launch", "type": "php"}` {
+		t.Errorf("launch_json = %q", cfg.Debug.LaunchJSON)
+	}
+}
+
+func TestLoadASCIISetting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	if err := os.WriteFile(path, []byte("[ui]\nascii = off\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if cfg.UI.Ascii != "off" {
+		t.Fatalf("ascii = %q, want off", cfg.UI.Ascii)
+	}
+	if err := os.WriteFile(path, []byte("[ui]\nascii = bogus\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg = Load(dir)
+	if cfg.UI.Ascii != "auto" {
+		t.Fatalf("ascii = %q, want default auto for invalid value", cfg.UI.Ascii)
 	}
 }
 

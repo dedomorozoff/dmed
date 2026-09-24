@@ -3,9 +3,10 @@ package editor
 import tea "charm.land/bubbletea/v2"
 
 type pane struct {
-	tabIdx  int
-	offsetX int
-	offsetY int
+	tabIdx   int
+	offsetX  int
+	offsetY  int
+	wordWrap bool
 }
 
 type splitLayout int
@@ -21,7 +22,7 @@ func (m *Model) initPanes() {
 	if idx < 0 {
 		idx = 0
 	}
-	m.panes = []pane{{tabIdx: idx}}
+	m.panes = []pane{{tabIdx: idx, wordWrap: m.cfg.Editor.WordWrap}}
 	m.activePane = 0
 	m.layout = splitNone
 }
@@ -68,6 +69,18 @@ func (m Model) paneViewHeight(paneIdx int) int {
 	return h
 }
 
+// paneContentHeight returns how many editor rows a pane actually draws. In a
+// split every pane's cell reserves its bottom row for its own status bar, so
+// the content region is one row shorter than the cell; the extra row exists
+// only in split mode, where paneViewHeight still counts it for hit-testing
+// and cell geometry.
+func (m Model) paneContentHeight(paneIdx int) int {
+	if m.layout == splitNone {
+		return m.paneViewHeight(paneIdx)
+	}
+	return m.paneViewHeight(paneIdx) - 1
+}
+
 func (m *Model) splitVert() {
 	if m.layout != splitNone {
 		return
@@ -111,6 +124,26 @@ func (m *Model) focusOtherPane() {
 	}
 	m.activePane = 1 - m.activePane
 	m.msg = ""
+}
+
+// toggleSplitVert opens a vertical split, or collapses the current split when
+// one is already open.
+func (m *Model) toggleSplitVert() {
+	if m.layout != splitNone {
+		m.closePane()
+		return
+	}
+	m.splitVert()
+}
+
+// toggleSplitHoriz opens a horizontal split, or collapses the current split
+// when one is already open.
+func (m *Model) toggleSplitHoriz() {
+	if m.layout != splitNone {
+		m.closePane()
+		return
+	}
+	m.splitHoriz()
 }
 
 func (m *Model) closePane() tea.Cmd {

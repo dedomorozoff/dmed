@@ -206,6 +206,9 @@ func (b *Buffer) setFromPoints(pts []Cursor) {
 	b.SetCursor(pts[0].Line, pts[0].Col)
 	b.cursors = b.cursors[:0]
 	for _, c := range pts[1:] {
+		if b.cursorAt(c.Line, c.Col) {
+			continue
+		}
 		b.cursors = append(b.cursors, c)
 	}
 }

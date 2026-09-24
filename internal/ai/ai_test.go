@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,7 +49,7 @@ func TestChatStream(t *testing.T) {
 	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL, Model: "test-model"})
 	var got strings.Builder
 	msgs := []Message{{Role: "user", Content: "hi"}}
-	err := p.ChatStream(context.Background(), msgs, func(d string) { got.WriteString(d) })
+	err := p.ChatStream(context.Background(), Request{Messages: msgs}, Handler{Delta: func(d string) { got.WriteString(d) }})
 	if err != nil {
 		t.Fatalf("ChatStream: %v", err)
 	}
@@ -65,7 +66,7 @@ func TestChatStreamServerError(t *testing.T) {
 	defer srv.Close()
 
 	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL, Model: "missing"})
-	err := p.ChatStream(context.Background(), nil, func(string) {})
+	err := p.ChatStream(context.Background(), Request{}, Handler{Delta: func(string) {}})
 	if err == nil || !strings.Contains(err.Error(), "model not found") {
 		t.Fatalf("want server error, got %v", err)
 	}
@@ -78,7 +79,7 @@ func TestChatStreamInBandError(t *testing.T) {
 	defer srv.Close()
 
 	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL, Model: "m"})
-	err := p.ChatStream(context.Background(), nil, func(string) {})
+	err := p.ChatStream(context.Background(), Request{}, Handler{Delta: func(string) {}})
 	if err == nil || !strings.Contains(err.Error(), "oom") {
 		t.Fatalf("want in-band error, got %v", err)
 	}
@@ -102,7 +103,7 @@ func TestChatStreamContextCancel(t *testing.T) {
 		cancel()
 	}()
 	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL, Model: "m"})
-	err := p.ChatStream(ctx, nil, func(string) {})
+	err := p.ChatStream(ctx, Request{}, Handler{Delta: func(string) {}})
 	if err == nil {
 		t.Fatal("want context error after cancel")
 	}
@@ -139,7 +140,7 @@ func TestOpenAIStream(t *testing.T) {
 	p := NewProvider(Config{Type: OpenAIProvider, URL: srv.URL, Model: "gpt-4", APIKey: "test-key"})
 	var got strings.Builder
 	msgs := []Message{{Role: "user", Content: "hi"}}
-	err := p.ChatStream(context.Background(), msgs, func(d string) { got.WriteString(d) })
+	err := p.ChatStream(context.Background(), Request{Messages: msgs}, Handler{Delta: func(d string) { got.WriteString(d) }})
 	if err != nil {
 		t.Fatalf("ChatStream: %v", err)
 	}
@@ -165,5 +166,138 @@ func TestOpenAIModels(t *testing.T) {
 	}
 	if len(models) != 2 || models[0] != "gpt-4" {
 		t.Fatalf("got %v", models)
+	}
+}
+
+func TestOllamaToolCalling(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		dec := json.NewDecoder(r.Body)
+		_ = dec.Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"Let me check."},"done":false}` + "\n"))
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"READ","arguments":"{\"arg\":\"a.go\"}"}}]},"done":true}` + "\n"))
+	}))
+	defer srv.Close()
+
+	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL, Model: "m"})
+	tools := []ToolDef{{Name: "READ", Description: "read", Parameters: map[string]any{"type": "object"}}}
+	var delta strings.Builder
+	var calls []ToolCall
+	err := p.ChatStream(context.Background(), Request{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+		Tools:    tools,
+	}, Handler{Delta: func(d string) { delta.WriteString(d) }, ToolCalls: func(c []ToolCall) { calls = c }})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	if delta.String() != "Let me check." {
+		t.Fatalf("delta = %q", delta.String())
+	}
+	if len(calls) != 1 || calls[0].Name != "READ" || !strings.Contains(calls[0].Args, "a.go") {
+		t.Fatalf("calls = %+v", calls)
+	}
+	if _, ok := gotBody["tools"]; !ok {
+		t.Fatal("request missing tools array")
+	}
+	if msgs, ok := gotBody["messages"].([]any); !ok || len(msgs) == 0 {
+		t.Fatal("request missing messages")
+	}
+}
+
+func TestOpenAIToolCallingIncremental(t *testing.T) {
+	var gotTools any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotTools = body["tools"]
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, chunk := range []string{
+			`{"choices":[{"delta":{"role":"assistant","content":""},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_9","type":"function","function":{"name":"EDIT","arguments":"{\"path\":\"a.go\",\""}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"content\":\"new\"}"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+		} {
+			_, _ = w.Write([]byte("data: " + chunk + "\n\n"))
+		}
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p := NewProvider(Config{Type: OpenAIProvider, URL: srv.URL, Model: "gpt", APIKey: "k"})
+	var calls []ToolCall
+	err := p.ChatStream(context.Background(), Request{
+		Messages: []Message{{Role: "user", Content: "edit"}},
+		Tools:    []ToolDef{{Name: "EDIT", Description: "edit", Parameters: map[string]any{"type": "object"}}},
+	}, Handler{ToolCalls: func(c []ToolCall) { calls = c }})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("calls = %+v", calls)
+	}
+	if calls[0].ID != "call_9" || calls[0].Name != "EDIT" {
+		t.Fatalf("call = %+v", calls[0])
+	}
+	if calls[0].Args != `{"path":"a.go","content":"new"}` {
+		t.Fatalf("assembled args = %q", calls[0].Args)
+	}
+	if gotTools == nil {
+		t.Fatal("request missing tools array")
+	}
+}
+
+func TestChatStreamSendsOptions(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"hi"},"done":true}` + "\n"))
+	}))
+	defer srv.Close()
+
+	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL, Model: "m"})
+	err := p.ChatStream(context.Background(), Request{
+		Messages: []Message{{Role: "user", Content: "x"}},
+		Options:  Options{Temperature: 8, NumCtx: 32768, NumPredict: 512},
+	}, Handler{Delta: func(string) {}})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	if _, ok := gotBody["temperature"]; !ok {
+		t.Fatalf("request missing temperature: %v", gotBody)
+	}
+	if opt, ok := gotBody["options"].(map[string]any); !ok {
+		t.Fatalf("request missing options: %v", gotBody)
+	} else if opt["num_ctx"].(float64) != 32768 || opt["num_predict"].(float64) != 512 {
+		t.Fatalf("options = %v, want num_ctx 32768 / num_predict 512", opt)
+	}
+}
+
+func TestChatStreamOmitsOptionsWhenUnset(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"hi"},"done":true}` + "\n"))
+	}))
+	defer srv.Close()
+
+	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL, Model: "m"})
+	err := p.ChatStream(context.Background(), Request{Messages: []Message{{Role: "user", Content: "x"}}}, Handler{Delta: func(string) {}})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	if _, ok := gotBody["options"]; ok {
+		t.Fatalf("options should be omitted when all zero: %v", gotBody)
+	}
+	if _, ok := gotBody["temperature"]; ok {
+		t.Fatalf("temperature should be omitted when zero: %v", gotBody)
 	}
 }

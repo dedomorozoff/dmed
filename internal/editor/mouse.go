@@ -1,0 +1,797 @@
+package editor
+
+import (
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"dmed/internal/i18n"
+)
+
+// Mouse handling across every pane: the tab bar, left rail (agent/git/tree),
+// bottom overlays (finder, palette, language chooser, plugin store, completion,
+// terminal), the right AI chat rail, diff views, and the buffer itself.
+// Mouse coordinates are zero-based as delivered by bubbletea.
+
+// tabAtX returns the tab whose painted label contains column x, or -1.
+func (m Model) tabAtX(x int) int {
+	pos := 0
+	for i := range m.tabs {
+		w := lipgloss.Width(m.tabLabel(i))
+		if x >= pos && x < pos+w {
+			return i
+		}
+		pos += w
+	}
+	return -1
+}
+
+// Bottom panels are stacked above the fixed final status row, in the same
+// order as View renders them. The docked debug panel sits directly above the
+// first bottom overlay.
+func (m Model) dapPanelStartRow() int { return m.viewHeight() + 2 } // leading divider
+
+// statusBarRow is the fixed final row. Bottom panels are rendered above it.
+func (m Model) statusBarRow() int {
+	if m.height < 1 {
+		return 0
+	}
+	return m.height - 1
+}
+
+func (m Model) bottomOverlayStartRow() int {
+	return m.viewHeight() + 1 + m.debugExtraRows() + m.contextBottomExtraRows()
+}
+
+func (m Model) finderStartRow() int {
+	return m.bottomOverlayStartRow() + 1 + m.gitCommitExtraRows() + m.aiInlineExtraRows() + m.aiFixExtraRows() + m.agentPromptExtraRows()
+}
+func (m Model) folderStartRow() int { return m.finderStartRow() + m.finderExtraRows() }
+func (m Model) paletteStartRow() int {
+	return m.folderStartRow() + m.folderExtraRows()
+}
+func (m Model) langChooserStartRow() int {
+	return m.paletteStartRow() + m.paletteExtraRows()
+}
+func (m Model) storeStartRow() int {
+	return m.langChooserStartRow() + m.langChooserExtraRows()
+}
+
+// complStartRow is the screen row the completion popup occupies: it floats
+// right below the edit line under the cursor.
+func (m Model) complStartRow() int {
+	_, sy := m.cursorScreenPos()
+	return sy + 1
+}
+func (m Model) termStartRow() int { return m.storeStartRow() + m.pluginStoreExtraRows() } // leading divider
+
+// doubleClickInterval is the window within which two clicks on the same spot
+// count as a double click.
+const doubleClickInterval = 400 * time.Millisecond
+
+// doubleShiftInterval is the window within which two bare Shift presses count
+// as the JetBrains-style "double Shift" palette shortcut.
+const doubleShiftInterval = 500 * time.Millisecond
+
+func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
+	x, y := msg.X, msg.Y
+
+	// A double click is a second press on the same cell within the interval.
+	// bubbletea v2 does not synthesize it; we detect it from consecutive
+	// clicks. Only the left button participates so middle-click (tab close)
+	// and right-click never collide with word/pane activation.
+	left := msg.Button != tea.MouseRight && msg.Button != tea.MouseMiddle && msg.Button != tea.MouseBackward && msg.Button != tea.MouseForward
+	dbl := false
+	if left {
+		dbl = m.lastClickValid && m.lastClickX == x && m.lastClickY == y &&
+			time.Since(m.lastClickTime) < doubleClickInterval
+		if dbl {
+			m.lastClickValid = false // reset so a third quick click starts a new pair
+		} else {
+			m.lastClickX, m.lastClickY, m.lastClickTime = x, y, time.Now()
+			m.lastClickValid = true
+		}
+	}
+
+	h := m.viewHeight()
+
+	// The tab bar is always row 0.
+	if y == 0 {
+		if a := m.splitIconAt(x); a != actNone && msg.Button != tea.MouseMiddle {
+			return m.activateSplitIcon(a)
+		}
+		if idx := m.tabAtX(x); idx >= 0 {
+			if msg.Button == tea.MouseMiddle {
+				return m.closeTabAt(idx)
+			}
+			m.setActiveTab(idx)
+		}
+		return nil
+	}
+
+	// Status-bar panel icons live on the fixed bottom row. Check this before
+	// overlay hit-testing because an open terminal reserves rows above it.
+	if y == m.statusBarRow() && m.statusIconsVisible() {
+		if left {
+			if a := m.statusIconAt(x); a != actNone {
+				return m.activateStatusIcon(a)
+			}
+		}
+		return nil
+	}
+
+	// The docked debug panel sits between the editor and the status bar.
+	if m.termOpen && y >= m.termStartRow()+1 && y < m.termStartRow()+m.termExtraRows() {
+		button := 0
+		if left {
+			button = 0
+		} else if msg.Button == tea.MouseMiddle {
+			button = 1
+		} else {
+			button = 2
+		}
+		m.forwardTerminalMouse(button, x, y-m.termStartRow()-1)
+		return nil
+	}
+	if handled, cmd := m.clickDebugPanel(x, y, dbl); handled {
+		return cmd
+	}
+
+	// Panels stacked above the editor.
+	if handled, cmd := m.clickOverlay(y, dbl); handled {
+		return cmd
+	}
+
+	// Right AI chat rail.
+	if m.chatOpen && x >= m.width-m.rightRailWidth() && y >= 1 && y <= h {
+		m.chatFocus = true
+		m.gitFocus = false
+		return nil
+	}
+
+	// Editor area rows.
+	if y < 1 || y > h {
+		return nil
+	}
+
+	// Left sidebar rail: agent tasks, git panel, project tree.
+	if x < m.leftRailWidth() {
+		cmd := m.clickLeftRail(x, y)
+		if dbl {
+			m.activatePanelItem()
+		}
+		return cmd
+	}
+
+	// Git inline diff preview fills the rest of the editor area.
+	if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0 {
+		m.gitDiffFocused = true
+		return nil
+	}
+
+	// Full-screen modes replace the buffer; their content is scrolled with
+	// the wheel. A click places the cursor only in the buffer.
+	if m.diffViewOpen || m.aiReviewMode || m.agentReviewMode || m.chatReviewMode || m.conflictOpen || m.aiCfgOpen || m.helpOpen {
+		return nil
+	}
+
+	return m.clickBuffer(x, y, msg.Button, msg.Mod)
+}
+
+// clickOverlay routes clicks on the stacked bottom panels. It reports whether
+// the click was consumed, and may return a command (palette / store actions).
+func (m *Model) clickOverlay(y int, dbl bool) (bool, tea.Cmd) {
+	f := m.finderStartRow()
+
+	if m.finderOpen {
+		n := len(m.finderHits)
+		if y >= f && y <= f+n {
+			if y < f+n {
+				m.finderSel = y - f
+				path := m.finderHits[m.finderSel]
+				m.finderOpen = false
+				m.focusOrOpen(path)
+			}
+			return true, nil
+		}
+		f += m.finderExtraRows()
+	}
+
+	if m.folderOpen {
+		if y >= f && y < f+m.folderExtraRows()-1 {
+			switch {
+			case y == f: // header
+			case y == f+1: // virtual parent
+				m.folderSel = 0
+				if dbl {
+					m.folderEnter()
+				}
+			default:
+				idx := y - (f + 2) + m.folderOffset
+				if idx >= 0 && idx < len(m.folderEntries) {
+					m.folderSel = idx + 1
+					m.clampFolder()
+					if dbl {
+						m.folderEnter()
+					}
+				}
+			}
+			return true, nil
+		}
+		f += m.folderExtraRows()
+	}
+
+	if m.paletteOpen {
+		hits := m.filterPalette()
+		n := len(hits)
+		if n > 8 {
+			n = 8
+		}
+		if y >= f && y <= f+n {
+			if y < f+n {
+				global := m.paletteOffset + (y - f)
+				if global >= 0 && global < len(hits) {
+					m.paletteSel = global
+					m.clampPalette(hits)
+					sel := hits[m.paletteSel]
+					m.paletteOpen = false
+					m.paletteSel = 0
+					m.paletteOffset = 0
+					return true, sel.action(m)
+				}
+			}
+			return true, nil
+		}
+		f += m.paletteExtraRows()
+	}
+
+	if m.langChooserOpen {
+		langs := i18n.Supported()
+		if y >= f+1 && y < f+1+len(langs) {
+			sel := y - (f + 1)
+			m.langChooserSel = sel
+			m.langChooserOpen = false
+			m.setLang(langs[sel].Code)
+			return true, nil
+		}
+		f += m.langChooserExtraRows()
+	}
+
+	if m.pluginStoreOpen {
+		if y >= f+1 && y < f+1+len(m.storeItems) {
+			sel := y - (f + 1)
+			if sel >= 0 && sel < len(m.storeItems) {
+				m.pluginStoreSel = sel
+				m.pluginStoreOpen = false
+				return true, m.activateStoreItem(m.storeItems[sel])
+			}
+			return true, nil
+		}
+		f += m.pluginStoreExtraRows()
+	}
+
+	// The completion popup is a floating window anchored under the cursor, not
+	// part of the bottom stack.
+	if m.complOpen {
+		vis := len(m.complItems)
+		if vis > complVisible {
+			vis = complVisible
+		}
+		start := m.complStartRow()
+		if y == start && vis > 0 {
+			return true, nil // title row
+		}
+		if y > start && y < start+1+vis {
+			global := m.complOffset + (y - (start + 1))
+			if global >= 0 && global < len(m.complItems) {
+				m.complSel = global
+				m.clampCompletion()
+				m.acceptCompletion()
+			}
+			return true, nil
+		}
+	}
+
+	if m.termOpen {
+		if y >= f && y < f+m.termExtraRows() {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// clickDebugPanel routes a click inside the docked debug panel. The column
+// under the pointer picks the list exactly like Tab does, the row picks the
+// entry like the arrow keys (reloading the columns derived from it), and a
+// double click on a ▸ variable expands it the way Enter does.
+func (m *Model) clickDebugPanel(x, y int, dbl bool) (bool, tea.Cmd) {
+	if !m.dapOpen {
+		return false, nil
+	}
+	top := m.dapPanelStartRow()
+	if y < top || y >= top+m.debugPanelHeight() {
+		return false, nil
+	}
+	row := y - top
+	if row <= 0 {
+		return true, nil // header row
+	}
+	// Row 1 of the panel carries the column titles; the lists start below it.
+	screen := row - 1
+	if screen < 0 {
+		return true, nil
+	}
+	n := m.dapListRows()
+	threadW, frameW, varW := m.dapColumnWidths(m.width)
+	switch {
+	case x < threadW:
+		if m.dapConsolePeek {
+			return true, nil // the console has no selectable rows
+		}
+		return true, m.dapSelectThread(m.dapThreadWindow(n) + screen)
+	case x < threadW+1+frameW:
+		return true, m.dapSelectFrame(m.dapFrameWindow(n) + screen)
+	case x < threadW+1+frameW+1+varW:
+		return true, m.dapSelectVar(m.dapVarWindow(n)+screen, dbl)
+	}
+	return true, nil
+}
+
+// clickLeftRail selects an item under the pointer in the agent task list, git
+// panel, or project tree.
+func (m *Model) clickLeftRail(x, y int) tea.Cmd {
+	h := m.viewHeight()
+	switch {
+	case m.agentOpen:
+		idx := m.agentOffset + (y - 1)
+		if tasks := m.agentQueue.Snapshot(); idx >= 0 && idx < len(tasks) {
+			m.agentSel = idx
+		}
+		m.agentFocus = true
+		m.gitFocus = false
+		m.chatFocus = false
+	case m.gitOpen:
+		m.gitFocus = true
+		m.chatFocus = false
+		switch m.gitMode {
+		case gitModeStatus:
+			idx := m.gitOffset + (y - 1)
+			if idx >= 0 && idx < len(m.gitFiles) {
+				m.gitSel = idx
+				m.clampGitScroll()
+				m.refreshGitDiffPreview()
+			}
+			m.gitDiffFocused = false
+		case gitModeLog:
+			idx := m.gitLogOffset + (y-1)/2
+			if idx >= 0 && idx < len(m.gitLogEntries) {
+				m.gitLogSel = idx
+				m.clampGitLogScroll()
+				m.showLogDiff()
+			}
+			m.gitDiffFocused = false
+		case gitModeBranch:
+			idx := m.gitBranchOffset + (y - 1)
+			if idx >= 0 && idx < len(m.gitBranchList) {
+				m.gitBranchSel = idx
+				m.clampGitBranchScroll()
+			}
+		}
+	case m.sidebarOn():
+		idx := m.treeOffset + (y - 1)
+		if idx >= 0 && idx < len(m.treeRows) {
+			m.treeSel = idx
+			m.treeFocus = true
+			m.gitFocus = false
+			m.chatFocus = false
+			m.clampTreeScroll(h)
+		}
+	}
+	return nil
+}
+
+// activatePanelItem runs the same action as pressing Enter in the currently
+// focused left-rail panel, so a double click selects and activates an item.
+func (m *Model) activatePanelItem() {
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	switch {
+	case m.agentOpen:
+		m.handleAgent(enter)
+	case m.gitOpen:
+		switch m.gitMode {
+		case gitModeStatus:
+			m.handleGitStatus(enter)
+		case gitModeLog:
+			// There is no Enter binding here; a double click focuses the commit
+			// diff so the wheel can scroll it.
+			if len(m.diffRows) > 0 {
+				m.gitDiffFocused = true
+				m.clampDiffScroll(m.viewHeight())
+			}
+		case gitModeBranch:
+			m.handleGitBranch(enter)
+		}
+	case m.sidebarOn():
+		m.handleTree(enter)
+	}
+}
+
+// clickBuffer places the cursor (or a secondary cursor with Alt+Click) in the
+// pane under the pointer and engages drag-selection. Inside the gutter the
+// button picks the marker: left click toggles a breakpoint, middle click
+// (the wheel button) toggles a bookmark.
+func (m *Model) clickBuffer(x, y int, btn tea.MouseButton, mod tea.KeyMod) tea.Cmd {
+	leftW := m.leftRailWidth()
+	editorRow := y - 1
+
+	// Pick the pane that was actually clicked in a split layout.
+	if m.layout == splitVert {
+		w0 := m.paneTotalWidth(0)
+		if x >= leftW+w0+1 {
+			m.activePane = 1
+		} else {
+			m.activePane = 0
+		}
+	} else if m.layout == splitHoriz {
+		if editorRow >= m.paneViewHeight(0)+1 {
+			m.activePane = 1
+		} else {
+			m.activePane = 0
+		}
+	}
+
+	p := m.curPane()
+	t := &m.tabs[p.tabIdx]
+
+	// A click in the gutter toggles markers without moving the cursor. One
+	// shared column: left click flips a breakpoint, middle click (the wheel
+	// button) flips a bookmark.
+	gw := m.gutterWidthForTab(t)
+	if gx := x - leftW; gx >= 0 && gx < gw {
+		ln, _ := m.clickPosToLineCol(m.activePane, editorRow, x)
+		m.lastClickValid = false // a rapid second click must not toggle twice
+		if btn == tea.MouseMiddle {
+			m.toggleBookmarkAt(ln)
+			return nil
+		}
+		return m.toggleBreakpointAt(ln)
+	}
+
+	ln, rawCol := m.clickPosToLineCol(m.activePane, editorRow, x)
+
+	// Ctrl+Click navigates to the definition under the pointer (like Zed /
+	// VS Code), instead of moving the cursor.
+	if mod&tea.ModCtrl != 0 {
+		return m.gotoDefinitionAt(t.path, ln, rawCol)
+	}
+
+	if mod&tea.ModAlt != 0 {
+		if t.buf.AddCursor(ln, rawCol, rawCol, rawCol) {
+			m.msg = m.t("msg.added_cursor")
+		}
+		return nil
+	}
+
+	t.buf.SetCursor(ln, rawCol)
+	t.buf.Deselect()
+	m.treeFocus = false
+	m.agentFocus = false
+	m.gitFocus = false
+	m.gitDiffFocused = false
+	m.chatFocus = false
+	m.mouseDown = true
+	return nil
+}
+
+// clickPosToLineCol converts a pointer at screen (x, editorRow) inside the
+// pane content into a buffer (line, raw column), accounting for word wrap
+// segments and horizontal scrolling.
+func (m Model) clickPosToLineCol(paneIdx, editorRow, x int) (int, int) {
+	p := &m.panes[paneIdx]
+	t := &m.tabs[p.tabIdx]
+	leftW := m.leftRailWidth()
+	gw := m.gutterWidthForTab(t)
+	tabW := m.cfg.Editor.TabWidth
+
+	if p.wordWrap {
+		w := m.paneContentWidth(paneIdx)
+		if w > 0 {
+			si := editorRow + p.offsetY
+			segs := t.tabWrap(w, tabW)
+			if si >= 0 && si < len(segs) {
+				s := segs[si]
+				clickX := x - leftW - gw + s.expStart
+				if clickX < 0 {
+					clickX = 0
+				}
+				return clampLineCol(t, s.line, clickX, tabW)
+			}
+			ll := t.buf.LineCount() - 1
+			if ll < 0 {
+				ll = 0
+			}
+			return ll, t.buf.LineLen(ll)
+		}
+	}
+
+	ln := editorRow + p.offsetY
+	clickX := x - leftW - gw + p.offsetX
+	if clickX < 0 {
+		clickX = 0
+	}
+	return clampLineCol(t, ln, clickX, tabW)
+}
+
+// clampLineCol maps an expanded column to a raw buffer column on a line.
+func clampLineCol(t *tab, ln, clickX, tabW int) (int, int) {
+	if ln >= t.buf.LineCount() {
+		ln = t.buf.LineCount() - 1
+	}
+	if ln < 0 {
+		ln = 0
+	}
+	rawCol := expandedToRawCol(t.buf.LineAt(ln), clickX, tabW)
+	if lineLen := t.buf.LineLen(ln); rawCol > lineLen {
+		rawCol = lineLen
+	}
+	return ln, rawCol
+}
+
+func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
+	x, y := msg.X, msg.Y
+	h := m.viewHeight()
+	dir := 0
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		dir = -1
+	case tea.MouseWheelDown:
+		dir = 1
+	default:
+		return nil
+	}
+
+	// While the diff has focus, the wheel always scrolls it.
+	if m.gitDiffFocused {
+		m.diffOffsetY += dir
+		m.clampDiffScroll(h)
+		return nil
+	}
+
+	// Terminal applications that enabled mouse reporting receive wheel events
+	// in panel-local coordinates; otherwise the event is ignored by the panel.
+	if m.termOpen && y >= m.termStartRow()+1 && y < m.termStartRow()+m.termExtraRows() {
+		button := 64
+		if dir > 0 {
+			button = 65
+		}
+		m.forwardTerminalMouse(button, x, y-m.termStartRow()-1)
+		return nil
+	}
+
+	// Completion popup: move the selection instead of the buffer.
+	if m.complOpen {
+		start := m.complStartRow()
+		if y > start && y <= start+m.complExtraRows()-1 {
+			if n := len(m.complItems); n > 0 {
+				m.complSel += dir
+				if m.complSel < 0 {
+					m.complSel = 0
+				}
+				if m.complSel > n-1 {
+					m.complSel = n - 1
+				}
+				m.clampCompletion()
+			}
+			return nil
+		}
+	}
+
+	// Right AI chat rail. In diff-review mode the wheel scrolls the review
+	// diff; otherwise it scrolls the transcript (wheel up = into history).
+	if m.chatOpen && x >= m.width-m.rightRailWidth() && y >= 1 && y <= h {
+		if m.chatReviewMode {
+			m.chatReviewOffY += dir
+			if m.chatReviewOffY < 0 {
+				m.chatReviewOffY = 0
+			}
+			if maxOff := len(m.chatReviewRows) - 1; m.chatReviewOffY > maxOff {
+				m.chatReviewOffY = maxInt(0, maxOff)
+			}
+			return nil
+		}
+		step := m.paneViewHeight(m.activePane) / 2
+		if step < 1 {
+			step = 1
+		}
+		m.chatScroll -= dir * step
+		m.clampChatScroll()
+		return nil
+	}
+
+	// Docked debug panel: the wheel walks the focused column's selection and
+	// follows the console backlog while it peeks.
+	if m.dapOpen {
+		if top := m.dapPanelStartRow(); y >= top && y < top+m.debugPanelHeight() {
+			return m.dapWheel(dir, x)
+		}
+	}
+
+	if y < 1 || y > h {
+		return nil
+	}
+
+	// Full-width side-by-side views.
+	switch {
+	case m.diffViewOpen:
+		m.diffOffsetY += dir
+		m.clampDiffScroll(h)
+		return nil
+	case m.aiReviewMode:
+		m.aiReviewOffY += dir
+		if m.aiReviewOffY < 0 {
+			m.aiReviewOffY = 0
+		}
+		if maxOff := len(m.aiReviewRows) - 1; m.aiReviewOffY > maxOff {
+			m.aiReviewOffY = maxInt(0, maxOff)
+		}
+		return nil
+	case m.agentReviewMode:
+		m.agentReviewOffY += dir
+		if m.agentReviewOffY < 0 {
+			m.agentReviewOffY = 0
+		}
+		if maxOff := len(m.agentReviewRows) - 1; m.agentReviewOffY > maxOff {
+			m.agentReviewOffY = maxInt(0, maxOff)
+		}
+		return nil
+	case m.conflictOpen && len(m.conflictRows) > 0:
+		m.conflictOffY += dir
+		if m.conflictOffY < 0 {
+			m.conflictOffY = 0
+		}
+		if maxOff := len(m.conflictRows) - 1; m.conflictOffY > maxOff {
+			m.conflictOffY = maxInt(0, maxOff)
+		}
+		return nil
+	case m.helpOpen:
+		m.scrollHelp(dir)
+		return nil
+	case m.aiCfgOpen:
+		return nil
+	}
+
+	// Git inline diff preview.
+	if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0 {
+		if x >= m.leftRailWidth() {
+			m.gitDiffFocused = true
+			m.diffOffsetY += dir
+			m.clampDiffScroll(h)
+			return nil
+		}
+	}
+
+	// Left rail lists.
+	if x < m.leftRailWidth() {
+		return m.wheelLeftRail(dir)
+	}
+
+	// Buffer scroll.
+	p := m.curPane()
+	t := &m.tabs[p.tabIdx]
+	maxOff := t.buf.LineCount() - m.paneContentHeight(m.activePane)
+	if p.wordWrap {
+		w := m.paneContentWidth(m.activePane)
+		if w > 0 {
+			maxOff = len(t.tabWrap(w, m.cfg.Editor.TabWidth)) - m.paneContentHeight(m.activePane)
+		}
+	}
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	if dir < 0 {
+		if p.offsetY > 0 {
+			p.offsetY--
+		}
+	} else {
+		if p.offsetY < maxOff {
+			p.offsetY++
+		}
+	}
+	return nil
+}
+
+// dapWheel moves the debug panel selection with the wheel. The column under
+// the pointer takes focus first so the wheel acts on what the user points at;
+// the console peek has no selection, so it scrolls its backlog instead.
+func (m *Model) dapWheel(dir, x int) tea.Cmd {
+	threadW, frameW, _ := m.dapColumnWidths(m.width)
+	switch {
+	case x < threadW:
+		if m.dapConsolePeek {
+			// A wheel-up notch is dir == -1; the backlog walks towards older
+			// output, which dapScrollConsole counts as positive.
+			m.dapScrollConsole(-dir)
+			return nil
+		}
+		m.dapFocus = 0
+	case x < threadW+1+frameW:
+		m.dapFocus = 1
+	default:
+		m.dapFocus = 2
+	}
+	return m.dapMoveSelCmd(dir)
+}
+
+// wheelLeftRail moves the selection within the left-rail lists, keeping the
+// selection on screen through the existing clamp helpers.
+func (m *Model) wheelLeftRail(dir int) tea.Cmd {
+	switch {
+	case m.agentOpen:
+		if tasks := m.agentQueue.Snapshot(); len(tasks) > 0 {
+			m.agentSel += dir
+			if m.agentSel < 0 {
+				m.agentSel = 0
+			}
+			if m.agentSel > len(tasks)-1 {
+				m.agentSel = len(tasks) - 1
+			}
+		}
+	case m.gitOpen:
+		m.gitFocus = true
+		m.chatFocus = false
+		switch m.gitMode {
+		case gitModeStatus:
+			if len(m.gitFiles) > 0 {
+				m.gitSel += dir
+				if m.gitSel < 0 {
+					m.gitSel = 0
+				}
+				if m.gitSel > len(m.gitFiles)-1 {
+					m.gitSel = len(m.gitFiles) - 1
+				}
+				m.clampGitScroll()
+				m.refreshGitDiffPreview()
+			}
+		case gitModeLog:
+			if len(m.gitLogEntries) > 0 {
+				m.gitLogSel += dir
+				if m.gitLogSel < 0 {
+					m.gitLogSel = 0
+				}
+				if m.gitLogSel > len(m.gitLogEntries)-1 {
+					m.gitLogSel = len(m.gitLogEntries) - 1
+				}
+				m.clampGitLogScroll()
+				m.showLogDiff()
+			}
+		case gitModeBranch:
+			if len(m.gitBranchList) > 0 {
+				m.gitBranchSel += dir
+				if m.gitBranchSel < 0 {
+					m.gitBranchSel = 0
+				}
+				if m.gitBranchSel > len(m.gitBranchList)-1 {
+					m.gitBranchSel = len(m.gitBranchList) - 1
+				}
+				m.clampGitBranchScroll()
+			}
+		}
+	case m.sidebarOn():
+		if len(m.treeRows) > 0 {
+			m.treeSel += dir
+			if m.treeSel < 0 {
+				m.treeSel = 0
+			}
+			if m.treeSel > len(m.treeRows)-1 {
+				m.treeSel = len(m.treeRows) - 1
+			}
+			m.treeFocus = true
+			m.gitFocus = false
+			m.chatFocus = false
+			m.clampTreeScroll(m.treeEntryRows(m.viewHeight()))
+		}
+	}
+	return nil
+}

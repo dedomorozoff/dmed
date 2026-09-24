@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"dmed/internal/debug"
 	"dmed/internal/lsp"
 )
 
@@ -23,6 +24,14 @@ type lspCompletionMsg struct {
 type lspDiagMsg struct {
 	path  string
 	diags []lsp.Diagnostic
+}
+
+// lspDefinitionMsg carries an async Go-to-Definition result back into the
+// editor model. loc is nil when the server found no target.
+type lspDefinitionMsg struct {
+	path string
+	loc  *lsp.Location
+	err  error
 }
 
 // waitForLSPDiag blocks until diagnostics arrive and forwards them as a Msg.
@@ -72,6 +81,20 @@ func lspServerFor(ext string) (cmd string, args []string, langID string) {
 		return "vscode-html-languageserver", []string{"--stdio"}, "html"
 	}
 	return "", nil, ""
+}
+
+// lspResolve is the config-aware variant of lspServerFor: the master [lsp]
+// switch and per-language opt-out toggles can shut a server off even when the
+// binary is installed. Empty command means no LSP for that extension.
+func (m Model) lspResolve(ext string) (cmd string, args []string, langID string) {
+	cmd, args, lang := lspServerFor(ext)
+	if cmd == "" || lang == "" {
+		return "", nil, ""
+	}
+	if !m.cfg.LSP.Enabled || m.cfg.LSP.Disabled[lang] {
+		return "", nil, ""
+	}
+	return cmd, args, lang
 }
 
 // lspInstallFor returns the command that installs the given LSP server binary,
@@ -125,7 +148,7 @@ func (m *Model) ensureLSP() {
 	if t == nil || t.path == "" {
 		return
 	}
-	cmd, args, lang := lspServerFor(strings.ToLower(filepath.Ext(t.path)))
+	cmd, args, lang := m.lspResolve(strings.ToLower(filepath.Ext(t.path)))
 	if cmd == "" {
 		return
 	}
@@ -146,7 +169,15 @@ func (m *Model) ensureLSP() {
 		return
 	}
 	m.lspClient = c
-	m.lspClient.DidOpen(t.path, lang, t.buf.Text())
+	path := t.path
+	text := t.buf.Text()
+	// didOpen is sent from a background goroutine because it waits for the
+	// server's initialize handshake, and gopls must not receive the document
+	// before it (that hangs the first completion). The spawn itself stays on
+	// the UI thread so the editor keeps rendering while gopls loads.
+	go debug.CapturePanicReport(func() {
+		_ = c.EnsureOpened(path, lang, text)
+	})
 }
 
 // lspCompletionCmd fires an async completion request for the current cursor and
@@ -156,8 +187,8 @@ func (m *Model) lspCompletionCmd() tea.Cmd {
 	if t == nil || t.path == "" {
 		return nil
 	}
-	cmd, _, _ := lspServerFor(strings.ToLower(filepath.Ext(t.path)))
-	if cmd == "" {
+	cmd, _, lang := m.lspResolve(strings.ToLower(filepath.Ext(t.path)))
+	if cmd == "" || lang == "" {
 		return nil
 	}
 	if m.lspClient == nil {
@@ -171,12 +202,50 @@ func (m *Model) lspCompletionCmd() tea.Cmd {
 	text := t.buf.Text()
 	c := m.lspClient
 	return func() tea.Msg {
+		_ = c.EnsureOpened(path, lang, text)
 		c.DidChange(path, text, 1)
 		items, err := c.Completion(path, line, col)
 		if err != nil {
 			return lspCompletionMsg{path: path, err: err}
 		}
 		return lspCompletionMsg{path: path, items: items}
+	}
+}
+
+// gotoDefinition fires an async Go-to-Definition request for the current
+// cursor and returns a command that delivers an lspDefinitionMsg when the
+// result arrives. It is used by F12.
+func (m *Model) gotoDefinition() tea.Cmd {
+	t := m.cur()
+	if t == nil {
+		return nil
+	}
+	return m.gotoDefinitionAt(t.path, t.buf.CurLine(), t.buf.Col())
+}
+
+// gotoDefinitionAt is like gotoDefinition but targets an explicit buffer
+// position; it backs both the F12 binding and Ctrl+Click navigation.
+func (m *Model) gotoDefinitionAt(path string, line, col int) tea.Cmd {
+	if path == "" {
+		return nil
+	}
+	cmd, _, lang := m.lspResolve(strings.ToLower(filepath.Ext(path)))
+	if cmd == "" || lang == "" {
+		return nil
+	}
+	if m.lspClient == nil {
+		m.ensureLSP()
+	}
+	if m.lspClient == nil {
+		return nil
+	}
+	text := m.cur().buf.Text()
+	c := m.lspClient
+	return func() tea.Msg {
+		_ = c.EnsureOpened(path, lang, text)
+		c.DidChange(path, text, 1)
+		loc, err := c.Definition(path, line, col)
+		return lspDefinitionMsg{path: path, loc: loc, err: err}
 	}
 }
 
@@ -203,4 +272,67 @@ func (m *Model) mergeLSPCompletion(items []lsp.CompletionItem) {
 		m.complSel = 0
 		m.complOffset = 0
 	}
+}
+
+// lspMissingHintFor is the config-aware variant of lspMissingHint: it stays
+// silent when the [lsp] switch is off or the file's language is disabled.
+func (m Model) lspMissingHintFor(path string) string {
+	cmd, _, _ := m.lspResolve(strings.ToLower(filepath.Ext(path)))
+	if cmd == "" {
+		return ""
+	}
+	if _, err := exec.LookPath(cmd); err == nil {
+		return ""
+	}
+	if inst := lspInstallFor(cmd); inst != "" {
+		return fmt.Sprintf("%s — %s", cmd, inst)
+	}
+	return cmd
+}
+
+// lspStatusMsg sets the status-bar line describing the current file's LSP
+// situation: an active server, a known-but-missing one (with install hint),
+// or the reason it is shut off. It is the "LSP: Server Status" palette action.
+func (m *Model) lspStatusMsg() {
+	t := m.cur()
+	if t == nil || t.path == "" {
+		m.msg = m.t("msg.lsp_none")
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(t.path))
+	cmd, _, lang := m.lspResolve(ext)
+	if cmd == "" {
+		if !m.cfg.LSP.Enabled {
+			m.msg = m.t("msg.lsp_disabled_all")
+			return
+		}
+		if lang != "" && m.cfg.LSP.Disabled[lang] {
+			m.msg = fmt.Sprintf("%s", m.t("msg.lsp_disabled_lang", lang))
+			return
+		}
+		m.msg = m.t("msg.lsp_none")
+		return
+	}
+	if m.lspClient == nil {
+		if hint := lspInstallFor(cmd); hint != "" {
+			m.msg = m.t("msg.lsp_missing", cmd+" ("+hint+")")
+		} else {
+			m.msg = fmt.Sprintf("%s", cmd)
+		}
+		return
+	}
+	m.msg = m.t("msg.lsp_active", cmd)
+}
+
+// restartLSP tears down the current language server (if any) so the next
+// completion or go-to-definition lazily spawns a fresh one. Useful after a
+// server update or a wedged gopls process.
+func (m *Model) restartLSP() {
+	if m.lspClient != nil {
+		_ = m.lspClient.Close()
+		m.lspClient = nil
+		m.msg = m.t("msg.lsp_restarted")
+		return
+	}
+	m.msg = m.t("msg.lsp_none")
 }

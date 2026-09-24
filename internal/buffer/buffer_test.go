@@ -419,3 +419,118 @@ func TestDuplicateLineUndo(t *testing.T) {
 		t.Fatalf("after undo: %q", b.Text())
 	}
 }
+
+func TestDuplicateLineUp(t *testing.T) {
+	b := Load("aaa\nbbb\nccc\n")
+	b.SetCursor(1, 0)
+	b.DuplicateLineUp()
+	if b.Text() != "aaa\nbbb\nbbb\nccc\n" {
+		t.Fatalf("DuplicateLineUp: %q", b.Text())
+	}
+	if b.CurLine() != 2 {
+		t.Fatalf("cursor after dup up: line=%d", b.CurLine())
+	}
+}
+
+func TestDuplicateLineUpSelection(t *testing.T) {
+	b := Load("aaa\nbbb\nccc\nddd\n")
+	b.SetCursor(1, 0)
+	b.StartSelection()
+	b.MoveDownWithSelect() // select lines 1-2
+	b.DuplicateLineUp()
+	if b.Text() != "aaa\nbbb\nccc\nbbb\nccc\nddd\n" {
+		t.Fatalf("DuplicateLineUpSelection: %q", b.Text())
+	}
+	if b.CurLine() != 3 {
+		t.Fatalf("cursor after dup up sel: line=%d", b.CurLine())
+	}
+}
+
+func TestToggleCommentSingleLine(t *testing.T) {
+	b := Load("hello world")
+	b.SetCursor(0, 5)
+	b.ToggleComment("//", "")
+	want := "// hello world\n"
+	if b.Text() != want {
+		t.Fatalf("comment: got %q want %q", b.Text(), want)
+	}
+	if b.Col() != 8 {
+		t.Fatalf("col after comment: got %d want 8", b.Col())
+	}
+	b.ToggleComment("//", "")
+	if b.Text() != "hello world\n" {
+		t.Fatalf("uncomment: got %q", b.Text())
+	}
+	if b.Col() != 5 {
+		t.Fatalf("col after uncomment: got %d want 5", b.Col())
+	}
+}
+
+func TestToggleCommentIndented(t *testing.T) {
+	b := Load("    code()")
+	b.SetCursor(0, 4)
+	b.ToggleComment("//", "")
+	want := "    // code()\n"
+	if b.Text() != want {
+		t.Fatalf("indented comment: got %q want %q", b.Text(), want)
+	}
+	if b.Col() != 7 {
+		t.Fatalf("col: got %d want 7", b.Col())
+	}
+	b.ToggleComment("//", "")
+	if b.Text() != "    code()\n" {
+		t.Fatalf("uncomment indented: got %q", b.Text())
+	}
+	if b.Col() != 4 {
+		t.Fatalf("col: got %d want 4", b.Col())
+	}
+}
+
+func TestToggleCommentSelection(t *testing.T) {
+	b := Load("aaa\nbbb\nccc")
+	b.SetCursor(0, 0)
+	b.StartSelection()
+	b.MoveDownWithSelect() // select lines 0-1
+	b.ToggleComment("//", "")
+	want := "// aaa\n// bbb\nccc\n"
+	if b.Text() != want {
+		t.Fatalf("comment selection: got %q want %q", b.Text(), want)
+	}
+}
+
+func TestToggleCommentBlock(t *testing.T) {
+	b := Load("text")
+	b.SetCursor(0, 0)
+	b.ToggleComment("<!--", "-->")
+	want := "<!-- text -->\n"
+	if b.Text() != want {
+		t.Fatalf("block comment: got %q want %q", b.Text(), want)
+	}
+	b.ToggleComment("<!--", "-->")
+	if b.Text() != "text\n" {
+		t.Fatalf("block uncomment: got %q", b.Text())
+	}
+}
+
+func TestToggleCommentNoop(t *testing.T) {
+	b := Load("foo")
+	b.SetCursor(0, 0)
+	b.ToggleComment("", "")
+	if b.Text() != "foo\n" {
+		t.Fatalf("noop comment changed text: %q", b.Text())
+	}
+}
+
+func TestToggleCommentColumns(t *testing.T) {
+	b := Load("aaa\nbbb\nccc")
+	b.SetCursor(2, 2)
+	b.ToggleComment("//", "")
+	if b.Col() != 5 {
+		t.Fatalf("col on line 2 after comment: got %d want 5", b.Col())
+	}
+	// verify content of line 2
+	b.ToggleComment("//", "")
+	if b.Col() != 2 {
+		t.Fatalf("col on line 2 after uncomment: got %d want 2", b.Col())
+	}
+}

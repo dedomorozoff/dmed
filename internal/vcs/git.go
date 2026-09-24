@@ -10,9 +10,12 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/format/diff"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/transport"
+	httptransport "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
@@ -201,6 +204,69 @@ func (repo *Repo) SwitchBranch(name string) error {
 	return wt.Checkout(&git.CheckoutOptions{
 		Branch: plumbing.NewBranchReferenceName(name),
 	})
+}
+
+// remote returns the default remote ("origin") when one is configured.
+func (repo *Repo) remote() (*config.RemoteConfig, error) {
+	remotes, err := repo.r.Remotes()
+	if err != nil {
+		return nil, err
+	}
+	for _, rm := range remotes {
+		if rm.Config().Name == "origin" {
+			return rm.Config(), nil
+		}
+	}
+	return nil, fmt.Errorf("no remote configured")
+}
+
+// HasRemote reports whether a default remote ("origin") is configured, so the
+// git panel can enable/disable fetch and push.
+func (repo *Repo) HasRemote() bool {
+	_, err := repo.remote()
+	return err == nil
+}
+
+// remoteAuth builds an auth method from credentials embedded in the remote URL
+// (https://user:pass@host/...). Public and local remotes need no auth.
+func remoteAuth(remoteURL string) transport.AuthMethod {
+	ep, err := transport.NewEndpoint(remoteURL)
+	if err != nil || ep.User == "" {
+		return nil
+	}
+	return &httptransport.BasicAuth{Username: ep.User, Password: ep.Password}
+}
+
+// Fetch downloads objects and refs from the default remote (origin).
+func (repo *Repo) Fetch() error {
+	rm, err := repo.remote()
+	if err != nil {
+		return err
+	}
+	err = repo.r.Fetch(&git.FetchOptions{
+		RemoteName: "origin",
+		Auth:       remoteAuth(rm.URLs[0]),
+	})
+	if err == git.NoErrAlreadyUpToDate {
+		return nil
+	}
+	return err
+}
+
+// Push uploads the current branch to the default remote (origin).
+func (repo *Repo) Push() error {
+	rm, err := repo.remote()
+	if err != nil {
+		return err
+	}
+	err = repo.r.Push(&git.PushOptions{
+		RemoteName: "origin",
+		Auth:       remoteAuth(rm.URLs[0]),
+	})
+	if err == git.NoErrAlreadyUpToDate {
+		return nil
+	}
+	return err
 }
 
 // FileStatusCode indicates the state of a file in the working tree / index.
@@ -591,6 +657,44 @@ func (repo *Repo) Log(n int) ([]LogEntry, error) {
 		return nil, err
 	}
 	return entries, nil
+}
+
+// BlameLine holds the authorship of one committed line.
+type BlameLine struct {
+	Author string    // author name
+	Date   time.Time // when the line was last changed
+	Hash   string    // short commit hash that introduced the line
+}
+
+// Blame returns the authorship of every line of the file at the current HEAD.
+// Lines without a commit (new files, not yet committed) are absent.
+func (repo *Repo) Blame(absPath string) ([]BlameLine, error) {
+	rel, err := filepath.Rel(repo.Root, absPath)
+	if err != nil {
+		rel = absPath
+	}
+	rel = filepath.ToSlash(rel)
+	head, err := repo.r.Head()
+	if err != nil {
+		return nil, err
+	}
+	commit, err := repo.r.CommitObject(head.Hash())
+	if err != nil {
+		return nil, err
+	}
+	result, err := git.Blame(commit, rel)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BlameLine, 0, len(result.Lines))
+	for _, l := range result.Lines {
+		h := l.Hash.String()
+		if len(h) > 7 {
+			h = h[:7]
+		}
+		out = append(out, BlameLine{Author: l.AuthorName, Date: l.Date, Hash: h})
+	}
+	return out, nil
 }
 
 // FileDiffView is the side-by-side diff for a single file at a given commit.

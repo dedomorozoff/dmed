@@ -1,6 +1,8 @@
 package editor
 
 import (
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -69,6 +71,11 @@ func (m *Model) complWordCandidates(prefix string) []string {
 // or closes the popup. force ignores whether candidates were found, so
 // Ctrl+Space can surface suggestions even mid-word. It returns a command that
 // fires an async LSP completion request when a language server is available.
+//
+// The popup also opens when the buffer has no matching words but a language
+// server could answer (e.g. freshly typed "fmt.P" where no buffer word starts
+// with a capital). Without this, type-aware candidates are never requested and
+// the user only ever sees words scraped from the current file.
 func (m *Model) triggerCompletion(force bool) tea.Cmd {
 	start, prefix := m.complPrefix()
 	if prefix == "" && !force {
@@ -76,7 +83,7 @@ func (m *Model) triggerCompletion(force bool) tea.Cmd {
 		return nil
 	}
 	cands := m.complWordCandidates(prefix)
-	if len(cands) == 0 && !force {
+	if len(cands) == 0 && !force && !m.lspAvailable() {
 		m.closeCompletion()
 		return nil
 	}
@@ -87,6 +94,22 @@ func (m *Model) triggerCompletion(force bool) tea.Cmd {
 	m.complSel = 0
 	m.complOffset = 0
 	return m.lspCompletionCmd()
+}
+
+// lspAvailable reports whether the current tab's language has an LSP server
+// installed. It mirrors ensureLSP so triggerCompletion can decide whether a
+// zero-candidate popup is worth holding open for server results.
+func (m *Model) lspAvailable() bool {
+	t := m.cur()
+	if t == nil || t.path == "" {
+		return false
+	}
+	cmd, _, _ := m.lspResolve(strings.ToLower(filepath.Ext(t.path)))
+	if cmd == "" {
+		return false
+	}
+	_, err := exec.LookPath(cmd)
+	return err == nil
 }
 
 func (m *Model) closeCompletion() {
@@ -148,7 +171,7 @@ func (m *Model) handleCompletionKey(key string) bool {
 			m.clampCompletion()
 		}
 		return true
-	case "pgdn":
+	case "pgdown":
 		if n > 0 {
 			m.complSel += complVisible
 			if m.complSel > n-1 {
@@ -183,30 +206,87 @@ func (m Model) complExtraRows() int {
 	if n > complVisible {
 		n = complVisible
 	}
-	return n + 1
+	return n
 }
 
-// complPanel renders the completion popup as a compact list.
+// complWidth is the natural popup width: the widest candidate, capped so the
+// window stays compact next to the cursor.
+func (m Model) complWidth() int {
+	w := 4
+	for _, it := range m.complItems {
+		if lw := lipgloss.Width(it) + 4; lw > w {
+			w = lw
+		}
+	}
+	if w > 44 {
+		w = 44
+	}
+	return w
+}
+
+// complPanel renders the completion popup as a compact list. The block is
+// left-aligned at the edit cursor and blank-padded to the full terminal width,
+// so the caller can splice it over the rendered rows as a floating window.
 func (m Model) complPanel() []string {
 	items := m.complItems
 	total := len(items)
 	if total > complVisible {
 		items = items[m.complOffset : m.complOffset+complVisible]
 	}
-	rows := make([]string, 0, len(items)+1)
-	rows = append(rows, statusHiStyle.Render(" "+m.t("compl.title")+" "))
+	w := m.complWidth()
+	rows := make([]string, 0, len(items))
 	for i, it := range items {
-		label := " " + it + " "
-		pad := m.width - lipgloss.Width(label)
-		if pad < 0 {
-			pad = 0
-		}
-		label += strings.Repeat(" ", pad)
+		label := padTo(" "+it+" ", w)
 		if m.complOffset+i == m.complSel {
 			rows = append(rows, statusHiStyle.Render(label))
 		} else {
 			rows = append(rows, statusStyle.Render(label))
 		}
+	}
+
+	// Left-align the popup at the cursor column so it reads as a floating
+	// window under the text instead of a full-width banner.
+	cx, _ := m.cursorScreenPos()
+	if cx+w > m.width {
+		cx = m.width - w
+		if cx < 0 {
+			cx = 0
+		}
+	}
+	indent := strings.Repeat(" ", cx)
+	fill := m.width - (cx + w)
+	if fill < 0 {
+		fill = 0
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, indent+r+strings.Repeat(" ", fill))
+	}
+	return out
+}
+
+// overlayCompletion splices the popup into the assembled screen rows right
+// below the edit line, covering those rows for its height (no reflow), so the
+// rest of the buffer stays put while it is open.
+func (m Model) overlayCompletion(rows []string) []string {
+	if !m.complOpen || len(m.complItems) == 0 {
+		return rows
+	}
+	panel := m.complPanel()
+	if len(panel) == 0 {
+		return rows
+	}
+	_, sy := m.cursorScreenPos()
+	start := sy + 1
+	if start < 0 {
+		start = 0
+	}
+	for i, r := range panel {
+		idx := start + i
+		if idx >= len(rows) {
+			break
+		}
+		rows[idx] = r
 	}
 	return rows
 }

@@ -70,6 +70,42 @@ func TestSplitHorizRowsFixedWidth(t *testing.T) {
 	}
 }
 
+func TestF6TogglesVerticalSplit(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "a.txt", "alpha\n")
+	f2 := writeTemp(t, dir, "b.txt", "bravo\n")
+
+	m := New(f1, f2)
+	m.width, m.height = 80, 24
+
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyF6})
+	if m.layout != splitVert {
+		t.Fatalf("f6 must open vertical split, layout=%d", m.layout)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyF6})
+	if m.layout != splitNone || len(m.panes) != 1 {
+		t.Fatalf("f6 must collapse split, layout=%d panes=%d", m.layout, len(m.panes))
+	}
+}
+
+func TestF7TogglesHorizontalSplit(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "a.txt", "alpha\n")
+	f2 := writeTemp(t, dir, "b.txt", "bravo\n")
+
+	m := New(f1, f2)
+	m.width, m.height = 80, 24
+
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyF7})
+	if m.layout != splitHoriz {
+		t.Fatalf("f7 must open horizontal split, layout=%d", m.layout)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyF7})
+	if m.layout != splitNone || len(m.panes) != 1 {
+		t.Fatalf("f7 must collapse split, layout=%d panes=%d", m.layout, len(m.panes))
+	}
+}
+
 func TestCloseTabCollapsesSplit(t *testing.T) {
 	dir := t.TempDir()
 	f1 := writeTemp(t, dir, "a.txt", "alpha\n")

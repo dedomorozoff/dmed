@@ -59,6 +59,30 @@ func TestMultiNewline(t *testing.T) {
 	}
 }
 
+func TestMultiNewlineSameLineNoDupes(t *testing.T) {
+	b := Load("cat dog cat bird cat")
+	b.SetCursor(0, 0)
+	if !b.AddNextOccurrence() {
+		t.Fatal("arm multi mode")
+	}
+	if !b.AddNextOccurrence() {
+		t.Fatal("add second cursor")
+	}
+	if len(multi(b)) != 2 {
+		t.Fatalf("expected 2 cursors, got %d", len(multi(b)))
+	}
+	b.MultiNewline()
+	c := multi(b)
+	seen := map[[2]int]bool{}
+	for _, cr := range c {
+		k := [2]int{cr.Line, cr.Col}
+		if seen[k] {
+			t.Fatalf("duplicate cursor at %d:%d: %+v", cr.Line, cr.Col, c)
+		}
+		seen[k] = true
+	}
+}
+
 func TestMultiBackspace(t *testing.T) {
 	b := Load("abc\ndef\nghi")
 	b.SetCursor(0, 3)
