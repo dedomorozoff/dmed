@@ -7,7 +7,7 @@ export GOROOT=
 export GOPROXY=https://proxy.golang.org,direct
 export GOSUMDB=sum.golang.org
 
-VERSION  ?= 0.8.2
+VERSION  ?= 0.8.3
 LDFLAGS  := -s -w -X main.version=$(VERSION)
 PREFIX   ?= /usr/local
 

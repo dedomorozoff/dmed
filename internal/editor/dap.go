@@ -17,7 +17,6 @@ import (
 	"dmed/internal/syntax"
 )
 
-
 // debugBackend is the transport surface the debug panel needs: DAP adapters
 // (*dap.Client) and the DBGp Xdebug client (*dbgp.Client) both implement it,
 // so the panel, launch sequence and step keys work for either protocol.
@@ -184,19 +183,19 @@ var dapLangPresets = map[string]dapLangPreset{
 	// request by dapLaunchArgs, together with program/cwd.
 	"js": {
 		adapter:     "node",
-		adapterMode: "connect",
+		adapterMode: "stdio",
 		launchType:  "node",
 		launchJSON:  `{"type":"node","request":"launch"}`,
 	},
 	"jsx": {
 		adapter:     "node",
-		adapterMode: "connect",
+		adapterMode: "stdio",
 		launchType:  "node",
 		launchJSON:  `{"type":"node","request":"launch"}`,
 	},
 	"ts": {
 		adapter:     "node",
-		adapterMode: "connect",
+		adapterMode: "stdio",
 		launchType:  "node",
 		launchJSON:  `{"type":"node","request":"launch"}`,
 	},
@@ -1136,7 +1135,6 @@ func (m *Model) dapSelectVar(idx int, expand bool) tea.Cmd {
 	}
 	return nil
 }
-
 
 // handleDAPEventUpdate routes an adapter event into panel state and re-arms
 // the event channel. Events from a superseded session are dropped so a stale
