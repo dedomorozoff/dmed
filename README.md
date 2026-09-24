@@ -287,6 +287,32 @@ program = /path/to/app
 launch_json = {"justMyCode": false}
 ```
 
+Node.js and TypeScript: with VS Code's "JavaScript Debugger" extension
+(`ms-vscode.js-debug`) installed, `.js/.mjs/.cjs/.jsx/.ts/.mts/.tsx` files are
+auto-detected and debugged through its standalone stdio adapter (`node
+src/dap.js`) — `F4` breakpoints, `F5` runs the active file, F6/F7 step. Without
+the extension, install the adapter once and/or point dmed at it:
+
+```sh
+npm i -g @vscode/js-debug-adapter     # adapter script: src/dap.js
+```
+
+```ini
+[debug]
+adapter_cmd = node
+adapter_mode = stdio
+adapter_args = C:/Users/me/node_modules/@vscode/js-debug-adapter/src/dap.js
+launch_type = node
+launch_request = launch
+```
+
+The adapter script is searched in `~/.vscode{-insiders,-server}/extensions`,
+`~/.vscodium/extensions`, `~/.cursor/extensions` and `~/node_modules`, and
+`DMED_JS_DEBUG=/path/to/dap.js` pins it explicitly. Attaching to an
+already-running process works the same way: run `node --inspect-brk app.js`,
+then set `launch_request = attach` with `launch_json =
+{"port": 9229}`.
+
 ## Documentation
 
 - [Plugins (Lua)](docs/PLUGINS.md) — write keybindings, palette commands, events

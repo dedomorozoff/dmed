@@ -133,3 +133,100 @@ func TestDapAutoDetectConfigKey(t *testing.T) {
 		t.Fatal("auto_detect must default to on")
 	}
 }
+
+func TestDapJsDebugScriptFound(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DMED_JS_DEBUG", filepath.Join(dir, "dap.js"))
+	if err := os.WriteFile(filepath.Join(dir, "dap.js"), []byte("// adapter"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := dapJsDebugScript(); got == "" {
+		t.Fatal("DMED_JS_DEBUG pointing at dap.js must be honored")
+	}
+	t.Setenv("DMED_JS_DEBUG", "") // empty falls through to the extension scan
+
+	// A VS Code layout: ~/.vscode/extensions/ms-vscode.js-debug-1.99.0/src/dap.js
+	home, _ := os.UserHomeDir()
+	extBase := filepath.Join(home, ".vscode", "extensions")
+	if err := os.MkdirAll(filepath.Join(extBase, "ms-vscode.js-debug-1.99.0", "src"), 0o755); err != nil {
+		t.Skipf("cannot create fake extension dir: %v", err)
+	}
+	script := filepath.Join(extBase, "ms-vscode.js-debug-1.99.0", "src", "dap.js")
+	if err := os.WriteFile(script, []byte("// adapter"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(filepath.Join(extBase, "ms-vscode.js-debug-1.99.0"))
+	if got := dapJsDebugScript(); got != script {
+		t.Errorf("dapJsDebugScript() = %q, want %q", got, script)
+	}
+
+	// Unknown extension publishers must not match.
+	if err := os.MkdirAll(filepath.Join(extBase, "someoneelse.thing-1.0.0", "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(filepath.Join(extBase, "someoneelse.thing-1.0.0"))
+	if got := dapJsDebugScript(); got != script {
+		t.Errorf("dapJsDebugScript() = %q, want %q (only ms-vscode.js-debug* matches)", got, script)
+	}
+}
+
+func TestDapLangPresetJs(t *testing.T) {
+	// Pin the adapter script so the test does not depend on a locally
+	// installed VS Code extension; the not-installed case is covered by
+	// TestDapLangPresetJsMissingAdapter.
+	script := filepath.Join(t.TempDir(), "dap.js")
+	if err := os.WriteFile(script, []byte("// adapter"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DMED_JS_DEBUG", script)
+	for _, name := range []string{"app.js", "app.mjs", "app.cjs", "app.jsx", "app.ts", "app.mts", "app.tsx"} {
+		m := newEditorWithFile(t, name, "console.log(1)\n")
+		dc, ok := m.dapLangPreset()
+		if !ok {
+			t.Fatalf("%s preset not detected", name)
+		}
+		if dc.AdapterCmd != "node" || dc.AdapterMode != "stdio" {
+			t.Errorf("%s: adapter = %q/%q, want node/stdio", name, dc.AdapterCmd, dc.AdapterMode)
+		}
+		if dc.LaunchType != "node" {
+			t.Errorf("%s: launch_type = %q, want node", name, dc.LaunchType)
+		}
+		if !strings.Contains(dc.LaunchJSON, `"node"`) {
+			t.Errorf("%s: launch_json = %q, want a node launch body", name, dc.LaunchJSON)
+		}
+		// The located adapter script rides in adapter_args.
+		if dc.AdapterArgs != script {
+			t.Errorf("%s: adapter_args = %q, want %q", name, dc.AdapterArgs, script)
+		}
+		// The active file, not its directory, is what node runs.
+		m.dapDeduced = &dc
+		if got := m.dapProgram(); filepath.Ext(got) != filepath.Ext(name) || got == filepath.Dir(got) {
+			t.Errorf("%s: dapProgram() = %q, want the active file", name, got)
+		}
+	}
+}
+
+func TestDapLangPresetJsMissingAdapter(t *testing.T) {
+	// The preset must agree with the adapter lookup: adapter_cmd stays empty
+	// exactly when the vscode-js-debug adapter is not installed anywhere we
+	// know of, so the start fails with the actionable error instead of
+	// spawning a bare node. On machines where the adapter IS installed this
+	// degenerates to the node/dap.js shape.
+	t.Setenv("DMED_JS_DEBUG", "")
+	m := newEditorWithFile(t, "app.js", "console.log(1)\n")
+	m.root = t.TempDir() // a project without .dmed.conf
+	dc, ok := m.dapLangPreset()
+	if !ok {
+		t.Fatal("js preset expected regardless of adapter availability")
+	}
+	if script := dapJsDebugScript(); script == "" {
+		if dc.AdapterCmd != "" {
+			t.Errorf("adapter_cmd = %q, want empty (adapter missing)", dc.AdapterCmd)
+		}
+		if err := dapJsDebugError(); err == nil || !strings.Contains(err.Error(), "vscode-js-debug") {
+			t.Errorf("dapJsDebugError() = %v, want an actionable message", err)
+		}
+	} else if dc.AdapterCmd != "node" || !strings.HasSuffix(filepath.ToSlash(dc.AdapterArgs), "dap.js") {
+		t.Errorf("adapter = %q/%q with script %q, want node/<dap.js>", dc.AdapterCmd, dc.AdapterArgs, script)
+	}
+}

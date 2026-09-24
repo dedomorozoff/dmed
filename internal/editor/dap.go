@@ -17,6 +17,7 @@ import (
 	"dmed/internal/syntax"
 )
 
+
 // debugBackend is the transport surface the debug panel needs: DAP adapters
 // (*dap.Client) and the DBGp Xdebug client (*dbgp.Client) both implement it,
 // so the panel, launch sequence and step keys work for either protocol.
@@ -175,6 +176,30 @@ var dapLangPresets = map[string]dapLangPreset{
 		launchType:  "php",
 		launchJSON:  `{"type":"php","request":"launch"}`,
 	},
+	// JavaScript/TypeScript debug through vscode-js-debug's standalone stdio
+	// adapter (node src/dap.js), the same layout VS Code itself uses. The
+	// entry script is located at preset time (dapJsDebugScript); when it is
+	// missing the session fails with an actionable error instead of spawning
+	// a bare node process. The "type":"node" body is merged into the launch
+	// request by dapLaunchArgs, together with program/cwd.
+	"js": {
+		adapter:     "node",
+		adapterMode: "connect",
+		launchType:  "node",
+		launchJSON:  `{"type":"node","request":"launch"}`,
+	},
+	"jsx": {
+		adapter:     "node",
+		adapterMode: "connect",
+		launchType:  "node",
+		launchJSON:  `{"type":"node","request":"launch"}`,
+	},
+	"ts": {
+		adapter:     "node",
+		adapterMode: "connect",
+		launchType:  "node",
+		launchJSON:  `{"type":"node","request":"launch"}`,
+	},
 }
 
 // dapLangPreset deduces the [debug] settings for the active file's language.
@@ -202,6 +227,21 @@ func (m Model) dapLangPreset() (config.DebugConfig, bool) {
 		if d.AdapterArgs == "" {
 			d.AdapterArgs = preset.adapterArgs
 		}
+		// The JS adapter is not a bare binary: it is `node <path to
+		// vscode-js-debug's dap.js>`, so the script path is resolved at
+		// preset time and becomes adapter_args. When the adapter is not
+		// installed anywhere we know of, adapter_cmd falls back to plain
+		// node and the start fails with an actionable error rather than a
+		// bare interpreter that cannot speak DAP.
+		if d.AdapterCmd == "node" && preset.adapter == "node" {
+			script := dapJsDebugScript()
+			if script == "" {
+				d.AdapterCmd = ""
+			} else {
+				d.AdapterCmd = "node"
+				d.AdapterArgs = script
+			}
+		}
 	}
 	if d.Mode == "debug" {
 		d.Mode = preset.mode
@@ -223,6 +263,63 @@ func (m Model) dapDebugCfg() config.DebugConfig {
 		return *m.dapDeduced
 	}
 	return m.cfg.Debug
+}
+
+// dapJsDebugScript locates vscode-js-debug's standalone stdio adapter script
+// (src/dap.js). It is searched in the same places VS Code installs it — the
+// user's extension directories for stable/insiders/VSCodium and the remote
+// server layout — and can be pinned with DMED_JS_DEBUG. The path is passed to
+// `node` as the adapter command's argument; npm-installed copies
+// (`npm i @vscode/js-debug-adapter`) land in node_modules and are found via
+// the PATH-independent node_modules scan.
+func dapJsDebugScript() string {
+	if p := strings.TrimSpace(os.Getenv("DMED_JS_DEBUG")); p != "" {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	extDirs := []string{
+		filepath.Join(home, ".vscode", "extensions"),
+		filepath.Join(home, ".vscode-insiders", "extensions"),
+		filepath.Join(home, ".vscodium", "extensions"),
+		filepath.Join(home, ".cursor", "extensions"),
+		filepath.Join(home, ".vscode-server", "extensions"),
+	}
+	for _, base := range extDirs {
+		entries, err := os.ReadDir(base)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !strings.HasPrefix(e.Name(), "ms-vscode.js-debug") {
+				continue
+			}
+			candidate := filepath.Join(base, e.Name(), "src", "dap.js")
+			if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
+				return candidate
+			}
+		}
+	}
+	for _, cand := range []string{
+		filepath.Join(home, "node_modules", "@vscode", "js-debug-adapter", "src", "dap.js"),
+		filepath.Join(home, "node_modules", "@vscode", "js-debug-adapter", "vscode-js-debug", "src", "dap.js"),
+	} {
+		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+			return cand
+		}
+	}
+	return ""
+}
+
+// dapJsDebugError explains why a JS/TS debug session failed when the
+// vscode-js-debug adapter could not be located (the preset left adapter_cmd
+// empty on purpose so this branch can fire).
+func dapJsDebugError() error {
+	return fmt.Errorf("debug: vscode-js-debug adapter not found — install the \"JavaScript Debugger\" VS Code extension, `npm i -g @vscode/js-debug-adapter`, or point [debug] adapter_cmd at `node` and adapter_args at its src/dap.js (or set DMED_JS_DEBUG)")
 }
 
 // dapStartCmd spawns the DAP adapter and completes the initialize handshake
@@ -248,6 +345,13 @@ func (m *Model) dapStartCmd() tea.Cmd {
 	}
 	isConnect := mode == "connect"
 	isDBGP := mode == "dbgp"
+	// The deduced JS preset leaves adapter_cmd empty on purpose when the
+	// vscode-js-debug adapter script is not installed anywhere we know of, so
+	// the user gets an actionable error instead of a bare node process that
+	// cannot speak DAP.
+	if adapter == "" && !isConnect && !isDBGP {
+		return func() tea.Msg { return dapStartMsg{gen: m.dapGen, err: dapJsDebugError()} }
+	}
 	// In connect/dbgp mode adapter_args is the endpoint address, not CLI
 	// arguments for an adapter process, so skip the Delve/stdio splitting.
 	cmdAdapter, adapterArgs := adapter, []string(nil)
@@ -417,7 +521,8 @@ func (m Model) dapLaunchArgs() (map[string]interface{}, error) {
 // adapters like Delve), else ".". For a Go file outside any module, the file
 // itself is returned: dlv then builds `go build <file>.go`, which works
 // without a go.mod, instead of failing on a module-less package directory.
-// Script languages (PHP/Xdebug) debug the active file, not a directory.
+// Script languages (PHP/Xdebug, Node via js-debug) debug the active file,
+// not a directory.
 func (m Model) dapProgram() string {
 	if p := m.dapDebugCfg().Program; p != "" {
 		return p
@@ -425,6 +530,14 @@ func (m Model) dapProgram() string {
 	if t := m.cur(); t != nil && t.path != "" {
 		if filepath.Ext(t.path) == ".php" {
 			return t.path
+		}
+		switch syntax.Lang(t.path) {
+		case "js", "jsx", "ts":
+			// Node runs an entry file, not a package directory; only
+			// fall back to the directory when the tab is a folder.
+			if st, err := os.Stat(t.path); err == nil && !st.IsDir() {
+				return t.path
+			}
 		}
 		if filepath.Ext(t.path) == ".go" && !pathInGoModule(filepath.Dir(t.path)) {
 			return t.path

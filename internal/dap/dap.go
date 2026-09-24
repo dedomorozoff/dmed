@@ -327,6 +327,46 @@ func outputScanner(r io.Reader, emit func(string)) error {
 func (c *Client) Seq() int64 {
 	return atomic.AddInt64(&c.nextID, 1)
 }
+// StartConnectWithTransport dials a listening DAP endpoint using the given
+// transport (tcp or pipe) and speaks DAP over the resulting connection. For
+// pipe transport on Windows the addr is a Windows named pipe path like
+// \\.\pipe\dmed-js-debug-...; for tcp it is host:port. No adapter process is
+// spawned. rootDir is unused; kept for signature parity.
+func StartConnectWithTransport(transport, addr string, rootDir string, onEvent OnEvent) (*Client, error) {
+	if strings.TrimSpace(addr) == "" {
+		return nil, fmt.Errorf("dap connect %s: empty address", transport)
+	}
+	var conn net.Conn
+	var err error
+	switch transport {
+	case "pipe":
+		conn, err = net.DialTimeout("pipe", addr, 15*time.Second)
+	case "tcp":
+		conn, err = net.DialTimeout("tcp", addr, 15*time.Second)
+	default:
+		return nil, fmt.Errorf("dap connect: unsupported transport %q", transport)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("dap connect %s: %w", transport, err)
+	}
+	return NewClient(conn, onEvent), nil
+}
+
+// StartConnectWithTransportAndProcess dials a listening DAP endpoint using the given
+// transport (tcp or pipe) and speaks DAP over the resulting connection, then
+// associates an adapter process with the client so it gets torn down on Close.
+// This is used by the JS debug server path where dmed both spawns `node
+// <dapDebugServer.js> <pipe>` and dials the resulting pipe.
+func StartConnectWithTransportAndProcess(transport, addr, rootDir string, onEvent OnEvent, cmd *exec.Cmd) (*Client, error) {
+	client, err := StartConnectWithTransport(transport, addr, rootDir, onEvent)
+	if err != nil {
+		return nil, err
+	}
+	client.adapter = cmd
+	return client, nil
+}
+
+
 
 const callTimeout = 60 * time.Second
 
