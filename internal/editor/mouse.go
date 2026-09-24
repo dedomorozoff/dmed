@@ -47,8 +47,9 @@ func (m Model) bottomOverlayStartRow() int {
 func (m Model) finderStartRow() int {
 	return m.bottomOverlayStartRow() + m.gitCommitExtraRows() + m.aiInlineExtraRows() + m.aiFixExtraRows() + m.agentPromptExtraRows()
 }
+func (m Model) folderStartRow() int { return m.finderStartRow() + m.finderExtraRows() }
 func (m Model) paletteStartRow() int {
-	return m.finderStartRow() + m.finderExtraRows()
+	return m.folderStartRow() + m.folderExtraRows()
 }
 func (m Model) langChooserStartRow() int {
 	return m.paletteStartRow() + m.paletteExtraRows()
@@ -127,7 +128,7 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 	}
 
 	// Panels stacked above the editor.
-	if handled, cmd := m.clickOverlay(y); handled {
+	if handled, cmd := m.clickOverlay(y, dbl); handled {
 		return cmd
 	}
 
@@ -179,7 +180,7 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 
 // clickOverlay routes clicks on the stacked bottom panels. It reports whether
 // the click was consumed, and may return a command (palette / store actions).
-func (m *Model) clickOverlay(y int) (bool, tea.Cmd) {
+func (m *Model) clickOverlay(y int, dbl bool) (bool, tea.Cmd) {
 	f := m.finderStartRow()
 
 	if m.finderOpen {
@@ -194,6 +195,30 @@ func (m *Model) clickOverlay(y int) (bool, tea.Cmd) {
 			return true, nil
 		}
 		f += m.finderExtraRows()
+	}
+
+	if m.folderOpen {
+		if y >= f && y < f+m.folderExtraRows()-1 {
+			switch {
+			case y == f: // header
+			case y == f+1: // virtual parent
+				m.folderSel = 0
+				if dbl {
+					m.folderEnter()
+				}
+			default:
+				idx := y - (f + 2) + m.folderOffset
+				if idx >= 0 && idx < len(m.folderEntries) {
+					m.folderSel = idx + 1
+					m.clampFolder()
+					if dbl {
+						m.folderEnter()
+					}
+				}
+			}
+			return true, nil
+		}
+		f += m.folderExtraRows()
 	}
 
 	if m.paletteOpen {
@@ -222,14 +247,12 @@ func (m *Model) clickOverlay(y int) (bool, tea.Cmd) {
 
 	if m.langChooserOpen {
 		langs := i18n.Supported()
-		if y >= f+1 && y <= f+len(langs) {
-			if y < f+len(langs) {
-				sel := y - (f + 1)
-				m.langChooserSel = sel
-				m.langChooserOpen = false
-				m.setLang(langs[sel].Code)
-				return true, nil
-			}
+		if y >= f+1 && y < f+1+len(langs) {
+			sel := y - (f + 1)
+			m.langChooserSel = sel
+			m.langChooserOpen = false
+			m.setLang(langs[sel].Code)
+			return true, nil
 		}
 		f += m.langChooserExtraRows()
 	}

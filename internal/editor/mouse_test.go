@@ -85,8 +85,8 @@ func TestFinderItemClickOpensFile(t *testing.T) {
 	m.finderHits = []string{"a.txt", "b.txt"}
 	m.finderSel = 0
 
-	// Finder overlay: items occupy finderExtraRows rows after the status bar.
-	start := m.viewHeight() + 2
+	// Finder items start at the overlay's first row after the editor content.
+	start := m.finderStartRow()
 	_ = m.handleMouseClick(tea.MouseClickMsg{X: 10, Y: start + 1})
 	if m.finderOpen {
 		t.Fatal("finder must close after clicking an item")
@@ -142,8 +142,11 @@ func TestWheelOverTerminalDoesNotStealInput(t *testing.T) {
 	if start >= m.height {
 		t.Fatalf("terminal overlay does not fit: start=%d height=%d", start, m.height)
 	}
-	if handled, _ := m.clickOverlay(start + 1); !handled {
+	if handled, _ := m.clickOverlay(start+1, false); !handled {
 		t.Fatal("wheel target must belong to terminal overlay")
+	}
+	if handled, _ := m.clickOverlay(start+m.termPanelHeight(), false); handled {
+		t.Fatal("terminal divider must not be treated as terminal content")
 	}
 }
 

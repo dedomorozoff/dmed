@@ -108,7 +108,24 @@ func (m Model) finderExtraRows() int {
 	if !m.finderOpen {
 		return 0
 	}
-	return len(m.finderHits) + 1
+	return len(m.finderHits) + 2
+}
+
+// dividerRow is the thin separator strip ending each docked bottom panel
+// (finder, folder, palette, lang chooser, plugin store, terminal, debug). It
+// is the panel's own *last* row, so content rows and within-panel click
+// offsets never move; every downstream StartRow shifts automatically because
+// it is a sum of ExtraRows. TestStatusBarRemainsLastWithBottomPanels
+// guarantees the status bar stays the final frame row while dividers stack up.
+//
+// Reuses the existing statusStyle (no new global identifiers), matching the
+// strip to each panel's own background so it reads as a "полоса".
+func (m Model) dividerRow() string {
+	return statusStyle.Render(strings.Repeat(m.g.hline, m.width))
+}
+
+func (m Model) withDivider(rows []string) []string {
+	return append(rows, m.dividerRow())
 }
 
 func (m Model) paletteExtraRows() int {
@@ -117,18 +134,18 @@ func (m Model) paletteExtraRows() int {
 	}
 	hits := m.filterPalette()
 	if len(hits) > 8 {
-		return 9
+		return 10
 	}
-	return len(hits) + 1
+	return len(hits) + 2
 }
 
-// folderExtraRows is how many rows the built-in folder picker occupies below
-// the status bar, reserving their height so the panel stays on screen.
+// folderExtraRows is how many rows the built-in folder picker occupies above
+// the status bar, including its trailing divider.
 func (m Model) folderExtraRows() int {
 	if !m.folderOpen {
 		return 0
 	}
-	n := 3 // header + parent row + hint
+	n := 4 // header + parent row + hint + divider
 	if len(m.folderEntries) == 0 {
 		n++ // — empty directory —
 		return n
@@ -168,7 +185,7 @@ func (m Model) termExtraRows() int {
 	if !m.termOpen {
 		return 0
 	}
-	return m.termPanelHeight()
+	return m.termPanelHeight() + 1
 }
 
 // dapPanelMinRows is the smallest usable debug panel: header, column titles
@@ -219,14 +236,14 @@ func (m Model) debugExtraRows() int {
 	if !m.dapOpen {
 		return 0
 	}
-	return m.debugPanelHeight()
+	return m.debugPanelHeight() + 1
 }
 
 func (m Model) langChooserExtraRows() int {
 	if !m.langChooserOpen {
 		return 0
 	}
-	return len(i18n.Supported()) + 1
+	return len(i18n.Supported()) + 2
 }
 
 func (m Model) pluginStoreExtraRows() int {
@@ -234,10 +251,10 @@ func (m Model) pluginStoreExtraRows() int {
 		return 0
 	}
 	n := len(m.storeItems)
-	if m.storeLoading {
+	if m.storeLoading || m.storeErr != "" {
 		n++
 	}
-	return n + 1
+	return n + 2 // title + divider
 }
 
 func (m Model) contextBottomExtraRows() int {
@@ -368,9 +385,8 @@ func (m Model) View() tea.View {
 		rows = append(rows, m.editorRows(h)...)
 	}
 	if m.dapOpen {
-		// The debug panel docks between the content and the status bar so the
-		// status bar never moves away from the bottom of the screen.
-		rows = append(rows, m.debugPanel()...)
+		// The debug panel docks between the content and the bottom overlays.
+		rows = append(rows, m.withDivider(m.debugPanel())...)
 	}
 	// The bottom overlays keep the existing focused prompt/status line and
 	// input rows together. The application-wide status bar is appended last,
@@ -391,22 +407,22 @@ func (m Model) View() tea.View {
 		rows = append(rows, m.agentPromptInputRender()...)
 	}
 	if m.finderOpen {
-		rows = append(rows, m.finderPanel()...)
+		rows = append(rows, m.withDivider(m.finderPanel())...)
 	}
 	if m.folderOpen {
-		rows = append(rows, m.folderPanel()...)
+		rows = append(rows, m.withDivider(m.folderPanel())...)
 	}
 	if m.paletteOpen {
-		rows = append(rows, m.palettePanel()...)
+		rows = append(rows, m.withDivider(m.palettePanel())...)
 	}
 	if m.langChooserOpen {
-		rows = append(rows, m.langChooserPanel()...)
+		rows = append(rows, m.withDivider(m.langChooserPanel())...)
 	}
 	if m.pluginStoreOpen {
-		rows = append(rows, m.pluginStorePanel()...)
+		rows = append(rows, m.withDivider(m.pluginStorePanel())...)
 	}
 	if m.termOpen {
-		rows = append(rows, m.terminalPanel()...)
+		rows = append(rows, m.withDivider(m.terminalPanel())...)
 	}
 	rows = append(rows, m.statusBar())
 	// The completion popup floats under the edit line instead of being pinned

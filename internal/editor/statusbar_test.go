@@ -104,6 +104,44 @@ func TestStatusIconHiddenInPromptMode(t *testing.T) {
 	}
 }
 
+func TestDockedPanelsHaveTrailingDivider(t *testing.T) {
+	m := New()
+	m.width, m.height = 80, 40
+	m.finderHits = []string{"a", "b"}
+	m.folderEntries = []folderEntry{{name: "dir", dir: true}, {name: "file"}}
+	m.storeItems = []storeItem{{Name: "plug", Desc: "test"}}
+	m.storeErr = "offline"
+
+	tests := []struct {
+		name  string
+		open  func(*Model)
+		rows  []string
+		extra func(Model) int
+	}{
+		{"finder", func(m *Model) { m.finderOpen = true }, m.withDivider(m.finderPanel()), Model.finderExtraRows},
+		{"folder", func(m *Model) { m.folderOpen = true }, m.withDivider(m.folderPanel()), Model.folderExtraRows},
+		{"palette", func(m *Model) { m.paletteOpen = true }, m.withDivider(m.palettePanel()), Model.paletteExtraRows},
+		{"language", func(m *Model) { m.langChooserOpen = true }, m.withDivider(m.langChooserPanel()), Model.langChooserExtraRows},
+		{"plugin store", func(m *Model) { m.pluginStoreOpen = true }, m.withDivider(m.pluginStorePanel()), Model.pluginStoreExtraRows},
+		{"terminal", func(m *Model) { m.termOpen = true }, m.withDivider(m.terminalPanel()), Model.termExtraRows},
+		{"debug", func(m *Model) { m.dapOpen = true }, m.withDivider(m.debugPanel()), Model.debugExtraRows},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pm := m
+			tt.open(&pm)
+			extra := tt.extra(pm)
+			if len(tt.rows) != extra {
+				t.Fatalf("panel rows = %d, ExtraRows = %d", len(tt.rows), extra)
+			}
+			want := strings.Repeat(m.g.hline, m.width)
+			if got := stripANSI(tt.rows[len(tt.rows)-1]); got != want {
+				t.Fatalf("last row = %q, want divider %q", got, want)
+			}
+		})
+	}
+}
+
 func TestStatusBarRemainsLastWithBottomPanels(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -117,7 +155,14 @@ func TestStatusBarRemainsLastWithBottomPanels(t *testing.T) {
 			m.gitMode = gitModeStatus
 			m.diffRows = []vcs.DiffRow{{Type: vcs.DiffAdded}}
 		}},
-		{"git and terminal", func(m *Model) { m.gitOpen = true; m.gitFocus = true; m.gitMode = gitModeStatus; m.termOpen = true }},
+		{"git and terminal", func(m *Model) {
+			m.gitOpen = true
+			m.gitFocus = true
+			m.gitMode = gitModeStatus
+			m.termOpen = true
+		}},
+		{"debug and terminal", func(m *Model) { m.dapOpen = true; m.termOpen = true }},
+		{"finder and terminal", func(m *Model) { m.finderOpen = true; m.finderHits = []string{"a"}; m.termOpen = true }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
