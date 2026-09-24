@@ -27,15 +27,26 @@ func (m Model) tabAtX(x int) int {
 	return -1
 }
 
-// The bottom overlay panels are appended after the status bar, one after the
-// other, in the same order they are rendered. The docked debug panel sits
-// above the status bar, so it shifts everything below it down.
+// Bottom panels are stacked above the fixed final status row, in the same
+// order as View renders them. The docked debug panel sits directly above the
+// first bottom overlay.
 func (m Model) dapPanelStartRow() int { return m.viewHeight() + 1 }
 
-// statusBarRow is the screen row carrying the status bar and its panel icons.
-func (m Model) statusBarRow() int { return m.viewHeight() + m.debugExtraRows() + 1 }
+// statusBarRow is the fixed final row. Bottom panels are rendered above it.
+func (m Model) statusBarRow() int {
+	if m.height < 1 {
+		return 0
+	}
+	return m.height - 1
+}
 
-func (m Model) finderStartRow() int { return m.statusBarRow() + 1 }
+func (m Model) bottomOverlayStartRow() int {
+	return m.viewHeight() + 1 + m.debugExtraRows() + m.contextBottomExtraRows()
+}
+
+func (m Model) finderStartRow() int {
+	return m.bottomOverlayStartRow() + m.gitCommitExtraRows() + m.aiInlineExtraRows() + m.aiFixExtraRows() + m.agentPromptExtraRows()
+}
 func (m Model) paletteStartRow() int {
 	return m.finderStartRow() + m.finderExtraRows()
 }
@@ -99,6 +110,18 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 	}
 
 	// The docked debug panel sits between the editor and the status bar.
+	if m.termOpen && y >= m.termStartRow() && y < m.termStartRow()+m.termPanelHeight() {
+		button := 0
+		if left {
+			button = 0
+		} else if msg.Button == tea.MouseMiddle {
+			button = 1
+		} else {
+			button = 2
+		}
+		m.forwardTerminalMouse(button, x, y-m.termStartRow())
+		return nil
+	}
 	if handled, cmd := m.clickDebugPanel(x, y, dbl); handled {
 		return cmd
 	}
@@ -512,19 +535,14 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 		return nil
 	}
 
-	// Terminal panel.
+	// Terminal applications that enabled mouse reporting receive wheel events
+	// in panel-local coordinates; otherwise the event is ignored by the panel.
 	if m.termOpen && y >= m.termStartRow() && y < m.termStartRow()+m.termPanelHeight() {
-		step := m.termPanelHeight() / 2
-		if step < 1 {
-			step = 1
+		button := 64
+		if dir > 0 {
+			button = 65
 		}
-		m.termScroll += dir * step
-		if maxBack := len(m.termLines) - 1; m.termScroll > maxBack {
-			m.termScroll = maxInt(0, maxBack)
-		}
-		if m.termScroll < 0 {
-			m.termScroll = 0
-		}
+		m.forwardTerminalMouse(button, x, y-m.termStartRow())
 		return nil
 	}
 

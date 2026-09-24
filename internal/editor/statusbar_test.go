@@ -6,6 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"dmed/internal/vcs"
 )
 
 func TestStatusIconAtSpansStrip(t *testing.T) {
@@ -99,6 +101,41 @@ func TestStatusIconHiddenInPromptMode(t *testing.T) {
 	_ = m.handleMouseClick(tea.MouseClickMsg{X: m.statusIconX(actGit), Y: y})
 	if m.gitOpen != before {
 		t.Fatal("status icon click must not fire while the strip is hidden")
+	}
+}
+
+func TestStatusBarRemainsLastWithBottomPanels(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*Model)
+	}{
+		{"terminal", func(m *Model) { m.termOpen = true }},
+		{"git", func(m *Model) { m.gitOpen = true; m.gitFocus = true; m.gitMode = gitModeStatus }},
+		{"git diff", func(m *Model) {
+			m.gitOpen = true
+			m.gitFocus = true
+			m.gitMode = gitModeStatus
+			m.diffRows = []vcs.DiffRow{{Type: vcs.DiffAdded}}
+		}},
+		{"git and terminal", func(m *Model) { m.gitOpen = true; m.gitFocus = true; m.gitMode = gitModeStatus; m.termOpen = true }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := New()
+			m.width, m.height = 80, 24
+			tt.setup(&m)
+			rows := plainRows(m.View().Content)
+			if len(rows) != m.height {
+				t.Fatalf("frame has %d rows, want %d", len(rows), m.height)
+			}
+			want := stripANSI(m.statusBar())
+			if got := stripANSI(rows[len(rows)-1]); got != want {
+				t.Fatalf("last row = %q, want status bar %q", got, want)
+			}
+			if got := m.statusBarRow(); got != len(rows)-1 {
+				t.Fatalf("statusBarRow = %d, want %d", got, len(rows)-1)
+			}
+		})
 	}
 }
 

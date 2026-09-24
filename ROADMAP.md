@@ -169,10 +169,9 @@ in the Makefile as insurance).
       skipped_dirs, model, ollama_url, system_prompt, context_max,
       tree_width, chat_width_pct. `Settings: Open Config` in the palette,
       hot-reload on config save.
-- [x] Built-in terminal (`Alt+T`): persistent cmd session at the bottom of the
-      editor, command history via ↑/↓, PgUp/PgDn scrollback, `Esc` to close
-      (the session keeps running). Pipe-based: interactive TUI programs cannot
-      run inside it.
+- [x] Built-in terminal (`Alt+T`): persistent ConPTY/PTY session at the bottom
+      of the editor, ANSI screen emulation, colors/cursor addressing, interactive
+      and full-screen TUI programs, resize, paste and native shell history.
 - [x] Go to line (`Ctrl+L` in the editor / "Go to Line" palette): formats
       `N` (absolute), `N:C`, relative `+N`/`-N` (with a `+N:C` column).
 - [x] Duplicate lines: `Ctrl+D` (copy below), `Alt+Shift+Down`/`Up`

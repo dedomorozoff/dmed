@@ -152,6 +152,18 @@ func (m Model) termPanelHeight() int {
 	return h
 }
 
+func (m Model) terminalGeometry() (int, int) {
+	w := m.width
+	if w < 1 {
+		w = 80
+	}
+	h := m.termPanelHeight()
+	if m.termOpen {
+		h = m.termPanelHeight()
+	}
+	return w, h
+}
+
 func (m Model) termExtraRows() int {
 	if !m.termOpen {
 		return 0
@@ -228,12 +240,87 @@ func (m Model) pluginStoreExtraRows() int {
 	return n + 1
 }
 
+func (m Model) contextBottomExtraRows() int {
+	switch {
+	case m.diffViewOpen,
+		m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0,
+		m.aiReviewMode, m.agentReviewMode, m.chatReviewMode, m.agentPrompt,
+		m.aiInlineOpen, m.aiInlineBusy, m.aiFixOpen, m.aiFixBusy,
+		m.aiFixReviewMode, m.conflictOpen, m.treeConfirm != "", m.quitConfirm,
+		m.aiCfgOpen, m.gitOpen, m.promptSave, m.promptOpen,
+		m.searchOpen, m.gotoOpen:
+		return 1
+	default:
+		return 0
+	}
+}
+
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows()
+	h := m.height - 2 - m.contextBottomExtraRows() - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows()
 	if h < 1 {
 		h = 1
 	}
 	return h
+}
+
+func (m Model) contextBottomRow() string {
+	if m.diffViewOpen {
+		return m.diffBottom()
+	} else if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0 {
+		return m.diffBottom()
+	} else if m.aiReviewMode {
+		return m.aiReviewBottom()
+	} else if m.agentReviewMode {
+		return m.agentReviewBottom()
+	} else if m.chatReviewMode {
+		return m.chatReviewBottom()
+	} else if m.agentPrompt {
+		return m.agentPromptLine()
+	} else if m.aiInlineOpen {
+		return m.aiInlinePrompt()
+	} else if m.aiInlineBusy {
+		return m.aiInlineBusyLine()
+	} else if m.aiFixOpen {
+		return m.aiFixPrompt()
+	} else if m.aiFixBusy {
+		return m.aiFixBusyLine()
+	} else if m.aiFixReviewMode {
+		return m.aiFixReviewBottom()
+	} else if m.conflictOpen {
+		return m.conflictLine()
+	} else if m.treeConfirm != "" {
+		return m.treeConfirmLine()
+	} else if m.quitConfirm {
+		return m.quitLine()
+	} else if m.aiCfgOpen {
+		if m.aiCfgEdit {
+			return m.aiCfgEditLine()
+		}
+		return m.aiCfgBottom()
+	} else if m.gitOpen {
+		switch m.gitMode {
+		case gitModeCommit:
+			return m.gitLine()
+		case gitModeLog:
+			return m.gitLogStatusLine()
+		case gitModeBranch:
+			return m.gitBranchLine()
+		default:
+			return m.gitStatusLine()
+		}
+	} else if m.promptSave {
+		return m.saveLine()
+	} else if m.promptOpen {
+		return m.promptLine()
+	} else if m.searchOpen {
+		if m.replaceOpen {
+			return m.replaceLine()
+		}
+		return m.searchLine()
+	} else if m.gotoOpen {
+		return m.gotoLine()
+	}
+	return ""
 }
 
 func (m Model) gutterWidthForTab(t *tab) int {
@@ -285,65 +372,12 @@ func (m Model) View() tea.View {
 		// status bar never moves away from the bottom of the screen.
 		rows = append(rows, m.debugPanel()...)
 	}
-	bottom := m.statusBar()
-	if m.diffViewOpen {
-		bottom = m.diffBottom()
-	} else if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0 {
-		bottom = m.diffBottom()
-	} else if m.aiReviewMode {
-		bottom = m.aiReviewBottom()
-	} else if m.agentReviewMode {
-		bottom = m.agentReviewBottom()
-	} else if m.chatReviewMode {
-		bottom = m.chatReviewBottom()
-	} else if m.agentPrompt {
-		bottom = m.agentPromptLine()
-	} else if m.aiInlineOpen {
-		bottom = m.aiInlinePrompt()
-	} else if m.aiInlineBusy {
-		bottom = m.aiInlineBusyLine()
-	} else if m.aiFixOpen {
-		bottom = m.aiFixPrompt()
-	} else if m.aiFixBusy {
-		bottom = m.aiFixBusyLine()
-	} else if m.aiFixReviewMode {
-		bottom = m.aiFixReviewBottom()
-	} else if m.conflictOpen {
-		bottom = m.conflictLine()
-	} else if m.treeConfirm != "" {
-		bottom = m.treeConfirmLine()
-	} else if m.quitConfirm {
-		bottom = m.quitLine()
-	} else if m.aiCfgOpen {
-		if m.aiCfgEdit {
-			bottom = m.aiCfgEditLine()
-		} else {
-			bottom = m.aiCfgBottom()
-		}
-	} else if m.gitOpen {
-		if m.gitMode == gitModeCommit {
-			bottom = m.gitLine()
-		} else if m.gitMode == gitModeLog {
-			bottom = m.gitLogStatusLine()
-		} else if m.gitMode == gitModeBranch {
-			bottom = m.gitBranchLine()
-		} else {
-			bottom = m.gitStatusLine()
-		}
-	} else if m.promptSave {
-		bottom = m.saveLine()
-	} else if m.promptOpen {
-		bottom = m.promptLine()
-	} else if m.searchOpen {
-		if m.replaceOpen {
-			bottom = m.replaceLine()
-		} else {
-			bottom = m.searchLine()
-		}
-	} else if m.gotoOpen {
-		bottom = m.gotoLine()
+	// The bottom overlays keep the existing focused prompt/status line and
+	// input rows together. The application-wide status bar is appended last,
+	// after the terminal, so no bottom panel can hide it.
+	if context := m.contextBottomRow(); context != "" {
+		rows = append(rows, context)
 	}
-	rows = append(rows, bottom)
 	if m.gitOpen && m.gitMode == gitModeCommit {
 		rows = append(rows, m.gitCommitInputRender()...)
 	}
@@ -374,6 +408,7 @@ func (m Model) View() tea.View {
 	if m.termOpen {
 		rows = append(rows, m.terminalPanel()...)
 	}
+	rows = append(rows, m.statusBar())
 	// The completion popup floats under the edit line instead of being pinned
 	// to the bottom of the screen.
 	rows = m.overlayCompletion(rows)
@@ -1447,40 +1482,19 @@ func (m Model) diffBottom() string {
 }
 
 func (m Model) terminalPanel() []string {
-	h := m.termPanelHeight()
-	w := m.width
+	h, w := m.termPanelHeight(), m.width
 	rows := make([]string, 0, h)
-
-	outH := h - 1 // last row is the input line
-	lines := m.termLines
-	start := len(lines) - outH + m.termScroll
-	if start < 0 {
-		start = 0
-	}
-	end := start + outH
-	if end > len(lines) {
-		end = len(lines)
-		if start > len(lines)-outH {
-			start = maxInt(0, len(lines)-outH)
+	for y := 0; y < h; y++ {
+		var row terminalRow
+		if y < len(m.termRows) {
+			row = m.termRows[y]
 		}
-	}
-	for i := start; i < end; i++ {
-		r := []rune(stripANSI(lines[i]))
-		if len(r) > w {
-			r = r[len(r)-w:] // keep the tail of long lines
+		cursorX := -1
+		if m.termCursorOK && m.termCursorY == y {
+			cursorX = m.termCursorX
 		}
-		rows = append(rows, string(r))
+		rows = append(rows, renderTerminalRow(row, w, cursorX))
 	}
-	for len(rows) < outH {
-		rows = append(rows, "")
-	}
-
-	input := statusHiStyle.Render(" > ") + statusStyle.Render(string(m.termIn)) + cursorStyle.Render(" ")
-	fill := w - lipgloss.Width(input)
-	if fill > 0 {
-		input += statusStyle.Render(strings.Repeat(" ", fill))
-	}
-	rows = append(rows, input)
 	return rows
 }
 

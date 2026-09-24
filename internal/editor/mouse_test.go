@@ -134,21 +134,16 @@ func TestWheelOverChatScrolls(t *testing.T) {
 	}
 }
 
-func TestWheelOverTerminalScrolls(t *testing.T) {
+func TestWheelOverTerminalDoesNotStealInput(t *testing.T) {
 	m := New()
 	m.width, m.height = 80, 24
 	m.termOpen = true
-	for i := 0; i < 40; i++ {
-		m.termLines = append(m.termLines, "line")
-	}
-
 	start := m.termStartRow()
 	if start >= m.height {
 		t.Fatalf("terminal overlay does not fit: start=%d height=%d", start, m.height)
 	}
-	_ = m.handleMouseWheel(tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 40, Y: start + 1})
-	if m.termScroll <= 0 {
-		t.Fatalf("wheel down over terminal must scroll back, got %d", m.termScroll)
+	if handled, _ := m.clickOverlay(start + 1); !handled {
+		t.Fatal("wheel target must belong to terminal overlay")
 	}
 }
 

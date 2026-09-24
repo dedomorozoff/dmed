@@ -56,11 +56,8 @@ func (m Model) statusIconsVisible() bool {
 		m.aiReviewMode, m.aiFixReviewMode, m.agentReviewMode, m.chatReviewMode,
 		m.agentPrompt, m.treeConfirm != "", m.aiCfgOpen, m.helpOpen:
 		return false
-	case m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0:
-		// Inline git diff preview takes over the bottom line.
-		return false
-	case m.gitOpen && (m.gitMode == gitModeCommit || m.gitMode == gitModeBranch):
-		return false
+	case m.gitOpen:
+		// Git keeps its context/diff line above the application status bar.
 	}
 	return true
 }

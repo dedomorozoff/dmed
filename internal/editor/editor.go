@@ -3,9 +3,7 @@ package editor
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,6 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
+	"github.com/hinshun/vt10x"
 
 	"dmed/internal/agent"
 	"dmed/internal/ai"
@@ -24,6 +23,7 @@ import (
 	"dmed/internal/i18n"
 	"dmed/internal/lsp"
 	"dmed/internal/plugin"
+	"dmed/internal/ptyterm"
 	"dmed/internal/session"
 	"dmed/internal/syntax"
 	"dmed/internal/vcs"
@@ -368,16 +368,17 @@ type Model struct {
 	diffOffsetY     int
 	diffOffsetX     int
 
-	// Bottom terminal panel
-	termOpen    bool
-	termLines   []string
-	termIn      []rune
-	termScroll  int // lines of scrollback from the bottom (0 = follow)
-	termHist    []string
-	termHistIdx int // 0 = live input, N = N commands back
-	termCmd     *exec.Cmd
-	termStdin   io.WriteCloser
-	termCh      <-chan []string
+	// Bottom terminal panel (real PTY + ANSI screen state)
+	termOpen     bool
+	termRows     []terminalRow
+	termCursorX  int
+	termCursorY  int
+	termCursorOK bool
+	termSession  *ptyterm.Terminal
+	termVT       vt10x.Terminal
+	termCh       chan terminalOutputMsg
+	termExitCh   chan terminalExitMsg
+	termGen      int
 
 	// DAP debug panel (Delve) — the backend is a DAP client or the DBGp
 	// Xdebug client, either of which serves the same panel interface.
@@ -624,9 +625,9 @@ func controlByteKey(r rune, mod tea.KeyMod) tea.KeyPressMsg {
 
 func New(paths ...string) Model {
 	fe := make(chan string, 16)
-m := Model{
-		g:                    unicodeGlyphs,
-		width:                80,
+	m := Model{
+		g:                     unicodeGlyphs,
+		width:                 80,
 		height:                24,
 		expanded:              map[string]bool{},
 		fileEvents:            fe,
@@ -797,7 +798,7 @@ func (m *Model) closeTab() tea.Cmd {
 // tab bar, which targets a specific tab rather than the active one).
 func (m *Model) closeTabAt(idx int) tea.Cmd {
 	if len(m.tabs) == 1 {
-		return tea.Quit
+		return m.requestQuit()
 	}
 	if idx < 0 || idx >= len(m.tabs) {
 		return nil
@@ -1316,18 +1317,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Height > 0 {
 			m.height = msg.Height
 		}
-	case TerminalOutputMsg:
-		if len(msg.Lines) > 0 {
-			m.termLines = append(m.termLines, msg.Lines...)
-			maxBack := len(m.termLines) - 1
-			if m.termScroll > maxBack {
-				m.termScroll = maxBack
-			}
-			if m.termScroll < 0 {
-				m.termScroll = 0
-			}
+		m.resizeTerminal()
+	case terminalOutputMsg:
+		if msg.gen != m.termGen {
+			return m, nil
+		}
+		m.termRows = msg.rows
+		if m.termVT != nil {
+			m.termVT.Lock()
+			cur := m.termVT.Cursor()
+			m.termCursorX, m.termCursorY = cur.X, cur.Y
+			m.termCursorOK = m.termVT.CursorVisible()
+			m.termVT.Unlock()
+		}
+		if msg.exited {
+			m.msg = "terminal: process exited"
 		}
 		return m, waitForTermOutput(m.termCh)
+	case terminalExitMsg:
+		if msg.gen != m.termGen {
+			return m, nil
+		}
+		m.termSession = nil
+		if msg.err != nil && !strings.Contains(strings.ToLower(msg.err.Error()), "killed") {
+			m.msg = "terminal: " + msg.err.Error()
+		}
 	case ChatOutputMsg:
 		if msg.Gen != m.chatGen {
 			return m, nil // stale event from a cancelled/cleared conversation
@@ -1421,6 +1435,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case tea.MouseReleaseMsg:
 		m.mouseDown = false
+		if m.termOpen && msg.Y >= m.termStartRow() && msg.Y < m.termStartRow()+m.termPanelHeight() {
+			button := 0
+			if msg.Button == tea.MouseMiddle {
+				button = 1
+			} else if msg.Button == tea.MouseRight {
+				button = 2
+			}
+			m.forwardTerminalMouseEvent(button, msg.X, msg.Y-m.termStartRow(), 'm')
+		}
 	case tea.MouseMotionMsg:
 		if m.mouseDown {
 			cmd := m.handleMouseMotion(msg)
@@ -1429,7 +1452,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateStatusHover(msg)
 	case tea.PasteMsg:
 		if text := msg.String(); text != "" {
-			m.pasteInput(text)
+			if m.termOpen && m.termSession != nil {
+				_, _ = m.termSession.Write([]byte(strings.ReplaceAll(text, "\r\n", "\r")))
+			} else {
+				m.pasteInput(text)
+			}
 		}
 	case tea.KeyPressMsg:
 		if debugKeys {
@@ -1615,6 +1642,16 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// etc.) receive the actual typed characters instead of the normalized
 	// English equivalents used only for keybinding matching.
 	msg.Text = origText
+
+	// The PTY owns input while the panel is focused. Alt+T remains the local
+	// toggle; every other key (including Ctrl+C/Ctrl+Q) is forwarded verbatim.
+	if m.termOpen {
+		if s == "alt+t" {
+			m.termOpen = false
+			return nil
+		}
+		return m.handleTerm(msg)
+	}
 
 	// JetBrains-style double Shift opens the palette ("search everywhere").
 	// Bare modifier presses are only reported by terminals with the Kitty
@@ -1821,9 +1858,6 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.diffViewOpen {
 		return m.handleDiffView(msg)
-	}
-	if m.termOpen {
-		return m.handleTerm(msg)
 	}
 	if m.agentReviewMode {
 		return m.handleAgentReview(msg)
