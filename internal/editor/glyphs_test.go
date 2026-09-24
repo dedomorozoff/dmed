@@ -53,6 +53,9 @@ func TestGlyphSetsSingleWidth(t *testing.T) {
 // TestApplyTerminalCompatASCII verifies the ASCII fallback actually lands when
 // the terminal heuristic says so, and that a modern terminal keeps unicode.
 func TestApplyTerminalCompat(t *testing.T) {
+	// Keep the test independent of the host running it. An empty TERM in a
+	// headless Windows shell is correctly treated as a legacy console.
+	t.Setenv("TERM", "xterm-256color")
 	m := New()
 	m.ApplyTerminalCompat()
 	if m.g != unicodeGlyphs {
