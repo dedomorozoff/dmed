@@ -30,7 +30,7 @@ func (m Model) tabAtX(x int) int {
 // Bottom panels are stacked above the fixed final status row, in the same
 // order as View renders them. The docked debug panel sits directly above the
 // first bottom overlay.
-func (m Model) dapPanelStartRow() int { return m.viewHeight() + 1 }
+func (m Model) dapPanelStartRow() int { return m.viewHeight() + 2 } // leading divider
 
 // statusBarRow is the fixed final row. Bottom panels are rendered above it.
 func (m Model) statusBarRow() int {
@@ -45,7 +45,7 @@ func (m Model) bottomOverlayStartRow() int {
 }
 
 func (m Model) finderStartRow() int {
-	return m.bottomOverlayStartRow() + m.gitCommitExtraRows() + m.aiInlineExtraRows() + m.aiFixExtraRows() + m.agentPromptExtraRows()
+	return m.bottomOverlayStartRow() + 1 + m.gitCommitExtraRows() + m.aiInlineExtraRows() + m.aiFixExtraRows() + m.agentPromptExtraRows()
 }
 func (m Model) folderStartRow() int { return m.finderStartRow() + m.finderExtraRows() }
 func (m Model) paletteStartRow() int {
@@ -64,7 +64,7 @@ func (m Model) complStartRow() int {
 	_, sy := m.cursorScreenPos()
 	return sy + 1
 }
-func (m Model) termStartRow() int { return m.storeStartRow() + m.pluginStoreExtraRows() }
+func (m Model) termStartRow() int { return m.storeStartRow() + m.pluginStoreExtraRows() } // leading divider
 
 // doubleClickInterval is the window within which two clicks on the same spot
 // count as a double click.
@@ -110,8 +110,19 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 		return nil
 	}
 
+	// Status-bar panel icons live on the fixed bottom row. Check this before
+	// overlay hit-testing because an open terminal reserves rows above it.
+	if y == m.statusBarRow() && m.statusIconsVisible() {
+		if left {
+			if a := m.statusIconAt(x); a != actNone {
+				return m.activateStatusIcon(a)
+			}
+		}
+		return nil
+	}
+
 	// The docked debug panel sits between the editor and the status bar.
-	if m.termOpen && y >= m.termStartRow() && y < m.termStartRow()+m.termPanelHeight() {
+	if m.termOpen && y >= m.termStartRow()+1 && y < m.termStartRow()+m.termExtraRows() {
 		button := 0
 		if left {
 			button = 0
@@ -120,7 +131,7 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 		} else {
 			button = 2
 		}
-		m.forwardTerminalMouse(button, x, y-m.termStartRow())
+		m.forwardTerminalMouse(button, x, y-m.termStartRow()-1)
 		return nil
 	}
 	if handled, cmd := m.clickDebugPanel(x, y, dbl); handled {
@@ -130,16 +141,6 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 	// Panels stacked above the editor.
 	if handled, cmd := m.clickOverlay(y, dbl); handled {
 		return cmd
-	}
-
-	// Status-bar panel icons live on the bottom row, below the debug panel.
-	if y == m.statusBarRow() && m.statusIconsVisible() {
-		if left {
-			if a := m.statusIconAt(x); a != actNone {
-				return m.activateStatusIcon(a)
-			}
-		}
-		return nil
 	}
 
 	// Right AI chat rail.
@@ -258,7 +259,7 @@ func (m *Model) clickOverlay(y int, dbl bool) (bool, tea.Cmd) {
 	}
 
 	if m.pluginStoreOpen {
-		if y >= f+1 && y <= f+len(m.storeItems) {
+		if y >= f+1 && y < f+1+len(m.storeItems) {
 			sel := y - (f + 1)
 			if sel >= 0 && sel < len(m.storeItems) {
 				m.pluginStoreSel = sel
@@ -293,7 +294,7 @@ func (m *Model) clickOverlay(y int, dbl bool) (bool, tea.Cmd) {
 	}
 
 	if m.termOpen {
-		if y >= f && y < f+m.termPanelHeight() {
+		if y >= f && y < f+m.termExtraRows() {
 			return true, nil
 		}
 	}
@@ -560,12 +561,12 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 
 	// Terminal applications that enabled mouse reporting receive wheel events
 	// in panel-local coordinates; otherwise the event is ignored by the panel.
-	if m.termOpen && y >= m.termStartRow() && y < m.termStartRow()+m.termPanelHeight() {
+	if m.termOpen && y >= m.termStartRow()+1 && y < m.termStartRow()+m.termExtraRows() {
 		button := 64
 		if dir > 0 {
 			button = 65
 		}
-		m.forwardTerminalMouse(button, x, y-m.termStartRow())
+		m.forwardTerminalMouse(button, x, y-m.termStartRow()-1)
 		return nil
 	}
 

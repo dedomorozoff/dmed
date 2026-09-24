@@ -104,7 +104,7 @@ func TestStatusIconHiddenInPromptMode(t *testing.T) {
 	}
 }
 
-func TestDockedPanelsHaveTrailingDivider(t *testing.T) {
+func TestDockedPanelsHaveLeadingDivider(t *testing.T) {
 	m := New()
 	m.width, m.height = 80, 40
 	m.finderHits = []string{"a", "b"}
@@ -135,8 +135,8 @@ func TestDockedPanelsHaveTrailingDivider(t *testing.T) {
 				t.Fatalf("panel rows = %d, ExtraRows = %d", len(tt.rows), extra)
 			}
 			want := strings.Repeat(m.g.hline, m.width)
-			if got := stripANSI(tt.rows[len(tt.rows)-1]); got != want {
-				t.Fatalf("last row = %q, want divider %q", got, want)
+			if got := stripANSI(tt.rows[0]); got != want {
+				t.Fatalf("first row = %q, want divider %q", got, want)
 			}
 		})
 	}

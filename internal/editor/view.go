@@ -111,21 +111,15 @@ func (m Model) finderExtraRows() int {
 	return len(m.finderHits) + 2
 }
 
-// dividerRow is the thin separator strip ending each docked bottom panel
-// (finder, folder, palette, lang chooser, plugin store, terminal, debug). It
-// is the panel's own *last* row, so content rows and within-panel click
-// offsets never move; every downstream StartRow shifts automatically because
-// it is a sum of ExtraRows. TestStatusBarRemainsLastWithBottomPanels
-// guarantees the status bar stays the final frame row while dividers stack up.
-//
-// Reuses the existing statusStyle (no new global identifiers), matching the
-// strip to each panel's own background so it reads as a "полоса".
+// dividerRow is the boundary between the editor/content stack and a docked
+// panel. It is prepended to the panel, so it is not a trailing footer: the
+// next panel or the final status bar remains the actual bottom boundary.
 func (m Model) dividerRow() string {
 	return statusStyle.Render(strings.Repeat(m.g.hline, m.width))
 }
 
 func (m Model) withDivider(rows []string) []string {
-	return append(rows, m.dividerRow())
+	return append([]string{m.dividerRow()}, rows...)
 }
 
 func (m Model) paletteExtraRows() int {
@@ -140,12 +134,12 @@ func (m Model) paletteExtraRows() int {
 }
 
 // folderExtraRows is how many rows the built-in folder picker occupies above
-// the status bar, including its trailing divider.
+// the status bar, including its leading divider.
 func (m Model) folderExtraRows() int {
 	if !m.folderOpen {
 		return 0
 	}
-	n := 4 // header + parent row + hint + divider
+	n := 4 // leading divider + header + parent row + hint
 	if len(m.folderEntries) == 0 {
 		n++ // — empty directory —
 		return n
@@ -185,7 +179,7 @@ func (m Model) termExtraRows() int {
 	if !m.termOpen {
 		return 0
 	}
-	return m.termPanelHeight() + 1
+	return m.termPanelHeight() + 1 // leading divider
 }
 
 // dapPanelMinRows is the smallest usable debug panel: header, column titles
@@ -236,14 +230,14 @@ func (m Model) debugExtraRows() int {
 	if !m.dapOpen {
 		return 0
 	}
-	return m.debugPanelHeight() + 1
+	return m.debugPanelHeight() + 1 // leading divider
 }
 
 func (m Model) langChooserExtraRows() int {
 	if !m.langChooserOpen {
 		return 0
 	}
-	return len(i18n.Supported()) + 2
+	return len(i18n.Supported()) + 2 // leading divider + header/items
 }
 
 func (m Model) pluginStoreExtraRows() int {
@@ -254,7 +248,7 @@ func (m Model) pluginStoreExtraRows() int {
 	if m.storeLoading || m.storeErr != "" {
 		n++
 	}
-	return n + 2 // title + divider
+	return n + 2 // leading divider + title
 }
 
 func (m Model) contextBottomExtraRows() int {

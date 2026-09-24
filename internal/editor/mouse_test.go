@@ -145,8 +145,8 @@ func TestWheelOverTerminalDoesNotStealInput(t *testing.T) {
 	if handled, _ := m.clickOverlay(start+1, false); !handled {
 		t.Fatal("wheel target must belong to terminal overlay")
 	}
-	if handled, _ := m.clickOverlay(start+m.termPanelHeight(), false); handled {
-		t.Fatal("terminal divider must not be treated as terminal content")
+	if handled, _ := m.clickOverlay(start+m.termExtraRows(), false); handled {
+		t.Fatal("terminal boundary must not be treated as terminal content")
 	}
 }
 
