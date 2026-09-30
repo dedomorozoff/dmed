@@ -105,9 +105,77 @@ func TestValidateEmptyPath(t *testing.T) {
 		t.Fatalf("expected error for empty path")
 	}
 }
+
 // TestApplyCreatesMissingFile covers the AI "create a new file" flow: a Change
 // with empty Orig for a file that does not exist is a creation, and nested
 // directories are created as needed.
+// TestRootBoundsChangesToProject is the enforcement behind the project rule:
+// a human reviews the diff, but a model-chosen path like "../../.ssh/config"
+// would otherwise be written just as silently. With Root set, such a change is
+// rejected before anything is read or written.
+func TestRootBoundsChangesToProject(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(dir, "..", "escaped.txt")
+
+	wrote := []string{}
+	a := NewApplier()
+	a.Root = dir
+	a.Read = func(p string) (string, error) { return "", nil }
+	a.Write = func(p, c string) error { wrote = append(wrote, p); return nil }
+
+	err := a.Apply([]Change{{Path: outside, Orig: "", New: "pwned\n"}})
+	if err == nil {
+		t.Fatal("expected an out-of-root change to be rejected")
+	}
+	if !strings.Contains(err.Error(), "outside the project root") {
+		t.Fatalf("want an explicit out-of-root error, got %v", err)
+	}
+	if len(wrote) != 0 {
+		t.Fatalf("nothing may be written when validation fails, got %v", wrote)
+	}
+}
+
+// TestRootRejectsEscapesInRelativePaths covers the shapes an escape takes:
+// "..", a path that walks back through a subdirectory, and an absolute path
+// pointing elsewhere. All must be refused, and relative paths inside the root
+// must still work.
+func TestRootRejectsEscapesInRelativePaths(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ok.txt"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := NewApplier()
+	a.Root = dir
+
+	for _, p := range []string{
+		"../evil.txt",
+		"sub/../../evil.txt",
+		filepath.Join(dir, "..", "evil.txt"),
+	} {
+		if err := a.Validate([]Change{{Path: p, Orig: "", New: "x\n"}}); err == nil {
+			t.Fatalf("path %q must be rejected", p)
+		}
+	}
+	// A legitimate path inside the root still validates.
+	if err := a.Validate([]Change{{Path: "ok.txt", Orig: "old\n", New: "new\n"}}); err != nil {
+		t.Fatalf("in-root change must be allowed: %v", err)
+	}
+	if err := a.Validate([]Change{{Path: filepath.Join(dir, "new.txt"), Orig: "", New: "x\n"}}); err != nil {
+		t.Fatalf("absolute in-root creation must be allowed: %v", err)
+	}
+}
+
+// TestRootEmptyDisablesTheCheck documents that an unset Root keeps the
+// previous permissive behaviour, for callers that legitimately apply changes
+// to an arbitrary location.
+func TestRootEmptyDisablesTheCheck(t *testing.T) {
+	a := NewApplier()
+	a.Read = func(p string) (string, error) { return "", nil }
+	if err := a.Validate([]Change{{Path: filepath.Join("..", "anywhere.txt"), Orig: "", New: "x\n"}}); err != nil {
+		t.Fatalf("empty Root must not restrict paths: %v", err)
+	}
+}
+
 func TestApplyCreatesMissingFile(t *testing.T) {
 	dir := filepath.FromSlash(t.TempDir())
 	a := NewApplier()

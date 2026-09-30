@@ -100,20 +100,27 @@ func TestRunnerProducesChanges(t *testing.T) {
 	go r.Run(context.Background(), task, []TargetFile{{Path: "a.go", Content: "package old\n"}})
 
 	waitStatus(t, q, task.ID, StatusReview)
-	if len(task.Changes) != 1 {
-		t.Fatalf("expected 1 change, got %d", len(task.Changes))
+	// Read the result back through the queue: the runner goroutine owns the
+	// task's storage, and the local `task` is only the snapshot taken at
+	// Enqueue time.
+	got, ok := q.Find(task.ID)
+	if !ok {
+		t.Fatalf("task %s disappeared", task.ID)
 	}
-	if task.Changes[0].Path != "a.go" {
-		t.Fatalf("path = %q", task.Changes[0].Path)
+	if len(got.Changes) != 1 {
+		t.Fatalf("expected 1 change, got %d", len(got.Changes))
 	}
-	if !strings.Contains(task.Changes[0].New, "package x") {
-		t.Fatalf("new content = %q", task.Changes[0].New)
+	if got.Changes[0].Path != "a.go" {
+		t.Fatalf("path = %q", got.Changes[0].Path)
 	}
-	if !strings.Contains(task.Changes[0].Orig, "package old") {
-		t.Fatalf("orig (from target) = %q", task.Changes[0].Orig)
+	if !strings.Contains(got.Changes[0].New, "package x") {
+		t.Fatalf("new content = %q", got.Changes[0].New)
 	}
-	if task.Status != StatusReview {
-		t.Fatalf("status = %s, want review", task.Status)
+	if !strings.Contains(got.Changes[0].Orig, "package old") {
+		t.Fatalf("orig (from target) = %q", got.Changes[0].Orig)
+	}
+	if got.Status != StatusReview {
+		t.Fatalf("status = %s, want review", got.Status)
 	}
 }
 
@@ -127,8 +134,12 @@ func TestRunnerErrorMarksFailed(t *testing.T) {
 	go r.Run(context.Background(), task, nil)
 
 	waitStatus(t, q, task.ID, StatusFailed)
-	if task.Error != "boom" {
-		t.Fatalf("error = %q", task.Error)
+	got, ok := q.Find(task.ID)
+	if !ok {
+		t.Fatalf("task %s disappeared", task.ID)
+	}
+	if got.Error != "boom" {
+		t.Fatalf("error = %q", got.Error)
 	}
 }
 
@@ -207,13 +218,13 @@ func waitStatus(t *testing.T, q *Queue, id string, want Status) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if tk := q.Find(id); tk != nil && tk.Status == want {
+		if tk, ok := q.Find(id); ok && tk.Status == want {
 			return
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
-	tk := q.Find(id)
-	if tk == nil {
+	tk, ok := q.Find(id)
+	if !ok {
 		t.Fatalf("task %s not found (want %s)", id, want)
 	}
 	t.Fatalf("task %s status = %s, want %s", id, tk.Status, want)

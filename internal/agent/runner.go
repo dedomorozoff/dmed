@@ -68,7 +68,11 @@ func (r *Runner) Cancel(id string) {
 // Run executes one task. It blocks until the task is done, failed, or
 // cancelled. Callers should run this in a goroutine. parent is the base
 // context (e.g. the editor lifetime).
-func (r *Runner) Run(parent context.Context, task *Task, targets []TargetFile) {
+//
+// The task is taken by value: the queue stays the single owner of its
+// storage, so this goroutine reads a consistent snapshot while the TUI keeps
+// querying the queue.
+func (r *Runner) Run(parent context.Context, task Task, targets []TargetFile) {
 	if r.prov == nil {
 		r.queue.SetError(task.ID, "no AI provider configured")
 		return

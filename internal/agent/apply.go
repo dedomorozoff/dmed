@@ -23,6 +23,15 @@ type Applier struct {
 	// Remove deletes a file (used to roll back newly created ones). Defaults
 	// to os.Remove.
 	Remove func(path string) error
+	// Root bounds every path in a series to this directory. Empty disables the
+	// check.
+	//
+	// The project rule says agents never write outside a reviewed project, but
+	// the review only covers diffs the user actually looks at. A change with
+	// Path "../../.ssh/config" would pass validation and be written. Setting
+	// Root makes the guarantee enforced rather than merely intended; the editor
+	// passes the project root.
+	Root string
 }
 
 // NewApplier returns an Applier using the OS filesystem.
@@ -72,6 +81,47 @@ func isNotExistErr(err error) bool {
 		strings.Contains(err.Error(), "cannot find the path")
 }
 
+// resolve maps a Change path to the path the applier actually reads and
+// writes. Relative paths are resolved against Root when it is set, otherwise
+// against the process working directory (the historical behaviour).
+//
+// Without this, setting Root would validate one file and write another: the
+// OS-level Read/Write treat a relative path as relative to the CWD, which is
+// not necessarily the project root.
+func (a *Applier) resolve(path string) string {
+	if filepath.IsAbs(path) || a.Root == "" {
+		return path
+	}
+	return filepath.Join(a.Root, filepath.FromSlash(path))
+}
+
+// withinRoot reports whether path stays inside the applier's Root. It
+// resolves symlinks first so a link or a "a/../.." cannot be used to escape;
+// a non-existent path is fine (it is a file about to be created).
+func (a *Applier) withinRoot(path string) error {
+	if a.Root == "" {
+		return nil
+	}
+	root, err := filepath.Abs(a.Root)
+	if err != nil {
+		return fmt.Errorf("cannot resolve root %s: %w", a.Root, err)
+	}
+	abs, err := filepath.Abs(a.resolve(path))
+	if err != nil {
+		return fmt.Errorf("cannot resolve path %s: %w", path, err)
+	}
+	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil {
+		abs = resolved
+	}
+	if resolvedRoot, rerr := filepath.EvalSymlinks(root); rerr == nil {
+		root = resolvedRoot
+	}
+	if abs != root && !strings.HasPrefix(abs, root+string(filepath.Separator)) {
+		return fmt.Errorf("path %s is outside the project root %s", path, a.Root)
+	}
+	return nil
+}
+
 // Validate checks that every change still applies cleanly against the current
 // on-disk content. A change whose current content differs from Change.Orig is
 // stale (the file moved on under the agent) and invalidates the whole series.
@@ -81,7 +131,10 @@ func (a *Applier) Validate(changes []Change) error {
 		if c.Path == "" {
 			return fmt.Errorf("change %d: empty path", i)
 		}
-		cur, exists, err := a.readCurrent(c.Path)
+		if err := a.withinRoot(c.Path); err != nil {
+			return fmt.Errorf("change %d: %w", i, err)
+		}
+		cur, exists, err := a.readCurrent(a.resolve(c.Path))
 		if err != nil {
 			return fmt.Errorf("change %d (%s): cannot read current content: %w", i, c.Path, err)
 		}
@@ -109,16 +162,17 @@ func (a *Applier) Apply(changes []Change) error {
 	for i := range changes {
 		c := &changes[i]
 
-		orig, exists, err := a.readCurrent(c.Path)
+		target := a.resolve(c.Path)
+		orig, exists, err := a.readCurrent(target)
 		if err != nil {
 			a.rollback(done)
 			return fmt.Errorf("change %d (%s): read for rollback failed: %w", i, c.Path, err)
 		}
-		if err := a.Write(c.Path, c.New); err != nil {
+		if err := a.Write(target, c.New); err != nil {
 			a.rollback(done)
 			return fmt.Errorf("change %d (%s): write failed: %w", i, c.Path, err)
 		}
-		done = append(done, written{path: c.Path, orig: orig, created: !exists})
+		done = append(done, written{path: target, orig: orig, created: !exists})
 	}
 	return nil
 }

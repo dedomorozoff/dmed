@@ -43,7 +43,7 @@ type Task struct {
 }
 
 // IsFinished reports whether the task reached a terminal state.
-func (t *Task) IsFinished() bool {
+func (t Task) IsFinished() bool {
 	switch t.Status {
 	case StatusDone, StatusFailed, StatusCancelled:
 		return true
@@ -52,6 +52,19 @@ func (t *Task) IsFinished() bool {
 }
 
 // Terminal reports whether no further work will occur (finished or applied).
-func (t *Task) Terminal() bool {
+func (t Task) Terminal() bool {
 	return t.IsFinished() || t.Status == StatusApplied
+}
+
+// clone returns a deep-enough copy for handing a task to a caller: the
+// Changes slice is reallocated so the caller can never reach into the
+// queue's own storage. This is what lets Queue hand out values instead of
+// pointers while a runner goroutine keeps mutating tasks in the background.
+func (t Task) clone() Task {
+	out := t
+	if t.Changes != nil {
+		out.Changes = make([]Change, len(t.Changes))
+		copy(out.Changes, t.Changes)
+	}
+	return out
 }

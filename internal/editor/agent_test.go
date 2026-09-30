@@ -96,6 +96,18 @@ type agentFakeBus struct {
 
 func (b *agentFakeBus) Publish(e events.Event) { b.events = append(b.events, e) }
 
+// taskStatus reads a task's current status back from the queue. The queue
+// hands out copies, so tests must never rely on a Task value captured at
+// Enqueue time.
+func taskStatus(t *testing.T, q *agent.Queue, id string) agent.Status {
+	t.Helper()
+	tk, ok := q.Find(id)
+	if !ok {
+		t.Fatalf("task %s not found", id)
+	}
+	return tk.Status
+}
+
 func TestAgentReviewAndAccept(t *testing.T) {
 	fs := map[string]string{"a.go": "package old\n"}
 	m := New()
@@ -129,8 +141,8 @@ func TestAgentReviewAndAccept(t *testing.T) {
 	if fs["a.go"] != "package new\n" {
 		t.Fatalf("file not applied: %q", fs["a.go"])
 	}
-	fresh := m.agentQueue.Find(task.ID)
-	if fresh.Status != agent.StatusApplied {
+	fresh, ok := m.agentQueue.Find(task.ID)
+	if !ok || fresh.Status != agent.StatusApplied {
 		t.Fatalf("status = %s, want applied", fresh.Status)
 	}
 	if len(fg.staged) != 1 || fg.staged[0] != "a.go" {
@@ -156,7 +168,7 @@ func TestAgentReviewReject(t *testing.T) {
 	if m.agentReviewMode {
 		t.Fatalf("review mode should close after reject")
 	}
-	if got := m.agentQueue.Find(task.ID).Status; got != agent.StatusDone {
+	if got := taskStatus(t, m.agentQueue, task.ID); got != agent.StatusDone {
 		t.Fatalf("status = %s, want done", got)
 	}
 }
@@ -192,8 +204,8 @@ func TestAgentReviewCyrillicKeys(t *testing.T) {
 	if m.agentReviewMode {
 		t.Fatal("«н» must accept the agent review")
 	}
-	if got := m.agentQueue.Find(task.ID); got.Status != agent.StatusApplied {
-		t.Fatalf("status after accept = %s, want applied", got.Status)
+	if got := taskStatus(t, m.agentQueue, task.ID); got != agent.StatusApplied {
+		t.Fatalf("status after accept = %s, want applied", got)
 	}
 
 	// Reject path with «т» (physical N).
@@ -207,8 +219,8 @@ func TestAgentReviewCyrillicKeys(t *testing.T) {
 	if m.agentReviewMode {
 		t.Fatal("«т» must reject the agent review")
 	}
-	if got := m.agentQueue.Find(task2.ID); got.Status != agent.StatusDone {
-		t.Fatalf("status after reject = %s, want done", got.Status)
+	if got := taskStatus(t, m.agentQueue, task2.ID); got != agent.StatusDone {
+		t.Fatalf("status after reject = %s, want done", got)
 	}
 }
 
@@ -251,7 +263,7 @@ func TestAgentAcceptOpensFilesInTabs(t *testing.T) {
 	m.startAgentReview(task.ID)
 	m.acceptAgentReview()
 
-	if got := m.agentQueue.Find(task.ID).Status; got != agent.StatusApplied {
+	if got := taskStatus(t, m.agentQueue, task.ID); got != agent.StatusApplied {
 		t.Fatalf("status = %s, want applied", got)
 	}
 	if len(m.tabs) != before+1 {

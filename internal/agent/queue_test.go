@@ -48,9 +48,12 @@ func TestNextFIFOOrder(t *testing.T) {
 	q.Enqueue("second")
 	q.Enqueue("third")
 
-	first := q.Next()
-	second := q.Next()
-	third := q.Next()
+	first, ok := q.Next()
+	if !ok {
+		t.Fatal("first Next must succeed")
+	}
+	second, _ := q.Next()
+	third, _ := q.Next()
 
 	if first.Prompt != "first" || second.Prompt != "second" || third.Prompt != "third" {
 		t.Fatalf("expected FIFO order, got %q, %q, %q", first.Prompt, second.Prompt, third.Prompt)
@@ -58,8 +61,8 @@ func TestNextFIFOOrder(t *testing.T) {
 	if first.Status != StatusRunning {
 		t.Fatalf("expected running after Next, got %s", first.Status)
 	}
-	if got := q.Next(); got != nil {
-		t.Fatalf("expected nil when queue empty, got %q", got.Prompt)
+	if got, ok := q.Next(); ok {
+		t.Fatalf("expected no task when queue empty, got %q", got.Prompt)
 	}
 }
 
@@ -69,16 +72,17 @@ func TestCancel(t *testing.T) {
 	if !q.Cancel(t1.ID) {
 		t.Fatalf("expected cancel to succeed")
 	}
-	if t1.Status != StatusCancelled {
-		t.Fatalf("expected cancelled status, got %s", t1.Status)
+	cur, _ := q.Find(t1.ID)
+	if cur.Status != StatusCancelled {
+		t.Fatalf("expected cancelled status, got %s", cur.Status)
 	}
 	// A finished task cannot be cancelled again.
 	if q.Cancel(t1.ID) {
 		t.Fatalf("expected second cancel to fail")
 	}
 	// Cancelled task is never handed out by Next.
-	if got := q.Next(); got != nil {
-		t.Fatalf("expected nil Next after cancel, got %q", got.Prompt)
+	if got, ok := q.Next(); ok {
+		t.Fatalf("expected no task after cancel, got %q", got.Prompt)
 	}
 }
 
@@ -94,12 +98,14 @@ func TestStatusTransitionsPublishToBus(t *testing.T) {
 
 	// Terminal transitions are refused.
 	q.SetStatus(t1.ID, StatusDone)
-	if t1.Status != StatusDone {
-		t.Fatalf("expected done, got %s", t1.Status)
+	cur, _ := q.Find(t1.ID)
+	if cur.Status != StatusDone {
+		t.Fatalf("expected done, got %s", cur.Status)
 	}
 	q.SetStatus(t1.ID, StatusRunning)
-	if t1.Status != StatusDone {
-		t.Fatalf("terminal task should not change, got %s", t1.Status)
+	cur, _ = q.Find(t1.ID)
+	if cur.Status != StatusDone {
+		t.Fatalf("terminal task should not change, got %s", cur.Status)
 	}
 }
 
@@ -108,11 +114,19 @@ func TestSetChangesMovesToReview(t *testing.T) {
 	t1 := q.Enqueue("task")
 	changes := []Change{{Path: "a.go", Orig: "x", New: "y"}}
 	q.SetChanges(t1.ID, changes)
-	if t1.Status != StatusReview {
-		t.Fatalf("expected review, got %s", t1.Status)
+	cur, _ := q.Find(t1.ID)
+	if cur.Status != StatusReview {
+		t.Fatalf("expected review, got %s", cur.Status)
 	}
-	if len(t1.Changes) != 1 || t1.Changes[0].Path != "a.go" {
-		t.Fatalf("changes not stored: %+v", t1.Changes)
+	if len(cur.Changes) != 1 || cur.Changes[0].Path != "a.go" {
+		t.Fatalf("changes not stored: %+v", cur.Changes)
+	}
+	// The queue must own its slice: a later write through the caller's
+	// variable cannot reach into stored state.
+	changes[0].Path = "mutated.go"
+	cur, _ = q.Find(t1.ID)
+	if cur.Changes[0].Path != "a.go" {
+		t.Fatalf("stored changes aliased the caller's slice: %+v", cur.Changes)
 	}
 }
 
@@ -120,8 +134,9 @@ func TestSetErrorMarksFailed(t *testing.T) {
 	q := NewQueue(nil)
 	t1 := q.Enqueue("task")
 	q.SetError(t1.ID, "boom")
-	if t1.Status != StatusFailed || t1.Error != "boom" {
-		t.Fatalf("expected failed with error, got %s %q", t1.Status, t1.Error)
+	cur, _ := q.Find(t1.ID)
+	if cur.Status != StatusFailed || cur.Error != "boom" {
+		t.Fatalf("expected failed with error, got %s %q", cur.Status, cur.Error)
 	}
 }
 
@@ -129,16 +144,21 @@ func TestSetProgressOnlyWhenRunning(t *testing.T) {
 	q := NewQueue(nil)
 	t1 := q.Enqueue("task")
 	q.SetProgress(t1.ID, 0.5)
-	if t1.Progress != 0 {
-		t.Fatalf("progress should be ignored while queued, got %v", t1.Progress)
+	cur, _ := q.Find(t1.ID)
+	if cur.Progress != 0 {
+		t.Fatalf("progress should be ignored while queued, got %v", cur.Progress)
 	}
 	q.Next()
 	q.SetProgress(t1.ID, 0.6)
-	if t1.Progress != 0.6 {
-		t.Fatalf("expected progress 0.6, got %v", t1.Progress)
+	cur, _ = q.Find(t1.ID)
+	if cur.Progress != 0.6 {
+		t.Fatalf("expected progress 0.6, got %v", cur.Progress)
 	}
 }
 
+// TestSnapshotIsIndependent pins the invariant that makes the TUI race-free:
+// the queue hands out copies, so a caller can never observe — or mutate —
+// queue state through a snapshot taken while the runner is updating tasks.
 func TestSnapshotIsIndependent(t *testing.T) {
 	q := NewQueue(nil)
 	q.Enqueue("a")
@@ -147,6 +167,62 @@ func TestSnapshotIsIndependent(t *testing.T) {
 	if len(snap) != 2 {
 		t.Fatalf("expected 2 tasks in snapshot, got %d", len(snap))
 	}
+
+	// Mutating the snapshot must not touch the queue.
+	snap[0].Prompt = "mutated"
+	snap[0].Status = StatusFailed
+	fresh := q.Snapshot()
+	if fresh[0].Prompt != "a" || fresh[0].Status != StatusQueued {
+		t.Fatalf("snapshot aliases queue storage: %+v", fresh[0])
+	}
+
+	// Queue transitions must not be visible through a snapshot already taken.
+	before := q.Snapshot()
+	q.Next()
+	after := q.Snapshot()
+	if before[0].Status != StatusQueued {
+		t.Fatalf("old snapshot changed under the caller: %+v", before[0])
+	}
+	if after[0].Status != StatusRunning {
+		t.Fatalf("queue did not transition to running: %+v", after[0])
+	}
+}
+
+func TestFindMissingReportsNotFound(t *testing.T) {
+	q := NewQueue(nil)
+	q.Enqueue("a")
+	if _, ok := q.Find("nope"); ok {
+		t.Fatal("Find must report false for an unknown id")
+	}
+}
+
+// TestQueueConcurrentReadWrite is the regression test for the data race that
+// the audit found: the queue used to hand out *Task pointers, so the TUI read
+// fields the runner goroutine was writing. Under -race this fails without the
+// copy-on-read invariant.
+func TestQueueConcurrentReadWrite(t *testing.T) {
+	q := NewQueue(nil)
+	id := q.Enqueue("work").ID
+	q.Next()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 500; i++ {
+			q.SetProgress(id, float32(i%100)/100)
+			q.SetStatus(id, StatusRunning)
+		}
+	}()
+
+	for i := 0; i < 500; i++ {
+		if tk, ok := q.Find(id); ok {
+			_ = tk.Progress
+			_ = tk.Status
+			_ = tk.Changes
+		}
+		_ = q.Snapshot()
+	}
+	<-done
 }
 
 func TestWakeSignalsOnEnqueue(t *testing.T) {

@@ -49,12 +49,7 @@ func (m *Model) ensureAgent() tea.Cmd {
 		m.agentCtx, m.agentCancel = context.WithCancel(context.Background())
 	}
 
-	prov := ai.NewProvider(ai.Config{
-		Type:   ai.ProviderType(m.cfg.AI.Provider),
-		URL:    m.cfg.AI.OllamaURL,
-		Model:  m.cfg.AI.Model,
-		APIKey: m.cfg.AI.APIKey,
-	})
+	prov := m.aiProvider(m.cfg.AI.Model)
 
 	m.agentQueue = agent.NewQueue(m.bus)
 	m.agentRunner = agent.NewRunner(prov, m.agentQueue)
@@ -76,6 +71,10 @@ func (m *Model) ensureAgent() tea.Cmd {
 		}
 	}
 	m.agentApplier = agent.NewApplier()
+	// Enforce the project rule instead of merely intending it: an agent change
+	// may not touch anything outside the project root, no matter what path the
+	// model produced.
+	m.agentApplier.Root = m.baseDir()
 	m.agentCommit = &agent.Committer{Repo: m.repo, Bus: m.bus}
 	m.agentCh = make(chan struct{}, 1)
 
@@ -97,8 +96,8 @@ func (m *Model) agentWorker() {
 		if m.agentCtx != nil && m.agentCtx.Err() != nil {
 			return
 		}
-		task := m.agentQueue.Next()
-		if task == nil {
+		task, ok := m.agentQueue.Next()
+		if !ok {
 			select {
 			case <-m.agentCtx.Done():
 				return
@@ -434,8 +433,8 @@ func (m Model) agentPromptInputRender() []string {
 // startAgentReview opens the side-by-side review of a task that reached the
 // review state. Enter on a review task triggers this.
 func (m *Model) startAgentReview(id string) {
-	task := m.agentQueue.Find(id)
-	if task == nil || task.Status != agent.StatusReview || len(task.Changes) == 0 {
+	task, ok := m.agentQueue.Find(id)
+	if !ok || task.Status != agent.StatusReview || len(task.Changes) == 0 {
 		m.msg = m.t("msg.agent_nothing")
 		return
 	}
@@ -450,8 +449,8 @@ func (m *Model) startAgentReview(id string) {
 // loadAgentChange loads the diff of the given change index into the review
 // state.
 func (m *Model) loadAgentChange(idx int) {
-	task := m.agentQueue.Find(m.agentReviewTaskID)
-	if task == nil || idx < 0 || idx >= len(task.Changes) {
+	task, ok := m.agentQueue.Find(m.agentReviewTaskID)
+	if !ok || idx < 0 || idx >= len(task.Changes) {
 		return
 	}
 	c := task.Changes[idx]
@@ -472,11 +471,8 @@ func (m *Model) loadAgentChange(idx int) {
 
 // handleAgentReview handles keys while the agent diff review is shown.
 func (m *Model) handleAgentReview(msg tea.KeyPressMsg) tea.Cmd {
-	task := m.agentQueue.Find(m.agentReviewTaskID)
-	n := 0
-	if task != nil {
-		n = len(task.Changes)
-	}
+	task, _ := m.agentQueue.Find(m.agentReviewTaskID)
+	n := len(task.Changes)
 	switch gitKeyName(msg) {
 	case "y", "enter", "a":
 		m.acceptAgentReview()
@@ -534,8 +530,8 @@ func (m *Model) handleAgentReview(msg tea.KeyPressMsg) tea.Cmd {
 // acceptAgentReview applies the task's changes atomically, commits them, and
 // refreshes open buffers.
 func (m *Model) acceptAgentReview() {
-	task := m.agentQueue.Find(m.agentReviewTaskID)
-	if task == nil {
+	task, ok := m.agentQueue.Find(m.agentReviewTaskID)
+	if !ok {
 		m.agentReviewMode = false
 		return
 	}
@@ -604,7 +600,7 @@ func (m *Model) rejectAgentReview() {
 
 // agentReviewBottom renders the status line while reviewing a task's diff.
 func (m Model) agentReviewBottom() string {
-	task := m.agentQueue.Find(m.agentReviewTaskID)
+	task, found := m.agentQueue.Find(m.agentReviewTaskID)
 	added, modified, deleted := 0, 0, 0
 	for _, dr := range m.agentReviewRows {
 		switch dr.Type {
@@ -617,11 +613,11 @@ func (m Model) agentReviewBottom() string {
 		}
 	}
 	var path string
-	if task != nil && m.agentReviewChange < len(task.Changes) {
+	if found && m.agentReviewChange < len(task.Changes) {
 		path = task.Changes[m.agentReviewChange].Path
 	}
 	title := " Agent diff: " + m.fitPath(path, 30)
-	if task != nil && len(task.Changes) > 1 {
+	if found && len(task.Changes) > 1 {
 		title += fmt.Sprintf(" (%d/%d)", m.agentReviewChange+1, len(task.Changes))
 	}
 	line := statusHiStyle.Render(title) +

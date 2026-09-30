@@ -12,7 +12,7 @@ import (
 // wakes the worker channel so it does not poll.
 type Queue struct {
 	mu    sync.Mutex
-	tasks []*Task // sorted oldest -> newest, includes finished tasks
+	tasks []Task // sorted oldest -> newest, includes finished tasks
 	bus   publisher
 	wake  chan struct{} // buffered(1); signaled when a task is enqueued
 	order uint64
@@ -48,15 +48,15 @@ func (q *Queue) publish(id string) {
 	q.bus.Publish(events.Event{Type: events.EventAgentUpdated, Path: id})
 }
 
-// Enqueue appends a new task in queued state and returns it.
-// The task ID is auto-generated if empty.
-func (q *Queue) Enqueue(prompt string) *Task {
+// Enqueue appends a new task in queued state and returns a copy of it.
+// The task ID is auto-generated.
+func (q *Queue) Enqueue(prompt string) Task {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	now := time.Now()
 	q.order++
-	t := &Task{
+	t := Task{
 		ID:      newID(q.order, now),
 		Prompt:  prompt,
 		Status:  StatusQueued,
@@ -70,41 +70,50 @@ func (q *Queue) Enqueue(prompt string) *Task {
 }
 
 // Next removes and returns the oldest queued task, marking it running.
-// It returns nil if there is nothing to run.
-func (q *Queue) Next() *Task {
+// It reports false if there is nothing to run.
+//
+// The returned Task is a copy: the queue keeps sole ownership of its own
+// storage, so the caller may read it freely while the queue is being mutated
+// by the runner goroutine. This is what keeps the TUI race-free.
+func (q *Queue) Next() (Task, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	for _, t := range q.tasks {
+	for i, t := range q.tasks {
 		if t.Status == StatusQueued {
 			t.Status = StatusRunning
 			t.Updated = time.Now()
+			q.tasks[i] = t
 			q.publish(t.ID)
-			return t
+			return t, true
 		}
 	}
-	return nil
+	return Task{}, false
 }
 
-// Find returns the task with the given ID, or nil.
-func (q *Queue) Find(id string) *Task {
+// Find returns a copy of the task with the given ID, and whether it exists.
+// The copy is taken under the lock, so every field is read consistently even
+// while the runner goroutine is updating the task.
+func (q *Queue) Find(id string) (Task, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for _, t := range q.tasks {
 		if t.ID == id {
-			return t
+			return t.clone(), true
 		}
 	}
-	return nil
+	return Task{}, false
 }
 
-// Snapshot returns a copy of the task list (shared pointers, but callers
-// should treat it read-only).
-func (q *Queue) Snapshot() []*Task {
+// Snapshot returns copies of every task, oldest first. Callers may read and
+// keep the result; it never aliases the queue's own storage.
+func (q *Queue) Snapshot() []Task {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	out := make([]*Task, len(q.tasks))
-	copy(out, q.tasks)
+	out := make([]Task, len(q.tasks))
+	for i, t := range q.tasks {
+		out[i] = t.clone()
+	}
 	return out
 }
 
@@ -113,54 +122,58 @@ func (q *Queue) Snapshot() []*Task {
 func (q *Queue) SetStatus(id string, s Status) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	t := q.findLocked(id)
-	if t == nil || t.Terminal() {
+	i := q.findLocked(id)
+	if i < 0 || q.tasks[i].Terminal() {
 		return
 	}
-	t.Status = s
-	t.Updated = time.Now()
-	q.publish(t.ID)
+	q.tasks[i].Status = s
+	q.tasks[i].Updated = time.Now()
+	q.publish(id)
 }
 
 // SetError records a failure message and marks the task failed.
 func (q *Queue) SetError(id, msg string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	t := q.findLocked(id)
-	if t == nil || t.Terminal() {
+	i := q.findLocked(id)
+	if i < 0 || q.tasks[i].Terminal() {
 		return
 	}
-	t.Status = StatusFailed
-	t.Error = msg
-	t.Updated = time.Now()
-	q.publish(t.ID)
+	q.tasks[i].Status = StatusFailed
+	q.tasks[i].Error = msg
+	q.tasks[i].Updated = time.Now()
+	q.publish(id)
 }
 
 // SetProgress updates the progress of a running task.
 func (q *Queue) SetProgress(id string, p float32) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	t := q.findLocked(id)
-	if t == nil || t.Status != StatusRunning {
+	i := q.findLocked(id)
+	if i < 0 || q.tasks[i].Status != StatusRunning {
 		return
 	}
-	t.Progress = p
-	t.Updated = time.Now()
-	q.publish(t.ID)
+	q.tasks[i].Progress = p
+	q.tasks[i].Updated = time.Now()
+	q.publish(id)
 }
 
 // SetChanges stores the produced changes and moves the task into review.
+// The slice is copied so a later reuse of the caller's slice cannot mutate
+// what the queue holds.
 func (q *Queue) SetChanges(id string, changes []Change) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	t := q.findLocked(id)
-	if t == nil || t.Terminal() {
+	i := q.findLocked(id)
+	if i < 0 || q.tasks[i].Terminal() {
 		return
 	}
-	t.Changes = changes
-	t.Status = StatusReview
-	t.Updated = time.Now()
-	q.publish(t.ID)
+	own := make([]Change, len(changes))
+	copy(own, changes)
+	q.tasks[i].Changes = own
+	q.tasks[i].Status = StatusReview
+	q.tasks[i].Updated = time.Now()
+	q.publish(id)
 }
 
 // Cancel aborts a queued or running task (third-party coordinators cancel the
@@ -168,23 +181,24 @@ func (q *Queue) SetChanges(id string, changes []Change) {
 func (q *Queue) Cancel(id string) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	t := q.findLocked(id)
-	if t == nil || t.Terminal() {
+	i := q.findLocked(id)
+	if i < 0 || q.tasks[i].Terminal() {
 		return false
 	}
-	t.Status = StatusCancelled
-	t.Updated = time.Now()
-	q.publish(t.ID)
+	q.tasks[i].Status = StatusCancelled
+	q.tasks[i].Updated = time.Now()
+	q.publish(id)
 	return true
 }
 
-func (q *Queue) findLocked(id string) *Task {
-	for _, t := range q.tasks {
+// findLocked returns the index of the task with the given ID, or -1.
+func (q *Queue) findLocked(id string) int {
+	for i, t := range q.tasks {
 		if t.ID == id {
-			return t
+			return i
 		}
 	}
-	return nil
+	return -1
 }
 
 // newID builds a short, unique, sortable task ID.
