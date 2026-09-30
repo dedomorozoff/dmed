@@ -127,14 +127,7 @@ func (m *Model) toggleChat() tea.Cmd {
 	if m.chatOpen && !m.chatHistLoaded {
 		m.loadChatPanelHistory()
 	}
-	if m.ai == nil {
-		m.ai = ai.NewProvider(ai.Config{
-			Type:   ai.ProviderType(m.cfg.AI.Provider),
-			URL:    m.cfg.AI.OllamaURL,
-			Model:  m.cfg.AI.Model,
-			APIKey: m.cfg.AI.APIKey,
-		})
-	}
+	m.ai = m.aiProvider(m.chatModel)
 	if m.chatOpen && m.chatModel == "" {
 		m.pickChatModel()
 	}
@@ -150,7 +143,8 @@ func (m *Model) pickChatModel() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	models, err := m.ai.Models(ctx)
+	prov := m.aiProvider(m.chatModel)
+	models, err := prov.Models(ctx)
 	switch {
 	case err != nil:
 		m.msg = "provider offline (" + err.Error() + ")"
@@ -158,12 +152,8 @@ func (m *Model) pickChatModel() {
 		m.msg = "no models available"
 	default:
 		m.chatModel = models[0]
-		m.ai = ai.NewProvider(ai.Config{
-			Type:   ai.ProviderType(m.cfg.AI.Provider),
-			URL:    m.cfg.AI.OllamaURL,
-			Model:  m.chatModel,
-			APIKey: m.cfg.AI.APIKey,
-		})
+		// Rebuild for the freshly picked model.
+		m.ai = m.aiProvider(m.chatModel)
 	}
 }
 

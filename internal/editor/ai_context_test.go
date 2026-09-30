@@ -11,6 +11,7 @@ import (
 
 	"dmed/internal/ai"
 	"dmed/internal/buffer"
+	"dmed/internal/config"
 )
 
 // TestInlineReviewCyrillicKeys verifies the y/n inline review keys work in the
@@ -317,12 +318,61 @@ func TestChatEditFocusOpenTabNoDuplicate(t *testing.T) {
 
 func TestChatNonEditToolsDoNotEnterReview(t *testing.T) {
 	m := chatEditHarness(t, t.TempDir())
+	m.cfg.AI.AllowRun = "always" // execute inline, so the loop continues
 	cmd := m.handleChatToolsDone("", []ai.ToolCall{{ID: "c1", Name: "RUN", Args: `{"arg":"echo hi"}`}})
 	if m.chatReviewMode {
 		t.Fatal("non-edit tools must not enter review mode")
 	}
 	if cmd == nil {
 		t.Fatal("should continue the loop after non-edit tools")
+	}
+}
+
+// TestChatRunParksForConfirmationByDefault pins the safe default: a fresh
+// install must not let the model execute a shell command unattended. The RUN
+// tool returns a marker, the loop parks, and the transcript keeps the decision
+// visible to the human.
+func TestChatRunParksForConfirmationByDefault(t *testing.T) {
+	m := chatEditHarness(t, t.TempDir())
+	m.cfg.AI.AllowRun = config.Defaults().AI.AllowRun
+	if m.cfg.AI.AllowRun != "ask" {
+		t.Fatalf("this test assumes the shipped default; got %q", m.cfg.AI.AllowRun)
+	}
+	m.chatRunConfirm = ""
+	cmd := m.handleChatToolsDone("", []ai.ToolCall{{ID: "c1", Name: "RUN", Args: `{"arg":"rm -rf /"}`}})
+	if m.chatReviewMode {
+		t.Fatal("a RUN must never enter diff review")
+	}
+	if cmd != nil {
+		t.Fatal("the loop must park for a human decision, not continue")
+	}
+	if m.chatRunConfirm != "rm -rf /" {
+		t.Fatalf("held command = %q, want the command parked for confirmation", m.chatRunConfirm)
+	}
+	if !strings.Contains(m.msg, "y run") {
+		t.Fatalf("the pending decision must be visible in the status line, got %q", m.msg)
+	}
+}
+
+// TestChatRunBlockedWhenNever verifies allow_run = still refuses outright.
+func TestChatRunBlockedWhenNever(t *testing.T) {
+	m := chatEditHarness(t, t.TempDir())
+	m.cfg.AI.AllowRun = "never"
+	cmd := m.handleChatToolsDone("", []ai.ToolCall{{ID: "c1", Name: "RUN", Args: `{"arg":"echo hi"}`}})
+	if cmd == nil {
+		t.Fatal("a blocked RUN still returns a result to the model, so the loop continues")
+	}
+	if m.chatRunConfirm != "" {
+		t.Fatal("a blocked RUN must not park for confirmation")
+	}
+	var blocked bool
+	for _, res := range m.chatMsgs {
+		if res.Role == "tool" && strings.Contains(res.Content, "blocked") {
+			blocked = true
+		}
+	}
+	if !blocked {
+		t.Fatalf("the model must learn the command was blocked: %+v", m.chatMsgs)
 	}
 }
 

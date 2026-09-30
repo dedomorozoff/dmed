@@ -88,14 +88,7 @@ func (m *Model) submitInlineRequest() tea.Cmd {
 	if instruction == "" || m.aiInlineBusy {
 		return nil
 	}
-	if m.ai == nil {
-		m.ai = ai.NewProvider(ai.Config{
-			Type:   ai.ProviderType(m.cfg.AI.Provider),
-			URL:    m.cfg.AI.OllamaURL,
-			Model:  m.cfg.AI.Model,
-			APIKey: m.cfg.AI.APIKey,
-		})
-	}
+	m.ai = m.aiProvider(m.chatModel)
 	if m.chatModel == "" {
 		m.pickChatModel()
 		if m.chatModel == "" {

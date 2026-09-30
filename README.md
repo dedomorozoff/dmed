@@ -245,8 +245,8 @@ temperature = 0              # generation temperature in tenths (7 => 0.7); 0 = 
 num_ctx = 0                  # context window in tokens for Ollama (num_ctx); 0 = default
 num_predict = 0              # max output tokens; 0 = provider default
 tool_rounds = 0              # chat tool-calling loop cap; 0 = built-in (6)
-allow_run = always           # always | never | ask — let the model run shell commands (RUN tool)
-restrict_to_root = false     # true bounds READ/EDIT/REPLACE paths to the project root
+allow_run = ask                # always | never | ask — ask (default) confirms each shell command the model proposes
+restrict_to_root = true       # true (default) keeps READ/EDIT/REPLACE inside the project root
 system_prompt = You are a helpful coding assistant...
 
 [agent]                       # background agent tasks (M4): defaults are fine for most users
@@ -319,6 +319,8 @@ then set `launch_request = attach` with `launch_json =
 - [Autocompletion & LSP](docs/AUTOCOMPLETION.md) — completion popup + language servers
 - [M4 Agents](docs/M4-AGENTS.md) — background agent tasks, queue, diff-review apply
 - [ROADMAP.md](ROADMAP.md) — milestones and status
+- [docs/IMPROVEMENT-PLAN.md](docs/IMPROVEMENT-PLAN.md) — audit findings and the
+  prioritized improvement backlog (P0–P3)
 
 ## Architecture
 

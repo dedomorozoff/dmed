@@ -124,13 +124,16 @@ func detectFileInfo(data []byte) (lineEnding, encoding string) {
 	return
 }
 
-func (t *tab) getSyntaxLines() []syntax.HighlightedLine {
+// getSyntaxLines returns the highlighted lines for the tab, cached against the
+// buffer text. h comes from the model so the theme is owned by the editor
+// rather than by package-level state in internal/syntax.
+func (t *tab) getSyntaxLines(h *syntax.Highlighter) []syntax.HighlightedLine {
 	text := t.buf.Text()
 	if t.syntaxCached != nil && t.syntaxText == text {
 		return t.syntaxCached
 	}
 	t.syntaxText = text
-	t.syntaxCached = syntax.Default().HighlightBuffer(t.path, text)
+	t.syntaxCached = h.HighlightBuffer(t.path, text)
 	return t.syntaxCached
 }
 
@@ -251,9 +254,13 @@ func (t *tab) getDiff(repo *vcs.Repo) vcs.FileDiff {
 }
 
 type Model struct {
-	root       string
-	cfg        config.Config
-	g          glyphSet // active render glyphs (unicode or ASCII fallback)
+	root string
+	cfg  config.Config
+	g    glyphSet // active render glyphs (unicode or ASCII fallback)
+	// syn is the syntax highlighter owned by the model. It was a package-level
+	// variable in internal/syntax, written from Update on config hot-reload
+	// and read while rendering; keeping it here removes that global mutable.
+	syn        *syntax.Highlighter
 	tr         i18n.Translator
 	plugins    *plugin.Manager
 	lspClient  *lsp.Client
@@ -446,17 +453,21 @@ type Model struct {
 	complStart  int
 
 	// Right-side AI chat panel (local Ollama)
-	chatOpen      bool
-	chatFocus     bool
-	chatIn        []rune
-	chatMsgs      []ai.Message
-	chatReply     string // assistant reply being streamed
-	chatErr       string
-	chatBusy      bool
-	chatRows      []chatRow
-	chatScroll    int    // lines of scrollback from the bottom (0 = follow)
-	chatModel     string // resolved Ollama model tag
-	ai            ai.Provider
+	chatOpen   bool
+	chatFocus  bool
+	chatIn     []rune
+	chatMsgs   []ai.Message
+	chatReply  string // assistant reply being streamed
+	chatErr    string
+	chatBusy   bool
+	chatRows   []chatRow
+	chatScroll int    // lines of scrollback from the bottom (0 = follow)
+	chatModel  string // resolved Ollama model tag
+	ai         ai.Provider
+	// aiKey fingerprints the [ai] settings the current provider was built
+	// from, so a hot-reloaded .dmed.conf transparently rebuilds it instead of
+	// pinning the session to a stale endpoint/model/key.
+	aiKey         string
 	chatCh        <-chan chatEvent
 	chatCancel    context.CancelFunc
 	chatToolRound int    // remaining tool loop iterations for the current turn
@@ -687,14 +698,9 @@ func New(paths ...string) Model {
 	// Create the AI provider up front so chat, inline, and ghost all work even
 	// before the chat panel is first opened (previously ghost silently no-opped
 	// until toggleChat ran).
-	m.ai = ai.NewProvider(ai.Config{
-		Type:   ai.ProviderType(m.cfg.AI.Provider),
-		URL:    m.cfg.AI.OllamaURL,
-		Model:  m.cfg.AI.Model,
-		APIKey: m.cfg.AI.APIKey,
-	})
+	m.ai = m.aiProvider(m.cfg.AI.Model)
 	m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
-	syntax.SetDefault(m.cfg.Editor.SyntaxTheme)
+	m.syn = syntax.New(m.cfg.Editor.SyntaxTheme)
 	m.initPanes()
 	if restoreActiveTab >= 0 && restoreActiveTab < len(m.tabs) {
 		m.setActiveTab(restoreActiveTab)
@@ -759,7 +765,11 @@ func (m *Model) openPath(rawPath string) {
 		t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
 	}
 	if m.watcher != nil && path != "" {
-		_ = m.watcher.Watch(path)
+		if err := m.watcher.Watch(path); err != nil {
+			// Watching is best-effort, but say so: a silent failure here looks
+			// exactly like "external changes are not detected".
+			m.msg = m.t("msg.watch_failed", path, err.Error())
+		}
 	}
 	m.tabs = append(m.tabs, t)
 	// Only set active tab if panes are already initialized
@@ -894,8 +904,8 @@ func (m *Model) openConfigFile() {
 			"# num_ctx = 0  # Ollama context window tokens; 0 = default\n" +
 			"# num_predict = 0  # max output tokens; 0 = provider default\n" +
 			"# tool_rounds = 0  # chat tool-loop cap; 0 = built-in (6)\n" +
-			"# allow_run = always  # always | never\n" +
-			"# restrict_to_root = false  # true = keep READ/EDIT/REPLACE inside the project\n\n" +
+			"# allow_run = ask  # always | never | ask (default: ask = confirm each command)\n" +
+			"# restrict_to_root = true  # true (default) = keep READ/EDIT/REPLACE inside the project\n\n" +
 			"[agent]\n" +
 			"# system_prompt =  # optional override for background agent tasks\n" +
 			"# context_max = 262144  # bytes of file context sent to the agent\n\n" +
@@ -1124,7 +1134,9 @@ func (m *Model) handleSavePrompt(msg tea.KeyPressMsg) tea.Cmd {
 			t := m.cur()
 			t.path = path
 			if m.watcher != nil {
-				_ = m.watcher.Watch(path)
+				if err := m.watcher.Watch(path); err != nil {
+					m.msg = m.t("msg.watch_failed", path, err.Error())
+				}
 			}
 			text := t.buf.Text()
 			if t.lineEnding == "crlf" {
@@ -1252,7 +1264,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.HasSuffix(path, ".dmed.conf") {
 			m.cfg = config.Load(m.root)
 			m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
-			syntax.SetDefault(m.cfg.Editor.SyntaxTheme)
+			// A new highlighter invalidates the per-tab cached lines.
+			m.syn = syntax.New(m.cfg.Editor.SyntaxTheme)
+			for i := range m.tabs {
+				m.tabs[i].syntaxCached = nil
+			}
 			m.msg = m.t("msg.config_reloaded")
 			return m, waitForFileEvent(m.fileEvents)
 		}

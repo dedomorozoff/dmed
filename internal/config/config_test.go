@@ -32,6 +32,39 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
+// TestDefaultsAreSafe pins the security posture of a fresh install: the model
+// must not be able to run shell commands or touch files outside the project
+// without the human either confirming or explicitly opting out. Both settings
+// remain configurable; this only guards against a silent regression to
+// permissive defaults.
+func TestDefaultsAreSafe(t *testing.T) {
+	cfg := Defaults()
+	if cfg.AI.AllowRun != "ask" {
+		t.Errorf("allow_run = %q, want ask (confirm every command)", cfg.AI.AllowRun)
+	}
+	if !cfg.AI.RestrictToRoot {
+		t.Error("restrict_to_root = false, want true (keep tools inside the project)")
+	}
+}
+
+// TestPermissiveSafetySettingsAreHonored checks the opt-out path still works,
+// so the safer defaults do not become a one-way door.
+func TestPermissiveSafetySettingsAreHonored(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	body := "[ai]\nallow_run = always\nrestrict_to_root = false\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if cfg.AI.AllowRun != "always" {
+		t.Errorf("allow_run = %q, want always", cfg.AI.AllowRun)
+	}
+	if cfg.AI.RestrictToRoot {
+		t.Error("restrict_to_root = true, want false")
+	}
+}
+
 func TestParseINI(t *testing.T) {
 	input := `[editor]
 tab_width = 2

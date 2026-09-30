@@ -145,16 +145,20 @@ func Defaults() Config {
 			SkippedDirs: []string{".git", "node_modules"},
 		},
 		AI: AIConfig{
-			Provider:       "ollama",
-			Model:          "",
-			OllamaURL:      "http://localhost:11434",
-			ContextMax:     6000,
-			Temperature:    0,
-			NumCtx:         0,
-			NumPredict:     0,
-			ToolRounds:     0,
-			AllowRun:       "always",
-			RestrictToRoot: false,
+			Provider:    "ollama",
+			Model:       "",
+			OllamaURL:   "http://localhost:11434",
+			ContextMax:  6000,
+			Temperature: 0,
+			NumCtx:      0,
+			NumPredict:  0,
+			ToolRounds:  0,
+			// Safe by default: the model may propose a shell command, but a
+			// human confirms each one. Set allow_run = always to opt out.
+			AllowRun: "ask",
+			// Safe by default: READ/EDIT/REPLACE stay inside the project root.
+			// Set restrict_to_root = false to opt out.
+			RestrictToRoot: true,
 			SystemPrompt: "You are a helpful coding assistant inside the dmed editor. " +
 				"Answer concisely. You have tools: EDIT creates or rewrites a whole file, " +
 				"READ reads a file, SEARCH finds text, RUN executes a shell command. " +

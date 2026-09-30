@@ -27,6 +27,36 @@ func (m *Model) aiRequestOptions() ai.Options {
 	}
 }
 
+// aiProvider returns the shared AI provider, (re)building it from the current
+// config. This is the single place that turns config into a provider: chat,
+// inline rewrite, ghost text and the background agent runner all go through
+// here, so a new [ai] setting cannot be forgotten in one of the call sites.
+//
+// The cache is keyed on the settings that actually shape the provider. When
+// .dmed.conf is hot-reloaded (or the wizard saves a new provider), the key
+// changes and the next call transparently builds a new provider instead of
+// keeping the stale one alive for the rest of the session.
+//
+// model overrides the configured model when non-empty (the chat auto-picks
+// the first model the server reports).
+func (m *Model) aiProvider(model string) ai.Provider {
+	kind := ai.ProviderType(m.cfg.AI.Provider)
+	key := strings.Join([]string{
+		string(kind), m.cfg.AI.OllamaURL, model, m.cfg.AI.APIKey,
+	}, "\x00")
+	if m.ai != nil && m.aiKey == key {
+		return m.ai
+	}
+	m.ai = ai.NewProvider(ai.Config{
+		Type:   kind,
+		URL:    m.cfg.AI.OllamaURL,
+		Model:  model,
+		APIKey: m.cfg.AI.APIKey,
+	})
+	m.aiKey = key
+	return m.ai
+}
+
 // chatToolDefs returns the native function definitions exposed to the chat
 // model. The model calls these via structured JSON arguments rather than
 // emitting fragile text markers, so small local models reliably invoke them.

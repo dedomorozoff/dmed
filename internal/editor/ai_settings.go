@@ -265,6 +265,11 @@ func (m *Model) saveAISettings() {
 	if m.cfg.AI.Provider != was {
 		m.cfg.AI.Provider = was
 	}
+	// Invalidate the cached provider so the next aiProvider() call rebuilds it
+	// from the settings just saved — otherwise the wizard would appear to save
+	// while chat/ghost/agent kept talking to the old endpoint and key.
+	m.ai = nil
+	m.aiKey = ""
 	m.msg = "AI settings saved"
 }
 
