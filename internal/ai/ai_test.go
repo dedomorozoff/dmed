@@ -117,6 +117,49 @@ func TestDefaultURL(t *testing.T) {
 	}
 }
 
+// TestClientHasNoOverallTimeout pins the streaming contract: an overall
+// http.Client.Timeout would abort a long generation mid-answer. The bound is
+// on connecting and on waiting for response headers instead.
+func TestClientHasNoOverallTimeout(t *testing.T) {
+	tr, ok := newHTTPClient().Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("client must use an explicit *http.Transport")
+	}
+	if tr.ResponseHeaderTimeout <= 0 {
+		t.Error("ResponseHeaderTimeout must be set: a dead server must not pin a chat forever")
+	}
+	if tr.DialContext == nil {
+		t.Error("DialContext with a timeout must be set")
+	}
+}
+
+// TestChatStreamOpenAIContextCancel verifies the same cancellation contract for
+// the OpenAI-compatible wire format (SSE).
+func TestChatStreamOpenAIContextCancel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		f, _ := w.(http.Flusher)
+		for i := 0; i < 100; i++ {
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n"))
+			if f != nil {
+				f.Flush()
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	p := NewProvider(Config{Type: OpenAIProvider, URL: srv.URL, Model: "m"})
+	if err := p.ChatStream(ctx, Request{}, Handler{Delta: func(string) {}}); err == nil {
+		t.Fatal("want context error after cancel")
+	}
+}
+
 func TestOpenAIStream(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {

@@ -4,8 +4,10 @@ package ai
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Message is one chat turn. For an assistant message that invoked tools,
@@ -83,6 +85,30 @@ type Config struct {
 	APIKey string       // API key (OpenAI only)
 }
 
+// Stream timeouts are deliberately split: the header wait is bounded so a
+// dead server cannot pin a chat forever, while the body itself has no overall
+// deadline — a long generation must not be cut off mid-answer. Cancellation
+// is driven by the request context (ctx), which the editor wires to Esc.
+const (
+	connectTimeout    = 10 * time.Second
+	responseHdrTimout = 30 * time.Second
+)
+
+// newHTTPClient builds the shared client. No http.Client.Timeout is set,
+// because it would also abort an in-flight stream.
+func newHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: connectTimeout}).DialContext,
+			TLSHandshakeTimeout:   connectTimeout,
+			ResponseHeaderTimeout: responseHdrTimout,
+			ExpectContinueTimeout: time.Second,
+			IdleConnTimeout:       90 * time.Second,
+		},
+	}
+}
+
 // NewProvider creates a Provider based on the given config.
 func NewProvider(cfg Config) Provider {
 	if cfg.URL == "" {
@@ -102,7 +128,7 @@ func NewProvider(cfg Config) Provider {
 		cfg.URL = strings.TrimSuffix(cfg.URL, "/v1")
 	}
 
-	httpClient := &http.Client{}
+	httpClient := newHTTPClient()
 
 	switch cfg.Type {
 	case OpenAIProvider:

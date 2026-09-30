@@ -50,7 +50,7 @@ type Client struct {
 	nextID      int64
 	rootURI     string
 	mu          sync.Mutex
-	writeMu     sync.Mutex // serializes ALL writes + the didOpen transition
+	writeMu     sync.Mutex    // serializes ALL writes + the didOpen transition
 	initDone    chan struct{} // closed once the initialize handshake finished
 	pending     map[int64]chan json.RawMessage
 	opened      map[string]bool

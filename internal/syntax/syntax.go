@@ -5,10 +5,10 @@ import (
 	"strings"
 	"sync"
 
+	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
-	"charm.land/lipgloss/v2"
 )
 
 // HighlightedLine contains a lipgloss style for each rune of the line.
@@ -22,18 +22,14 @@ type Highlighter struct {
 	styleCache map[chroma.TokenType]lipgloss.Style
 }
 
-var defaultHighlighter = New("monokai")
-
-func Default() *Highlighter {
-	return defaultHighlighter
-}
-
-// SetDefault changes the default highlighter to the named chroma style.
-func SetDefault(styleName string) {
-	h := New(styleName)
-	defaultHighlighter = h
-}
-
+// New builds a Highlighter for the named chroma style. An unknown name falls
+// back to monokai.
+//
+// There is deliberately no package-level "default" highlighter: the editor
+// owns its Highlighter (see editor.Model.syn), because SetDefault used to be
+// called from the Update loop while rendering goroutines read it — a global
+// mutable that the project rules forbid and that -race would flag the moment
+// the config hot-reload landed on another path.
 func New(styleName string) *Highlighter {
 	s := styles.Get(styleName)
 	if s == nil {
@@ -123,55 +119,55 @@ func CommentTokens(filename, text string) (prefix, suffix string) {
 
 // [2]string{prefix, suffix}
 var commentTable = map[string][2]string{
-	"Go":              {"//", ""},
-	"C":               {"//", ""},
-	"C++":             {"//", ""},
-	"C#":              {"//", ""},
-	"Java":            {"//", ""},
-	"JavaScript":      {"//", ""},
-	"TypeScript":      {"//", ""},
-	"Rust":            {"//", ""},
-	"Swift":           {"//", ""},
-	"Kotlin":          {"//", ""},
-	"Dart":            {"//", ""},
-	"Zig":             {"//", ""},
-	"PHP":             {"//", ""},
-	"Scala":           {"//", ""},
-	"Groovy":          {"//", ""},
-	"GDScript3":       {"//", ""},
-	"Nim":             {"#", ""},
-	"Python":          {"#", ""},
-	"Ruby":            {"#", ""},
-	"Perl":            {"#", ""},
-	"Lua":             {"#", ""},
-	"Bash":            {"#", ""},
-	"Shell":           {"#", ""},
-	"YAML":            {"#", ""},
-	"TOML":            {"#", ""},
-	"Makefile":        {"#", ""},
-	"Docker":          {"#", ""},
-	"R":               {"#", ""},
-	"Julia":           {"#", ""},
-	"Elixir":          {"#", ""},
-	"PowerShell":      {"#", ""},
-	"Haskell":         {"--", ""},
-	"Erlang":          {"%", ""},
-	"TeX":             {"%", ""},
-	"LaTeX":           {"%", ""},
-	"VB.net":          {"'", ""},
-	"MySQL":           {"--", ""},
-	"SQL":             {"--", ""},
-	"CSS":             {"/*", "*/"},
-	"SCSS":            {"//", ""},
-	"HTML":            {"<!--", "-->"},
-	"XML":             {"<!--", "-->"},
-	"markdown":        {"<!--", "-->"},
-	"vue":             {"<!--", "-->"},
-	"Svelte":          {"<!--", "-->"},
-	"ObjectPascal":    {"{", "}"},
-	"Clojure":         {";", ""},
-	"Common Lisp":     {";", ""},
-	"Scheme":          {";", ""},
+	"Go":           {"//", ""},
+	"C":            {"//", ""},
+	"C++":          {"//", ""},
+	"C#":           {"//", ""},
+	"Java":         {"//", ""},
+	"JavaScript":   {"//", ""},
+	"TypeScript":   {"//", ""},
+	"Rust":         {"//", ""},
+	"Swift":        {"//", ""},
+	"Kotlin":       {"//", ""},
+	"Dart":         {"//", ""},
+	"Zig":          {"//", ""},
+	"PHP":          {"//", ""},
+	"Scala":        {"//", ""},
+	"Groovy":       {"//", ""},
+	"GDScript3":    {"//", ""},
+	"Nim":          {"#", ""},
+	"Python":       {"#", ""},
+	"Ruby":         {"#", ""},
+	"Perl":         {"#", ""},
+	"Lua":          {"#", ""},
+	"Bash":         {"#", ""},
+	"Shell":        {"#", ""},
+	"YAML":         {"#", ""},
+	"TOML":         {"#", ""},
+	"Makefile":     {"#", ""},
+	"Docker":       {"#", ""},
+	"R":            {"#", ""},
+	"Julia":        {"#", ""},
+	"Elixir":       {"#", ""},
+	"PowerShell":   {"#", ""},
+	"Haskell":      {"--", ""},
+	"Erlang":       {"%", ""},
+	"TeX":          {"%", ""},
+	"LaTeX":        {"%", ""},
+	"VB.net":       {"'", ""},
+	"MySQL":        {"--", ""},
+	"SQL":          {"--", ""},
+	"CSS":          {"/*", "*/"},
+	"SCSS":         {"//", ""},
+	"HTML":         {"<!--", "-->"},
+	"XML":          {"<!--", "-->"},
+	"markdown":     {"<!--", "-->"},
+	"vue":          {"<!--", "-->"},
+	"Svelte":       {"<!--", "-->"},
+	"ObjectPascal": {"{", "}"},
+	"Clojure":      {";", ""},
+	"Common Lisp":  {";", ""},
+	"Scheme":       {";", ""},
 }
 
 // HighlightBuffer tokenizes full buffer text and returns a slice of styles per rune for each line.

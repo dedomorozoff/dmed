@@ -47,4 +47,3 @@ func debugLineRow(content, target string) string {
 	}
 	return ""
 }
-

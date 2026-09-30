@@ -119,6 +119,11 @@ func (p *openAIProvider) ChatStream(ctx context.Context, req Request, h Handler)
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
+		// See ollama.ChatStream: the stream body has no deadline, so ctx
+		// cancellation is what makes Esc stop a generation promptly.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		line := sc.Text()
 		// SSE format: "data: {...}" or "data: [DONE]"
 		if !strings.HasPrefix(line, "data: ") {

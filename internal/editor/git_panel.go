@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"dmed/internal/debug"
-	"dmed/internal/syntax"
 	"dmed/internal/vcs"
 )
 
@@ -247,8 +246,8 @@ func (m *Model) refreshGitDiffPreview() {
 	m.diffRows = vcs.SideBySide(headText, right)
 	m.diffOffsetY = 0
 	m.diffOffsetX = 0
-	m.diffHeadSyntax = syntax.Default().HighlightBuffer(fs.Path, headText)
-	m.diffRightSyntax = syntax.Default().HighlightBuffer(fs.Path, right)
+	m.diffHeadSyntax = m.syn.HighlightBuffer(fs.Path, headText)
+	m.diffRightSyntax = m.syn.HighlightBuffer(fs.Path, right)
 }
 
 func (m *Model) showTree() {

@@ -18,7 +18,7 @@ func TestHighlightBufferGo(t *testing.T) {
 }
 
 func TestHighlightBufferFallback(t *testing.T) {
-	h := Default()
+	h := New("monokai")
 	code := "some plain text"
 	hl := h.HighlightBuffer("unknown.xyz123", code)
 	if len(hl) != 1 {

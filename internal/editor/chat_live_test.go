@@ -49,7 +49,12 @@ func TestWheelOverChatChangesRender(t *testing.T) {
 	}
 	after := stripANSI(m.View().Content)
 	if before == after {
-		t.Logf("panel width=%d height=%d rows=%d scroll=%d firstRow=%q", m.chatPanelWidth(), m.viewHeight(), len(m.chatRows), m.chatScroll, func() string { if len(m.chatRows) > 0 { return m.chatRows[0].text }; return "" }())
+		t.Logf("panel width=%d height=%d rows=%d scroll=%d firstRow=%q", m.chatPanelWidth(), m.viewHeight(), len(m.chatRows), m.chatScroll, func() string {
+			if len(m.chatRows) > 0 {
+				return m.chatRows[0].text
+			}
+			return ""
+		}())
 	}
 }
 

@@ -327,6 +327,7 @@ func outputScanner(r io.Reader, emit func(string)) error {
 func (c *Client) Seq() int64 {
 	return atomic.AddInt64(&c.nextID, 1)
 }
+
 // StartConnectWithTransport dials a listening DAP endpoint using the given
 // transport (tcp or pipe) and speaks DAP over the resulting connection. For
 // pipe transport on Windows the addr is a Windows named pipe path like
@@ -365,8 +366,6 @@ func StartConnectWithTransportAndProcess(transport, addr, rootDir string, onEven
 	client.adapter = cmd
 	return client, nil
 }
-
-
 
 const callTimeout = 60 * time.Second
 

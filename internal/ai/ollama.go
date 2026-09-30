@@ -92,6 +92,12 @@ func (p *ollamaProvider) ChatStream(ctx context.Context, req Request, h Handler)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	toolFired := false
 	for sc.Scan() {
+		// The body read has no deadline, so cancellation must be observed here:
+		// otherwise Esc would only take effect once the server happened to send
+		// another chunk (or the socket closed).
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		var chunk struct {
 			Message struct {
 				Content   string `json:"content"`
