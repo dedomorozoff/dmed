@@ -17,6 +17,7 @@ BUILD_TARGETS := build-linux-amd64 build-linux-arm64 build-freebsd-amd64 \
 
 # help is the first rule, so it is the default target under both make flavors.
 .PHONY: help build test vet run clean dist install install-man
+.PHONY: fmt fmt-check race cover
 .PHONY: deb rpm pkg termux win-zip freebsd-port
 .PHONY: $(BUILD_TARGETS)
 
@@ -37,8 +38,24 @@ help: ## Show this help
 build: ## Build for current platform
 	$(GO) build -ldflags "$(LDFLAGS)" .
 
+fmt: ## Format all Go sources
+	gofmt -w .
+
+fmt-check: ## Fail if any Go source is not gofmt-clean
+	@out=$$(gofmt -l .); \
+	if [ -n "$$out" ]; then \
+		echo "not gofmt-clean:"; echo "$$out"; exit 1; \
+	fi
+
 test: ## Run unit tests
 	$(GO) test ./...
+
+race: ## Run the race detector over the concurrent packages
+	$(GO) test -race -count=1 ./internal/agent/... ./internal/editor/...
+
+cover: ## Run tests with a coverage profile (needs a working local toolchain)
+	$(GO) test -coverprofile=cover.out ./...
+	$(GO) tool cover -func=cover.out | tail -1
 
 vet: ## Run static analysis
 	$(GO) vet ./...

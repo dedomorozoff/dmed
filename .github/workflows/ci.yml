@@ -22,6 +22,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Formatting
+        run: make fmt-check
+
       - name: Static analysis
         run: make vet
 
@@ -30,6 +33,49 @@ jobs:
 
       - name: Build (native)
         run: make build
+
+  race:
+    name: race detector
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The agent queue is written by a runner goroutine and read by the TUI
+      # every frame; a data race there is invisible to `go vet`. Keep this job.
+      - name: Race detector (agent + editor)
+        run: make race
+
+  windows:
+    name: vet + test (windows)
+    # The platform-specific code (conpty ptyterm, trash, DAP process launch)
+    # is otherwise only exercised on developer machines.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Formatting
+        run: make fmt-check
+
+      - name: Static analysis
+        run: make vet
+
+      - name: Unit tests
+        run: make test
+
+      - name: Build
+        run: go build -ldflags "-s -w -X main.version=ci" .
 
   cross-build:
     name: cross-compile (${{ matrix.platform }})
