@@ -640,6 +640,7 @@ var ruCatalog = map[string]string{
 	"dap.settings":      " DAP-настройки ",
 	"dap.settings_hint": "(↑/↓ движение, Enter правка, ←/→ выбор, Ctrl+S сохранить, Esc закрыть)",
 	"dap.settings_save": "(Ctrl+S сохранить, Esc закрыть)",
+	"dap.choice":        "(←/→ выбор)",
 	"msg.dap_saved":     "DAP-настройки сохранены",
 
 	// Help panel

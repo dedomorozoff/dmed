@@ -3,3 +3,12 @@ dmed
 dmed.exe
 dmed.exe~
 dist/
+
+# Coverage profiles and scratch output from local runs
+cover.out
+out_*.txt
+
+# Python tooling leftovers in a Go repository (not tracked, but noisy)
+.ruff_cache/
+__pycache__/
+*.pyc

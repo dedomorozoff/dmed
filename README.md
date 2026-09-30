@@ -319,8 +319,29 @@ then set `launch_request = attach` with `launch_json =
 - [Autocompletion & LSP](docs/AUTOCOMPLETION.md) — completion popup + language servers
 - [M4 Agents](docs/M4-AGENTS.md) — background agent tasks, queue, diff-review apply
 - [ROADMAP.md](ROADMAP.md) — milestones and status
-- [docs/IMPROVEMENT-PLAN.md](docs/IMPROVEMENT-PLAN.md) — audit findings and the
-  prioritized improvement backlog (P0–P3)
+- [docs/IMPROVEMENT-PLAN.md](docs/IMPROVEMENT-PLAN.md) — what to improve next,
+  ordered by cost/benefit
+- [docs/AUDIT-2026-10-01.md](docs/AUDIT-2026-10-01.md) — the audit that led there
+
+## Known limitations
+
+Worth knowing before you file a bug.
+
+- **Keybindings must be checked in a real terminal.** Automated harnesses lose
+  most Ctrl-chords and break F-key sequences, so the binding table is verified
+  manually (Windows Terminal / mintty), not by CI.
+- **AI tools are safe by default and can be relaxed.** `allow_run = ask` means
+  the model has to ask before running a shell command, and
+  `restrict_to_root = true` keeps `READ`/`EDIT`/`REPLACE` inside the project.
+  Set both to `always`/`false` in `.dmed.conf` if you prefer the old behaviour.
+- **Accepted agent changes are committed to git but cannot be undone from the
+  editor yet.** Use `git revert` for now.
+- **Large repositories get slow between AI tool rounds**, because the editor
+  snapshots the whole project tree to detect touched files.
+- **LSP support is minimal**: diagnostics and go-to-definition. No
+  code actions or formatting yet.
+- **`php-test/`** is a manual fixture for Xdebug debugging, not used by any
+  automated test — see [php-test/README.md](php-test/README.md).
 
 ## Architecture
 
