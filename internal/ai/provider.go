@@ -83,6 +83,13 @@ type Config struct {
 	URL    string       // base URL
 	Model  string       // model tag
 	APIKey string       // API key (OpenAI only)
+	// APIPath is the path prefix of the OpenAI-compatible endpoints. Almost
+	// every server uses /v1, but Pollinations serves the same protocol under
+	// /openai, so the prefix is configurable instead of hardcoded.
+	APIPath string
+	// ModelsPath overrides the model-list path when it differs from
+	// APIPath + "/models" (Pollinations lists its text models at /models).
+	ModelsPath string
 }
 
 // Stream timeouts are deliberately split: the header wait is bounded so a
@@ -132,11 +139,21 @@ func NewProvider(cfg Config) Provider {
 
 	switch cfg.Type {
 	case OpenAIProvider:
+		apiPath := "/" + strings.Trim(cfg.APIPath, "/")
+		if apiPath == "/" {
+			apiPath = "/v1"
+		}
+		modelsPath := apiPath + "/models"
+		if p := "/" + strings.Trim(cfg.ModelsPath, "/"); cfg.ModelsPath != "" {
+			modelsPath = p
+		}
 		return &openAIProvider{
-			url:    cfg.URL,
-			model:  cfg.Model,
-			apiKey: cfg.APIKey,
-			http:   httpClient,
+			url:        cfg.URL,
+			apiPath:    apiPath,
+			modelsPath: modelsPath,
+			model:      cfg.Model,
+			apiKey:     cfg.APIKey,
+			http:       httpClient,
 		}
 	default:
 		return &ollamaProvider{

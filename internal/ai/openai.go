@@ -11,17 +11,21 @@ import (
 	"strings"
 )
 
-// openAIProvider talks to an OpenAI-compatible API (POST /v1/chat/completions, SSE).
-// Compatible with: OpenAI, DeepSeek, Groq, Together, vLLM, LM Studio, Unsloth, etc.
+// openAIProvider talks to an OpenAI-compatible API (POST <apiPath>/chat/completions,
+// SSE). Compatible with: OpenAI, DeepSeek, Groq, Together, vLLM, LM Studio,
+// Unsloth, Pollinations, etc. apiPath exists because "OpenAI-compatible" does
+// not always mean "/v1": Pollinations serves the same JSON under /openai.
 type openAIProvider struct {
-	url    string
-	model  string
-	apiKey string
-	http   *http.Client
+	url        string
+	apiPath    string // e.g. "/v1" or "/openai"
+	modelsPath string // e.g. "/v1/models" or "/models"
+	model      string
+	apiKey     string
+	http       *http.Client
 }
 
 func (p *openAIProvider) Models(ctx context.Context) ([]string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.url+"/v1/models", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.url+p.modelsPath, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +75,7 @@ func (p *openAIProvider) ChatStream(ctx context.Context, req Request, h Handler)
 	if err != nil {
 		return err
 	}
-	r, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url+"/v1/chat/completions", bytes.NewReader(payload))
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url+p.apiPath+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}

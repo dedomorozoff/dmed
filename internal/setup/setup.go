@@ -28,10 +28,13 @@ func Run() error {
 	fmt.Println("dmed AI setup — pick a provider (Enter = Ollama, free & local):")
 	for i, p := range presets {
 		need := ""
-		if p.APIKey {
+		switch {
+		case p.APIKey:
 			need = "  [API key]"
+		case p.Free:
+			need = "  [no account needed]"
 		}
-		fmt.Printf("  %d) %-18s %s%s\n", i+1, p.Name, p.BaseURL, need)
+		fmt.Printf("  %d) %-26s %s%s\n", i+1, p.Name, p.BaseURL, need)
 	}
 	idx := askNumber(in, "provider", 1, len(presets), 1) - 1
 	p := presets[idx]
@@ -59,7 +62,12 @@ func Run() error {
 	}
 
 	// Probe with the chosen settings; auto-pick a model for local servers.
-	prov := ai.NewProvider(ai.Config{Type: ai.ProviderType(p.Kind), URL: url, Model: model, APIKey: apiKey})
+	// The endpoint prefix travels with the preset: Pollinations speaks the
+	// OpenAI protocol under /openai, so probing /v1 would report a false 404.
+	prov := ai.NewProvider(ai.Config{
+		Type: ai.ProviderType(p.Kind), URL: url, Model: model, APIKey: apiKey,
+		APIPath: p.APIPath, ModelsPath: p.ModelsPath,
+	})
 	fmt.Print("testing connection... ")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -93,10 +101,17 @@ func Run() error {
 		OllamaURL:  url,
 		APIKey:     apiKey,
 		ContextMax: cfg.AI.ContextMax,
+		APIPath:    p.APIPath,
+		ModelsPath: p.ModelsPath,
 	}); err != nil {
 		return err
 	}
 	fmt.Println("saved to " + path)
+	if p.Free {
+		// The provider works without an account, but the traffic leaves the
+		// machine; say so at the moment the user opts in.
+		fmt.Println("Note: prompts and code are sent to a public service by this provider.")
+	}
 	fmt.Println("Run `dmed`, press Alt+A and ask something.")
 	return nil
 }

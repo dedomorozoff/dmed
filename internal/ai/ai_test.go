@@ -192,6 +192,46 @@ func TestOpenAIStream(t *testing.T) {
 	}
 }
 
+// TestOpenAICustomAPIPath covers providers that are OpenAI-compatible but do not
+// live under /v1 — Pollinations serves the same protocol under /openai and
+// lists its models at /models, and hardcoding the prefix would make the
+// no-signup provider unusable.
+func TestOpenAICustomAPIPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openai/chat/completions":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		case "/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"openai"},{"id":"mistral"}]}`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	p := NewProvider(Config{Type: OpenAIProvider, URL: srv.URL, Model: "openai",
+		APIPath: "/openai", ModelsPath: "/models"})
+
+	models, err := p.Models(context.Background())
+	if err != nil {
+		t.Fatalf("Models: %v", err)
+	}
+	if len(models) != 2 || models[0] != "openai" {
+		t.Fatalf("models = %v", models)
+	}
+
+	var got strings.Builder
+	if err := p.ChatStream(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}},
+		Handler{Delta: func(d string) { got.WriteString(d) }}); err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	if got.String() != "hi" {
+		t.Fatalf("streamed %q", got.String())
+	}
+}
+
 func TestOpenAIModels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {
