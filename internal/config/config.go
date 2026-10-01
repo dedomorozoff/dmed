@@ -973,10 +973,14 @@ const DefaultOllamaURL = "http://localhost:11434"
 // default.
 func PollinationsPreset() AIPreset {
 	return AIPreset{
-		Name:       "Pollinations (free, no key)",
-		Kind:       "openai",
+		Name:  "Pollinations (free, no key)",
+		Kind:  "openai",
+		Model: "openai-fast",
+		// The documented model name is the alias "openai", but the anonymous tier
+		// publishes "openai-fast" as the real entry, and the wizard's list comes
+		// from the server — a name the server never reports would look like a
+		// mistake on the Model row.
 		BaseURL:    "https://text.pollinations.ai",
-		Model:      "openai",
 		APIPath:    "/openai",
 		ModelsPath: "/models",
 		Free:       true,

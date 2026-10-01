@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
-
 	"dmed/internal/config"
 )
 
@@ -154,7 +152,8 @@ func TestCycleProviderLeavesFallback(t *testing.T) {
 	m.chatNotice = "cloud notice"
 
 	m.startAISettings()
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyRight})
+	pickAISelect(t, &m, 0, "Ollama (local)") // re-picking the same preset is a no-op
+	pickAISelect(t, &m, 0, config.AIPresets()[2].Name)
 
 	if m.aiFallback {
 		t.Fatal("choosing a provider must end the fallback state")

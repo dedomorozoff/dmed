@@ -232,6 +232,50 @@ func TestOpenAICustomAPIPath(t *testing.T) {
 	}
 }
 
+// TestOpenAIModelListShapes covers the endpoints that claim to be
+// OpenAI-compatible and then answer with something else. Pollinations — the
+// keyless provider — returns a bare array of objects with "name", not the
+// {"data":[{"id":...}]} envelope; parsing only the envelope left it with an empty
+// list, which looks exactly like "this server has no models".
+func TestOpenAIModelListShapes(t *testing.T) {
+	cases := map[string]struct {
+		body string
+		want []string
+	}{
+		"openai envelope": {`{"data":[{"id":"gpt-4o-mini"},{"id":"gpt-4o"}]}`, []string{"gpt-4o-mini", "gpt-4o"}},
+		"pollinations":    {`[{"name":"openai-fast","aliases":["openai"]},{"name":"mistral"}]`, []string{"openai-fast", "mistral"}},
+		"array of names":  {`["openai","mistral","searchgpt"]`, []string{"openai", "mistral", "searchgpt"}},
+		"envelope empty":  {`{"data":[]}`, []string{}},
+	}
+	for name, c := range cases {
+		body := c.body
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/models" {
+				t.Errorf("%s: unexpected path %q", name, r.URL.Path)
+			}
+			_, _ = w.Write([]byte(body))
+		}))
+
+		p := NewProvider(Config{Type: OpenAIProvider, URL: srv.URL, APIPath: "/openai", ModelsPath: "/models"})
+		got, err := p.Models(context.Background())
+		srv.Close()
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if len(got) != len(c.want) {
+			t.Errorf("%s: models = %v, want %v", name, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("%s: models = %v, want %v", name, got, c.want)
+				break
+			}
+		}
+	}
+}
+
 func TestOpenAIModels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {

@@ -24,6 +24,67 @@ type openAIProvider struct {
 	http       *http.Client
 }
 
+// modelList covers the three shapes a "list your models" endpoint comes in:
+// the OpenAI one ({"data":[{"id":...}]}), a bare array of objects (Pollinations
+// returns [{"name":...}]) and a bare array of names. The last two are not
+// OpenAI-compatible, but refusing them would leave the keyless provider with an
+// empty list and no way to pick a model — a failure that looks like "the server
+// has nothing", which is exactly the confusion this code exists to remove.
+func (o *openAIProvider) modelList(data []byte) ([]string, error) {
+	var envelope struct {
+		Data []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &envelope); err == nil && len(envelope.Data) > 0 {
+		names := make([]string, 0, len(envelope.Data))
+		for _, m := range envelope.Data {
+			if n := firstNonEmpty(m.ID, m.Name); n != "" {
+				names = append(names, n)
+			}
+		}
+		return names, nil
+	}
+	var objects []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(data, &objects); err == nil && len(objects) > 0 {
+		names := make([]string, 0, len(objects))
+		for _, m := range objects {
+			if n := firstNonEmpty(m.ID, m.Name); n != "" {
+				names = append(names, n)
+			}
+		}
+		return names, nil
+	}
+	var plain []string
+	if err := json.Unmarshal(data, &plain); err == nil && len(plain) > 0 {
+		out := make([]string, 0, len(plain))
+		for _, n := range plain {
+			if n = strings.TrimSpace(n); n != "" {
+				out = append(out, n)
+			}
+		}
+		return out, nil
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil, err
+	}
+	// A well-formed but empty list is a valid answer, not an error.
+	return []string{}, nil
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func (p *openAIProvider) Models(ctx context.Context) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.url+p.modelsPath, nil)
 	if err != nil {
@@ -41,20 +102,16 @@ func (p *openAIProvider) Models(ctx context.Context) ([]string, error) {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, fmt.Errorf("openai %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
-	var res struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxModelList))
+	if err != nil {
 		return nil, err
 	}
-	names := make([]string, 0, len(res.Data))
-	for _, m := range res.Data {
-		names = append(names, m.ID)
-	}
-	return names, nil
+	return p.modelList(data)
 }
+
+// maxModelList caps the model list: a local Ollama can report dozens, and the
+// answer only has to be readable by a person choosing from it.
+const maxModelList = 1 << 20 // 1 MiB
 
 func (p *openAIProvider) ChatStream(ctx context.Context, req Request, h Handler) error {
 	body := map[string]any{

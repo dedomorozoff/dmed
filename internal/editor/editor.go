@@ -312,6 +312,17 @@ type Model struct {
 	// real choices; aiCfgGen discards replies from a superseded request.
 	aiCfgModels []string
 	aiCfgGen    int
+	// aiCfgNeedsReload remembers a probe that was skipped because one was
+	// already in flight when the endpoint changed.
+	aiCfgNeedsReload bool
+	// The open option list for a choice row (Provider, Model, Allow Run,
+	// Restrict Root). A list, not a value cycler: fifty models cannot be walked
+	// one arrow press at a time.
+	aiCfgSelOpen  bool
+	aiCfgSelField int
+	aiCfgSelItems []string
+	aiCfgSelIdx   int
+	aiCfgSelOff   int
 
 	treeVisible    bool
 	treeFocus      bool
@@ -1441,8 +1452,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, waitForChatOutput(m.chatCh, m.chatGen)
 		}
 	case AITestResultMsg:
-		m.handleAITestResult(msg)
-		return m, nil
+		return m, m.handleAITestResult(msg)
 	case InlineOutputMsg:
 		cmd := m.handleInlineOutput(msg)
 		return m, cmd

@@ -988,6 +988,14 @@ func maxInt(a, b int) int {
 	return b
 }
 
+// minInt is maxInt's counterpart, for the few places that need a lower bound.
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func padTo(s string, w int) string {
 	if d := w - lipgloss.Width(s); d > 0 {
 		return s + strings.Repeat(" ", d)
