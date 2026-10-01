@@ -308,6 +308,10 @@ type Model struct {
 	aiCfgEdit  bool
 	aiCfgIn    []rune
 	aiCfgTest  aiTestState // last connection probe from the wizard Test row
+	// aiCfgModels is the list the provider reported, so the Model row can offer
+	// real choices; aiCfgGen discards replies from a superseded request.
+	aiCfgModels []string
+	aiCfgGen    int
 
 	treeVisible    bool
 	treeFocus      bool

@@ -60,7 +60,10 @@ AI agents can read, propose, and apply changes directly to your codebase — but
 - **First-time setup, three ways**:
   - `dmed setup-ai` — interactive CLI wizard (provider → key → test → saved)
   - In the editor: `Ctrl+P` → `AI: Preferences...` — pick a preset with
-    `←`/`→`, paste the API key, press `t` to test the connection, `Ctrl+S` to save
+    `←`/`→`, paste the API key, press `t` to test the connection, `Ctrl+S` to save.
+    The **model list is fetched from the provider as soon as the panel opens**,
+    so the Model row shows what the server actually has (`←`/`→` to walk it)
+    instead of asking you to guess a name
   - Environment variables (highest priority, nothing written to disk):
     `DMED_PROVIDER`, `DMED_API_KEY`, `DMED_MODEL`, `DMED_OLLAMA_URL`
 

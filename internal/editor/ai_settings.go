@@ -2,6 +2,8 @@ package editor
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -43,19 +45,32 @@ type aiTestState struct {
 
 // AITestResultMsg carries the outcome of a wizard connection test started by
 // testAIConnection. Fields are plain values, so handling stays side-effect free.
+// Models is filled on success: the provider's own list is what turns "which
+// model do I pick?" into a question with a visible answer.
 type AITestResultMsg struct {
 	OK     bool
 	Status string
+	Models []string
+	// Gen identifies the request this reply belongs to. The wizard can have a
+	// probe in flight while the user changes provider or URL, and a late reply
+	// from the previous endpoint must not repopulate the new one.
+	Gen int
 }
 
-func (m *Model) startAISettings() {
+func (m *Model) startAISettings() tea.Cmd {
 	m.aiCfgOpen = true
 	m.aiCfgField = 0
 	m.aiCfgEdit = false
 	m.aiCfgIn = nil
 	m.aiCfgTest = aiTestState{}
+	// The list belongs to the endpoint, so a reopened wizard starts empty and
+	// asks again rather than showing one that belongs to another server.
+	m.aiCfgModels = nil
 	m.syncProviderKind()
 	m.msg = ""
+	// Load straight away: the commonest question about AI settings is "which
+	// model can I even choose here?", and the answer is one request away.
+	return m.testAIConnection()
 }
 
 // syncProviderKind maps the stored provider label onto the matching preset's
@@ -69,7 +84,10 @@ func (m *Model) syncProviderKind() {
 // defaults: base URL always, model only when the provider exposes a stable
 // suggestion and the user has not pinned one. URL is left untouched for Custom
 // so users with a self-hosted endpoint keep their value.
-func (m *Model) cycleAIProvider(d int) {
+//
+// It reloads the model list, because that is the whole point of the wizard: a
+// provider change without the list means the Model row is a guess.
+func (m *Model) cycleAIProvider(d int) tea.Cmd {
 	presets := config.AIPresets()
 	cur := config.ResolvePreset(m.cfg.AI.Provider)
 	idx := 0
@@ -100,7 +118,16 @@ func (m *Model) cycleAIProvider(d int) {
 	}
 	if p.Name != cur.Name { // switching providers invalidates a previous probe
 		m.aiCfgTest = aiTestState{}
+		// Another server means another model list, so ask it instead of showing
+		// the previous provider's models.
+		m.aiCfgModels = nil
+		// A model that only exists on the old server would fail on the new one.
+		if config.ResolvePreset(cur.Name).Model == "" && m.cfg.AI.Model == p.Model {
+			m.cfg.AI.Model = ""
+		}
+		return m.testAIConnection()
 	}
+	return nil
 }
 
 func (m *Model) aiFieldValue(i int) string {
@@ -160,18 +187,24 @@ func (m *Model) handleAISettings(msg tea.KeyPressMsg) tea.Cmd {
 	case "k", "up":
 		m.aiCfgField = (m.aiCfgField - 1 + len(aiSettingsFields)) % len(aiSettingsFields)
 	case "left":
-		if m.aiCfgField == 0 {
+		switch m.aiCfgField {
+		case 0:
 			m.cycleAIProvider(-1)
+		case 1:
+			m.cycleAIModel(-1)
 		}
 	case "right":
-		if m.aiCfgField == 0 {
+		switch m.aiCfgField {
+		case 0:
 			m.cycleAIProvider(1)
+		case 1:
+			m.cycleAIModel(1)
 		}
 	case "t", "T":
 		return m.testAIConnection()
 	case "enter":
 		if m.aiCfgField == 0 {
-			m.cycleAIProvider(1)
+			return m.cycleAIProvider(1)
 		} else if m.aiCfgField == len(aiSettingsFields)-1 {
 			return m.testAIConnection()
 		} else {
@@ -185,40 +218,44 @@ func (m *Model) handleAISettings(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 // testAIConnection launches a background probe of the current provider
-// settings. The result lands as AITestResultMsg; nothing is persisted here.
+// settings. The result lands as AITestResultMsg and carries the provider's model
+// list, so one request both checks the connection and fills the Model row.
+// Nothing is persisted here.
 func (m *Model) testAIConnection() tea.Cmd {
 	if m.aiCfgTest.running {
 		return nil
 	}
-	prov := ai.NewProvider(ai.Config{
-		Type:       ai.ProviderType(m.currentProviderKind()),
-		URL:        m.cfg.AI.OllamaURL,
-		Model:      m.cfg.AI.Model,
-		APIKey:     m.cfg.AI.APIKey,
-		APIPath:    m.cfg.AI.APIPath,
-		ModelsPath: m.cfg.AI.ModelsPath,
-	})
+	kind := ai.ProviderType(m.currentProviderKind())
+	url, key := m.cfg.AI.OllamaURL, m.cfg.AI.APIKey
+	apiPath, modelsPath := m.cfg.AI.APIPath, m.cfg.AI.ModelsPath
+	m.aiCfgGen++
+	gen := m.aiCfgGen
 	m.aiCfgTest = aiTestState{running: true, status: "testing..."}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 		defer cancel()
+		prov := ai.NewProvider(ai.Config{
+			Type: kind, URL: url, Model: m.cfg.AI.Model, APIKey: key,
+			APIPath: apiPath, ModelsPath: modelsPath,
+		})
 		models, err := prov.Models(ctx)
 		if err != nil {
-			return AITestResultMsg{OK: false, Status: strings.TrimSpace(err.Error())}
+			return AITestResultMsg{OK: false, Status: strings.TrimSpace(err.Error()), Gen: gen}
 		}
-		return AITestResultMsg{OK: true, Status: strconv.Itoa(len(models)) + " models"}
+		sort.Strings(models) // stable order so the list does not shuffle
+		return AITestResultMsg{OK: true, Status: strconv.Itoa(len(models)) + " models", Models: models, Gen: gen}
 	}
-}
-
-// currentProviderKind returns the wire protocol for the provider label
-// currently selected in the wizard ("ollama" | "openai").
-func (m *Model) currentProviderKind() string {
-	return config.ResolvePreset(m.cfg.AI.Provider).Kind
 }
 
 // handleAITestResult records the outcome of the connection probe and, on
 // failure, replaces the terse transport error with a hint a beginner can act on.
+// On success it stores the model list and fills the Model row when it is empty.
 func (m *Model) handleAITestResult(res AITestResultMsg) {
+	// A reply from a superseded request must not overwrite the current state:
+	// the user may have changed provider or URL while the probe was in flight.
+	if res.Gen != m.aiCfgGen {
+		return
+	}
 	status, ok := res.Status, res.OK
 	if !ok {
 		l := strings.ToLower(status)
@@ -234,8 +271,66 @@ func (m *Model) handleAITestResult(res AITestResultMsg) {
 		case strings.Contains(l, "no such host") || strings.Contains(l, "dial tcp") || strings.Contains(l, "timeout") || strings.Contains(l, "context deadline"):
 			status = "unreachable — check Base URL"
 		}
+		m.aiCfgTest = aiTestState{ok: ok, status: status}
+		// The list we had belonged to a server we can no longer reach.
+		m.aiCfgModels = nil
+		return
 	}
-	m.aiCfgTest = aiTestState{ok: ok, status: status}
+	m.aiCfgTest = aiTestState{ok: true, status: status}
+	m.aiCfgModels = res.Models
+	if len(res.Models) == 0 {
+		return
+	}
+	// An empty Model field means "whatever the server likes"; the wizard can
+	// fill it in now that the answer is known. A model the user already pinned
+	// is left alone even when the server does not list it — some servers filter.
+	if m.cfg.AI.Model == "" {
+		m.applyAIModel(res.Models[0])
+	}
+}
+
+// applyAIModel sets the model and tears down the cached provider, so the chat,
+// ghost text and agents use it from the next request on — before Ctrl+S, which
+// is only about persistence.
+func (m *Model) applyAIModel(model string) {
+	if model == "" || m.cfg.AI.Model == model {
+		return
+	}
+	m.cfg.AI.Model = model
+	m.chatModel = model
+	m.ai = nil
+	m.aiKey = ""
+}
+
+// cycleAIModel moves the selection through the loaded list. It reports whether
+// anything moved, so the caller knows whether to refresh the provider.
+func (m *Model) cycleAIModel(d int) bool {
+	if len(m.aiCfgModels) == 0 {
+		return false
+	}
+	idx := -1
+	for i, name := range m.aiCfgModels {
+		if name == m.cfg.AI.Model {
+			idx = i
+			break
+		}
+	}
+	// No current match: step into the list from the nearest end.
+	next := 0
+	switch {
+	case idx < 0 && d < 0:
+		next = len(m.aiCfgModels) - 1
+	case idx >= 0:
+		next = (idx + d + len(m.aiCfgModels)) % len(m.aiCfgModels)
+	}
+	m.applyAIModel(m.aiCfgModels[next])
+	return true
+}
+
+// currentProviderKind returns the wire protocol for the provider label
+// currently selected in the wizard ("ollama" | "openai").
+func (m *Model) currentProviderKind() string {
+	return config.ResolvePreset(m.cfg.AI.Provider).Kind
 }
 
 func (m *Model) commitAIField() {
@@ -297,6 +392,10 @@ func (m Model) aiSettingsPanel(h int) []string {
 			rows = append(rows, " "+statusHiStyle.Render(marker)+" "+padTo(f.name, 12)+" "+statusStyle.Render(m.cfg.AI.Provider)+"   "+hintStyle.Render(m.t("ai.choice")))
 			continue
 		}
+		if i == 1 {
+			rows = append(rows, m.aiModelRow(marker))
+			continue
+		}
 		if f.kind == "action" {
 			rows = append(rows, " "+statusHiStyle.Render(marker)+" "+padTo(f.name, 12)+" "+m.testStatusLine())
 			continue
@@ -304,6 +403,39 @@ func (m Model) aiSettingsPanel(h int) []string {
 		rows = append(rows, " "+marker+" "+padTo(f.name, 12)+" "+statusStyle.Render(m.aiFieldValue(i)))
 	}
 	return rows
+}
+
+// aiModelRow renders the Model row: the value plus what the provider actually
+// offers. Without the count the row is an opaque text field, which is the whole
+// complaint this row exists to answer.
+func (m Model) aiModelRow(marker string) string {
+	value := m.cfg.AI.Model
+	hint := m.t("ai.model_hint")
+	switch {
+	case len(m.aiCfgModels) > 0:
+		hint = fmt.Sprintf(m.t("ai.models_found"), len(m.aiCfgModels))
+		if value != "" && !containsString(m.aiCfgModels, value) {
+			// Keep the pinned value but say it is not what this server has.
+			hint += "  " + m.t("ai.model_not_listed")
+		}
+	case m.aiCfgTest.running:
+		hint = "loading..."
+	case value == "":
+		hint = m.t("ai.model_load_hint")
+	}
+	return " " + statusHiStyle.Render(marker) + " " + padTo(aiSettingsFields[1].name, 12) + " " +
+		statusStyle.Render(value) + "  " + hintStyle.Render(hint)
+}
+
+// containsString is a tiny helper kept local so this file does not grow an
+// import for one call.
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // testStatusLine renders the outcome of the last connection probe: green

@@ -186,6 +186,11 @@ Conventions:
 - Test seams must stay on the model, never in package globals: `aiFreeURLOverride`
   and `webSearchOverride` redirect the two network features to local servers so
   no unit test ever reaches the internet.
+- The AI wizard loads the provider's model list when it opens and after every
+  provider change (`testAIConnection` serves both the Test row and the list).
+  `AITestResultMsg.Gen` stamps the request so a late reply from the previous
+  endpoint cannot repopulate the Model row. A pinned `[ai] model` is never
+  overwritten; only an empty one is auto-filled.
 - DAP adapter sessions are async: the adapter is spawned in the background
   (`dapStartCmd`) and results are stamped with a session generation
   (`dapGen`). Stale events/disconnects from superseded sessions are dropped so

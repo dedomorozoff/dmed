@@ -338,12 +338,16 @@ var enCatalog = map[string]string{
 	"msg.agent_discarded":     "agent changes discarded",
 
 	// Agent review + AI settings
-	"agent.review_hint": "  (y: apply all, n: reject, Tab: next file, \u2191\u2193 scroll)",
-	"ai.settings":       " AI - settings ",
-	"ai.settings_hint":  "(\u2191/\u2193 move, Enter edit, \u2190/\u2192 choice, t test, Ctrl+S save, Esc close)",
-	"ai.choice":         "(\u2190/\u2192 choose)",
-	"ai.test_hint":      "press t / Enter to test connection",
-	"ai.settings_save":  "(Ctrl+S save, Esc close)",
+	"agent.review_hint":   "  (y: apply all, n: reject, Tab: next file, \u2191\u2193 scroll)",
+	"ai.settings":         " AI - settings ",
+	"ai.settings_hint":    "(\u2191/\u2193 move, Enter edit, \u2190/\u2192 choice, t test, Ctrl+S save, Esc close)",
+	"ai.choice":           "(\u2190/\u2192 choose)",
+	"ai.test_hint":        "press t / Enter to test connection",
+	"ai.model_hint":       "(\u2190/\u2192 from the server's list)",
+	"ai.models_found":     "%d model(s) \u2014 \u2190/\u2192",
+	"ai.model_not_listed": "not in this server's list",
+	"ai.model_load_hint":  "loading the list... press t to retry",
+	"ai.settings_save":    "(Ctrl+S save, Esc close)",
 
 	// DAP settings wizard
 	"dap.settings":      " DAP settings ",
@@ -664,12 +668,16 @@ var ruCatalog = map[string]string{
 	"msg.agent_discarded":     "изменения агента отклонены",
 
 	// Agent review + AI settings
-	"agent.review_hint": "  (Y/\u043d: \u043f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c \u0432\u0441\u0451, N/\u0442: \u043e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c, Tab: \u0441\u043b\u0435\u0434.\u0444\u0430\u0439\u043b, \u2191\u2193 \u0441\u043a\u0440\u043e\u043b\u043b)",
-	"ai.settings":       " AI - настройки ",
-	"ai.settings_hint":  "(\u2191/\u2193 движение, Enter правка, \u2190/\u2192 выбор, t тест, Ctrl+S сохранить, Esc закрыть)",
-	"ai.choice":         "(\u2190/\u2192 выбрать)",
-	"ai.test_hint":      "нажмите t / Enter, чтобы проверить подключение",
-	"ai.settings_save":  "(Ctrl+S сохранить, Esc закрыть)",
+	"agent.review_hint":   "  (Y/\u043d: \u043f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c \u0432\u0441\u0451, N/\u0442: \u043e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c, Tab: \u0441\u043b\u0435\u0434.\u0444\u0430\u0439\u043b, \u2191\u2193 \u0441\u043a\u0440\u043e\u043b\u043b)",
+	"ai.settings":         " AI - настройки ",
+	"ai.settings_hint":    "(\u2191/\u2193 движение, Enter правка, \u2190/\u2192 выбор, t тест, Ctrl+S сохранить, Esc закрыть)",
+	"ai.choice":           "(\u2190/\u2192 выбрать)",
+	"ai.test_hint":        "нажмите t / Enter, чтобы проверить подключение",
+	"ai.model_hint":       "(←/→ из списка сервера)",
+	"ai.models_found":     "моделей: %d — ←/→",
+	"ai.model_not_listed": "нет в списке этого сервера",
+	"ai.model_load_hint":  "загружаю список... нажмите t, чтобы повторить",
+	"ai.settings_save":    "(Ctrl+S сохранить, Esc закрыть)",
 
 	// DAP settings wizard
 	"dap.settings":      " DAP-настройки ",

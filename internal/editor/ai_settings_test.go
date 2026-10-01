@@ -1,6 +1,8 @@
 package editor
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,7 +100,7 @@ func TestAISettingsTestRowConnectionProbe(t *testing.T) {
 	if !m.aiCfgTest.running {
 		t.Fatal("probe should be running after Enter on Test row")
 	}
-	m.handleAITestResult(AITestResultMsg{OK: true, Status: "2 models"})
+	m.handleAITestResult(AITestResultMsg{OK: true, Status: "2 models", Gen: m.aiCfgGen})
 	if !m.aiCfgTest.ok || m.aiCfgTest.running {
 		t.Fatalf("state after ok result: %+v", m.aiCfgTest)
 	}
@@ -108,13 +110,182 @@ func TestAISettingsTestRowConnectionProbe(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("t should start a probe when none is running")
 	}
-	m.handleAITestResult(AITestResultMsg{OK: false, Status: "dial tcp: connection refused"})
+	m.handleAITestResult(AITestResultMsg{OK: false, Status: "dial tcp: connection refused", Gen: m.aiCfgGen})
 	if m.aiCfgTest.ok || strings.Contains(m.aiCfgTest.status, "dial tcp") {
 		t.Fatalf("refused must be translated into a human hint, got %q", m.aiCfgTest.status)
 	}
 }
 
+// TestAISettingsIgnoresStaleProbe: a reply from the endpoint the user already
+// navigated away from must not repopulate the Model row.
+func TestAISettingsIgnoresStaleProbe(t *testing.T) {
+	isolateHomeConfig(t)
+	m := New()
+	m.startAISettings()
+	stale := m.aiCfgGen
+
+	// The user changes the provider while the probe is in flight.
+	m.cycleAIProvider(1)
+	if m.aiCfgGen == stale {
+		t.Fatal("changing the provider must start a new request generation")
+	}
+
+	m.handleAITestResult(AITestResultMsg{OK: true, Status: "3 models", Gen: stale,
+		Models: []string{"old-model"}})
+
+	if len(m.aiCfgModels) != 0 {
+		t.Fatalf("a stale reply must not fill the list: %v", m.aiCfgModels)
+	}
+	if m.cfg.AI.Model == "old-model" {
+		t.Fatal("a stale reply must not choose a model")
+	}
+}
+
 // TestAISettingsEditAndCommit edits the Model field and commits it via Enter.
+// TestAISettingsLoadsModelsOnOpen: the reason this feature exists is that
+// choosing a model without knowing what the server has is guesswork, so opening
+// the wizard asks the server.
+func TestAISettingsLoadsModelsOnOpen(t *testing.T) {
+	isolateHomeConfig(t)
+	m := New()
+	cmd := m.startAISettings()
+	if cmd == nil {
+		t.Fatal("opening the wizard must start a model probe")
+	}
+	if !m.aiCfgTest.running {
+		t.Fatal("the probe should be running while the wizard is open")
+	}
+
+	m.handleAITestResult(AITestResultMsg{OK: true, Status: "3 models", Gen: m.aiCfgGen,
+		Models: []string{"deepseek-r1", "llama3.2", "qwen3-coder"}})
+
+	if len(m.aiCfgModels) != 3 {
+		t.Fatalf("models = %v", m.aiCfgModels)
+	}
+	// An empty Model row means "whatever the server likes" — now we know.
+	if m.cfg.AI.Model != "deepseek-r1" {
+		t.Fatalf("model = %q, want the first model auto-filled", m.cfg.AI.Model)
+	}
+	if m.chatModel != m.cfg.AI.Model {
+		t.Fatalf("the chat must follow the model the wizard chose: %q vs %q", m.chatModel, m.cfg.AI.Model)
+	}
+}
+
+// TestAISettingsModelRowNavigates: ←/→ walk the list the server reported, which
+// is the interaction the row hint promises.
+func TestAISettingsModelRowNavigates(t *testing.T) {
+	isolateHomeConfig(t)
+	m := New()
+	m.startAISettings()
+	m.handleAITestResult(AITestResultMsg{OK: true, Status: "3 models", Gen: m.aiCfgGen,
+		Models: []string{"a-model", "b-model", "c-model"}})
+	m.aiCfgField = 1 // Model row
+
+	right := tea.KeyPressMsg{Code: tea.KeyRight}
+	left := tea.KeyPressMsg{Code: tea.KeyLeft}
+
+	m.handleAISettings(right)
+	if m.cfg.AI.Model != "b-model" {
+		t.Fatalf("after right = %q, want b-model", m.cfg.AI.Model)
+	}
+	m.handleAISettings(right)
+	m.handleAISettings(right)
+	if m.cfg.AI.Model != "a-model" {
+		t.Fatalf("the list must wrap, got %q", m.cfg.AI.Model)
+	}
+	m.handleAISettings(left)
+	if m.cfg.AI.Model != "c-model" {
+		t.Fatalf("after left = %q, want c-model", m.cfg.AI.Model)
+	}
+
+	// Enter still starts inline editing, for a model the server does not list.
+	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.aiCfgEdit {
+		t.Fatal("Enter on the Model row must still allow typing a name")
+	}
+}
+
+// TestAISettingsKeepsPinnedModel pins the rule that matters: the wizard may fill
+// an empty field, but it must never overwrite a model the user chose — even one
+// the server does not report (some servers filter the list).
+func TestAISettingsKeepsPinnedModel(t *testing.T) {
+	isolateHomeConfig(t)
+	m := New()
+	m.cfg.AI.Model = "my-private-fork"
+	m.startAISettings()
+	m.handleAITestResult(AITestResultMsg{OK: true, Status: "2 models", Gen: m.aiCfgGen,
+		Models: []string{"a-model", "b-model"}})
+
+	if m.cfg.AI.Model != "my-private-fork" {
+		t.Fatalf("model = %q, want the user's choice untouched", m.cfg.AI.Model)
+	}
+	row := m.aiModelRow(">")
+	if !containsStr(row, "my-private-fork") {
+		t.Fatalf("the row must show the value: %q", row)
+	}
+	if !containsStr(row, m.t("ai.model_not_listed")) {
+		t.Fatalf("the row must warn that the model is not in the list: %q", row)
+	}
+}
+
+// TestAISettingsModelRowHints covers what the user actually sees: how many
+// models were found, and what to do while the list is loading.
+func TestAISettingsModelRowHints(t *testing.T) {
+	isolateHomeConfig(t)
+	m := New()
+	m.cfg.AI.Model = "x"
+
+	m.startAISettings()
+	if row := m.aiModelRow(">"); !containsStr(row, "loading") {
+		t.Fatalf("while loading, the row must say so: %q", row)
+	}
+
+	m.handleAITestResult(AITestResultMsg{OK: true, Status: "4 models", Gen: m.aiCfgGen,
+		Models: []string{"a", "b", "c", "d"}})
+	row := m.aiModelRow(">")
+	if !containsStr(row, "4") || !containsStr(row, "←") {
+		t.Fatalf("the row must show the count and the keys: %q", row)
+	}
+
+	// A failed probe drops the list: it belonged to a server we cannot reach.
+	m.handleAITestResult(AITestResultMsg{OK: false, Status: "dial tcp: refused", Gen: m.aiCfgGen})
+	if len(m.aiCfgModels) != 0 {
+		t.Fatalf("a failed probe must clear the list, got %v", m.aiCfgModels)
+	}
+}
+
+// TestAISettingsModelListSortedAndLoaded drives the real probe command against a
+// local stub: the list must arrive sorted, because "the first model" is what the
+// auto-pick uses and a shuffling list would make that arbitrary.
+func TestAISettingsModelListSortedAndLoaded(t *testing.T) {
+	isolateHomeConfig(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"z-last"},{"id":"a-first"},{"id":"m-middle"}]}`))
+	}))
+	defer srv.Close()
+
+	m := New()
+	m.cfg.AI.OllamaURL = srv.URL
+	m.cfg.AI.Provider = "Groq" // an OpenAI-compatible provider, so /v1/models
+	cmd := m.testAIConnection()
+	if cmd == nil {
+		t.Fatal("probe must start")
+	}
+	msg, ok := cmd().(AITestResultMsg)
+	if !ok || !msg.OK {
+		t.Fatalf("probe result = %+v", msg)
+	}
+	want := []string{"a-first", "m-middle", "z-last"}
+	for i, w := range want {
+		if msg.Models[i] != w {
+			t.Fatalf("models = %v, want %v", msg.Models, want)
+		}
+	}
+}
+
 func TestAISettingsEditAndCommit(t *testing.T) {
 	isolateHomeConfig(t)
 	m := New()
