@@ -82,9 +82,19 @@ func (m *Model) cycleAIProvider(d int) {
 	idx = (idx + d + len(presets)) % len(presets)
 	p := presets[idx]
 	m.cfg.AI.Provider = p.Name
+	// Choosing a provider is a decision, so the session stops being a fallback
+	// (and stops claiming the traffic is a fallback) even when the chosen one
+	// happens to be the keyless provider.
+	m.aiFallback = false
+	m.chatNotice = ""
 	if p.BaseURL != "" {
 		m.cfg.AI.OllamaURL = p.BaseURL
 	}
+	// The endpoint prefix travels with the preset: Pollinations serves the
+	// OpenAI protocol under /openai, so keeping the previous prefix would make
+	// the new provider answer 404s.
+	m.cfg.AI.APIPath = p.APIPath
+	m.cfg.AI.ModelsPath = p.ModelsPath
 	if p.Model != "" && m.cfg.AI.Model == "" {
 		m.cfg.AI.Model = p.Model
 	}
@@ -181,10 +191,12 @@ func (m *Model) testAIConnection() tea.Cmd {
 		return nil
 	}
 	prov := ai.NewProvider(ai.Config{
-		Type:   ai.ProviderType(m.currentProviderKind()),
-		URL:    m.cfg.AI.OllamaURL,
-		Model:  m.cfg.AI.Model,
-		APIKey: m.cfg.AI.APIKey,
+		Type:       ai.ProviderType(m.currentProviderKind()),
+		URL:        m.cfg.AI.OllamaURL,
+		Model:      m.cfg.AI.Model,
+		APIKey:     m.cfg.AI.APIKey,
+		APIPath:    m.cfg.AI.APIPath,
+		ModelsPath: m.cfg.AI.ModelsPath,
 	})
 	m.aiCfgTest = aiTestState{running: true, status: "testing..."}
 	return func() tea.Msg {

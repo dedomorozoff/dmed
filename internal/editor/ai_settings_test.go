@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"dmed/internal/config"
 )
 
 // isolateHomeConfig points the user home dir at a temp dir so the tests run
@@ -33,15 +35,42 @@ func TestAISettingsProviderCycle(t *testing.T) {
 		t.Fatalf("prov in default = %q", m.cfg.AI.Provider)
 	}
 	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.cfg.AI.Provider != "Pollinations (free, no key)" {
+		t.Fatalf("after right = %q, want the keyless fallback preset", m.cfg.AI.Provider)
+	}
+	// The keyless preset must carry its own endpoint prefix, or the probe would
+	// hit /v1 and report a 404 as "auth failed".
+	if m.cfg.AI.APIPath != "/openai" || m.cfg.AI.ModelsPath != "/models" {
+		t.Fatalf("api paths = %q / %q", m.cfg.AI.APIPath, m.cfg.AI.ModelsPath)
+	}
+	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyRight})
 	if m.cfg.AI.Provider != "OpenAI" {
-		t.Fatalf("after right = %q, want OpenAI", m.cfg.AI.Provider)
+		t.Fatalf("after two rights = %q, want OpenAI", m.cfg.AI.Provider)
 	}
 	if m.cfg.AI.OllamaURL != "https://api.openai.com" {
 		t.Fatalf("url after right = %q, want preset URL", m.cfg.AI.OllamaURL)
 	}
+	if m.cfg.AI.APIPath != "" {
+		t.Fatalf("api path must reset for a /v1 provider, got %q", m.cfg.AI.APIPath)
+	}
+	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyLeft})
 	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyLeft})
 	if m.cfg.AI.Provider != "Ollama (local)" {
-		t.Fatalf("after left = %q, want Ollama (local)", m.cfg.AI.Provider)
+		t.Fatalf("after two lefts = %q, want Ollama (local)", m.cfg.AI.Provider)
+	}
+}
+
+// TestAISettingsPollinationsNeedsNoKey verifies the wizard does not ask for a key
+// for the keyless provider: typing a key there is a pure usability bug.
+func TestAISettingsPollinationsNeedsNoKey(t *testing.T) {
+	isolateHomeConfig(t)
+	m := New()
+	m.startAISettings()
+	for m.cfg.AI.Provider != "Pollinations (free, no key)" {
+		m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyRight})
+	}
+	if p := config.ResolvePreset(m.cfg.AI.Provider); p.APIKey {
+		t.Fatal("the keyless preset must not be marked as needing a key")
 	}
 }
 

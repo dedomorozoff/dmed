@@ -15,6 +15,7 @@ import (
 
 	"dmed/internal/agent"
 	"dmed/internal/ai"
+	"dmed/internal/ask"
 	"dmed/internal/debug"
 	"dmed/internal/vcs"
 
@@ -38,10 +39,14 @@ var (
 	chatAITextStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 	chatToolLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	chatToolTextStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))
+	chatTodoLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("108")).Bold(true)
+	chatTodoTextStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	chatTodoDoneStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
+	chatNoticeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("179"))
 )
 
 type chatRow struct {
-	kind string // "label-you" | "user" | "label-ai" | "ai" | "tool" | "hint" | "err"
+	kind string // "label-you" | "user" | "label-ai" | "ai" | "tool" | "label-todo" | "todo" | "todo-done" | "notice" | "hint" | "err"
 	text string
 }
 
@@ -127,6 +132,12 @@ func (m *Model) toggleChat() tea.Cmd {
 	if m.chatOpen && !m.chatHistLoaded {
 		m.loadChatPanelHistory()
 	}
+	if m.chatOpen {
+		// The chat may delegate a task to a sub-agent, which needs the agent
+		// queue; wire it now so the model is offered SUB_AGENT right away
+		// instead of after the user happens to open the agent panel.
+		m.ensureAgent()
+	}
 	m.ai = m.aiProvider(m.chatModel)
 	if m.chatOpen && m.chatModel == "" {
 		m.pickChatModel()
@@ -135,7 +146,8 @@ func (m *Model) toggleChat() tea.Cmd {
 }
 
 // pickChatModel resolves the model once: DMED_MODEL wins, otherwise the
-// first model reported by the server.
+// first model reported by the server. A fresh install with no working provider
+// falls back to a keyless one (and says so) rather than showing a dead panel.
 func (m *Model) pickChatModel() {
 	if m.cfg.AI.Model != "" {
 		m.chatModel = m.cfg.AI.Model
@@ -147,6 +159,11 @@ func (m *Model) pickChatModel() {
 	models, err := prov.Models(ctx)
 	switch {
 	case err != nil:
+		if m.tryFreeFallback() {
+			m.msg = m.t("chat.fallback_status")
+			m.rebuildChatRows()
+			return
+		}
 		m.msg = "provider offline (" + err.Error() + ")"
 	case len(models) == 0:
 		m.msg = "no models available"
@@ -159,18 +176,11 @@ func (m *Model) pickChatModel() {
 
 func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 	s := msg.String()
-	// While a RUN command awaits confirmation (allow_run = ask) the input is
-	// parked: y runs the held command, n declines it. Either way the decision
-	// is fed back as the tool result and the loop continues.
-	if m.chatRunConfirm != "" {
-		switch gitKeyName(msg) {
-		case "y", "enter":
-			return m.finishChatRunConfirm(true)
-		case "n", "esc", "r":
-			return m.finishChatRunConfirm(false)
-		default:
-			return nil // ignore other keys while parked
-		}
+	// While a tool call is parked for a human decision (e.g. a RUN command with
+	// allow_run = ask) the input is parked too: the decision is fed back as the
+	// tool result and the loop continues.
+	if m.chatPark != nil {
+		return m.handleChatParkKey(msg)
 	}
 	switch s {
 	case "esc":
@@ -362,7 +372,7 @@ func (m *Model) startChatTurn() tea.Cmd {
 	go debug.CapturePanicReport(func() {
 		defer close(ch)
 		var tools []ai.ToolCall
-		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs, Tools: chatToolDefs(), Options: m.aiRequestOptions()}, ai.Handler{
+		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs, Tools: m.activeChatToolDefs(), Options: m.aiRequestOptions()}, ai.Handler{
 			Delta: func(d string) {
 				select {
 				case ch <- chatEvent{delta: d, gen: gen}:
@@ -396,6 +406,11 @@ func (m *Model) startChatTurn() tea.Cmd {
 func (m *Model) chatRequestMessages() []ai.Message {
 	var b strings.Builder
 	b.WriteString(m.cfg.AI.SystemPrompt)
+	if notice := m.modeNotice(); notice != "" {
+		// Plan mode is enforced by which tools exist, but the model still has to
+		// be told, or it will keep trying to edit and reporting failure.
+		b.WriteString("\n\n" + notice)
+	}
 	if len(m.chatMsgs) == 0 {
 		if t := m.cur(); t != nil && t.path != "" {
 			b.WriteString("\n\nCurrent file: " + t.path + "\n```")
@@ -497,22 +512,35 @@ type chatEditTrack struct {
 	label     string
 }
 
+// toolPark is one parked tool call waiting for a human decision, together with
+// the slot in the pending results whose placeholder gets replaced when the
+// decision is made. Parks are queued rather than handled one at a time inline
+// so a single round may park on several commands without losing any of them.
+type toolPark struct {
+	park      Park
+	resultIdx int
+}
+
 // handleChatToolsDone runs a batch of native tool calls after a stream ends.
 // Non-edit results are finalised immediately; EDIT proposals pause the loop
 // for a side-by-side diff review. It returns a tea.Cmd that continues the
-// conversation, or nil when waiting on human review.
+// conversation, or nil when waiting on human review or a parked decision.
 func (m *Model) handleChatToolsDone(content string, tools []ai.ToolCall) tea.Cmd {
 	before := snapshotFiles(m.root)
 	results := make([]ai.Message, 0, len(tools))
 	var pending []agent.Change
 	var tracks []chatEditTrack
+	var parks []toolPark
 	for _, tc := range tools {
-		res, chg := m.execChatTool(tc)
-		if chg != nil {
-			pending = append(pending, *chg)
-			tracks = append(tracks, chatEditTrack{resultIdx: len(results), label: shortenPath(m.baseDir(), chg.Path)})
+		res := m.execChatTool(tc)
+		if res.Change != nil {
+			pending = append(pending, *res.Change)
+			tracks = append(tracks, chatEditTrack{resultIdx: len(results), label: shortenPath(m.baseDir(), res.Change.Path)})
 		}
-		results = append(results, ai.Message{Role: "tool", ToolCallID: tc.ID, ToolName: tc.Name, Content: res})
+		if res.Park.Kind != ParkNone {
+			parks = append(parks, toolPark{park: res.Park, resultIdx: len(results)})
+		}
+		results = append(results, ai.Message{Role: "tool", ToolCallID: tc.ID, ToolName: tc.Name, Content: res.Text})
 	}
 
 	// Open every file the tools created or rewrote (e.g. by RUN) in tabs and
@@ -524,11 +552,10 @@ func (m *Model) handleChatToolsDone(content string, tools []ai.ToolCall) tea.Cmd
 	m.chatPendingResults = results
 	m.chatPendingChanges = pending
 	m.chatEditTracks = tracks
+	m.chatParks = parks
 	m.rebuildChatRows()
 
-	if confirm := m.pendingRunConfirm(); confirm != "" {
-		m.chatRunConfirm = confirm
-		m.msg = "RUN: " + confirm + "  (y run / n deny)"
+	if m.startNextPark() {
 		return nil
 	}
 	if len(pending) > 0 {
@@ -538,46 +565,85 @@ func (m *Model) handleChatToolsDone(content string, tools []ai.ToolCall) tea.Cmd
 	return m.finalizeChatTools()
 }
 
+// startNextPark activates the next parked tool call (if any) and puts the
+// decision in front of the user. It reports whether the loop is now parked.
+// This is the single place that suspends the tool loop, so every park kind
+// behaves the same way in the transcript, in the status line and in key
+// handling.
+func (m *Model) startNextPark() bool {
+	if len(m.chatParks) == 0 {
+		m.chatPark = nil
+		return false
+	}
+	p := m.chatParks[0]
+	m.chatParks = m.chatParks[1:]
+	m.chatPark = &p
+	switch p.park.Kind {
+	case ParkRunConfirm:
+		m.msg = "RUN: " + p.park.Text + "  (y run / n deny)"
+		return true
+	case ParkAskUser:
+		m.startAsk(p.park.Ask)
+		return true
+	case ParkSwitchMode:
+		m.msg = m.t("chat.switch_status")
+		return true
+	case ParkSubAgent:
+		// A delegation is already running in the background; the status line
+		// shows the wait and Esc cancels it.
+		m.msg = m.t("chat.subagent_status")
+		return true
+	default:
+		m.chatPark = nil
+		return false
+	}
+}
+
+// startAsk puts a question on screen: the chat is opened (a question the user
+// cannot see is a hang, not a decision), and the input is cleared so the answer
+// starts from nothing. The chosen suggestion defaults to the first one.
+func (m *Model) startAsk(req *ask.Request) {
+	m.askReq = req
+	m.askIn = nil
+	m.askSel = 0
+	m.chatOpen = true
+	m.chatFocus = true
+	m.msg = m.t("chat.ask_status")
+}
+
 // finishChatRunConfirm resolves a parked RUN confirmation: true executes the
 // held command via runCommand (capped output), false records a decline. The
-// marker placeholder in the pending results is replaced with the real outcome
-// so the model sees exactly what happened, then the tool loop continues.
+// placeholder in the pending results is replaced with the real outcome so the
+// model sees exactly what happened, then the loop continues (with the next
+// parked call, if any, or with the next turn).
 func (m *Model) finishChatRunConfirm(run bool) tea.Cmd {
-	cmd := m.chatRunConfirm
-	m.chatRunConfirm = ""
+	park := m.chatPark
+	m.chatPark = nil
+	if park == nil {
+		return m.finalizeChatTools()
+	}
+	cmd := park.park.Text
 	var out string
 	if run {
 		out = runCommand(m.root, cmd)
 	} else {
 		out = "[RUN not approved by user] " + cmd
 	}
-	for i, res := range m.chatPendingResults {
-		if strings.HasPrefix(res.Content, "\x00DMED_RUN_CONFIRM\x00") {
-			m.chatPendingResults[i].Content = out
-		}
-	}
+	resolveParkedResult(m.chatPendingResults, park.resultIdx, out)
 	m.msg = ""
 	m.rebuildChatRows()
+	if m.startNextPark() {
+		return nil
+	}
 	return m.finalizeChatTools()
 }
 
-// pendingRunConfirm scans the just-executed tool results and, if the model
-// issued a RUN while allow_run = ask, returns the held command (so the loop can
-// park for confirmation); otherwise it returns "".
-func (m *Model) pendingRunConfirm() string {
-	if !strings.EqualFold(m.cfg.AI.AllowRun, "ask") {
-		return ""
-	}
-	for _, res := range m.chatPendingResults {
-		if strings.HasPrefix(res.Content, "\x00DMED_RUN_CONFIRM\x00") {
-			cmd := res.Content[len("\x00DMED_RUN_CONFIRM\x00"):]
-			if i := strings.Index(cmd, "\x00"); i >= 0 {
-				cmd = cmd[:i]
-			}
-			return cmd
-		}
-	}
-	return ""
+// clearChatParks drops every parked decision and the active one. Used when the
+// conversation is reset or a new thread is loaded, so a stale park can never be
+// resumed into an unrelated conversation.
+func (m *Model) clearChatParks() {
+	m.chatPark = nil
+	m.chatParks = nil
 }
 
 // openTouchedFiles diffs on-disk snapshots taken before and after a tool round
@@ -618,6 +684,45 @@ func (m *Model) openTouchedFiles(before map[string]fileState, results []ai.Messa
 	}
 }
 
+// handleChatParkKey routes keys while the tool loop is parked. Every park kind
+// gets its own decision here, and keys the active decision does not understand
+// are ignored so a stray keystroke cannot approve anything.
+func (m *Model) handleChatParkKey(msg tea.KeyPressMsg) tea.Cmd {
+	park := m.chatPark
+	if park == nil {
+		return nil
+	}
+	switch park.park.Kind {
+	case ParkRunConfirm:
+		switch gitKeyName(msg) {
+		case "y", "enter":
+			return m.finishChatRunConfirm(true)
+		case "n", "esc", "r":
+			return m.finishChatRunConfirm(false)
+		}
+		return nil // ignore other keys while parked
+	case ParkAskUser:
+		return m.handleAskKey(msg)
+	case ParkSwitchMode:
+		switch gitKeyName(msg) {
+		case "y", "enter":
+			return m.finishChatSwitchMode(true)
+		case "n", "esc", "r":
+			return m.finishChatSwitchMode(false)
+		}
+		return nil
+	case ParkSubAgent:
+		// Nothing to answer: the loop resumes by itself when the task ends.
+		// Esc is the escape hatch, or the wait could last minutes.
+		if gitKeyName(msg) == "esc" {
+			m.cancelParkedSubAgent()
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
 // finalizeChatTools commits the pending assistant + tool-result messages into
 // the conversation and starts the next turn, capping the tool loop depth.
 func (m *Model) finalizeChatTools() tea.Cmd {
@@ -627,6 +732,7 @@ func (m *Model) finalizeChatTools() tea.Cmd {
 	m.chatPendingResults = nil
 	m.chatPendingChanges = nil
 	m.chatEditTracks = nil
+	m.clearChatParks()
 	m.chatToolRound++
 	m.saveChatThread()
 	m.rebuildChatRows()
@@ -904,6 +1010,14 @@ func (m *Model) rebuildChatRows() {
 			add("err", l)
 		}
 	}
+	if m.chatNotice != "" {
+		for _, l := range wrapRunes(m.chatNotice, inner) {
+			add("notice", l)
+		}
+		add("hint", "")
+	}
+	// The plan goes last so it stays visible without scrolling back.
+	m.todoBlock(add, inner)
 	if len(rows) == 0 {
 		add("hint", " AI works through presets: Ollama, OpenAI, DeepSeek,")
 		add("hint", " Groq, LM Studio, vLLM, Unsloth or any OpenAI-compatible server.")

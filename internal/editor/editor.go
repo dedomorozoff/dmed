@@ -16,6 +16,7 @@ import (
 
 	"dmed/internal/agent"
 	"dmed/internal/ai"
+	"dmed/internal/ask"
 	"dmed/internal/buffer"
 	"dmed/internal/config"
 	"dmed/internal/dap"
@@ -26,8 +27,10 @@ import (
 	"dmed/internal/ptyterm"
 	"dmed/internal/session"
 	"dmed/internal/syntax"
+	"dmed/internal/todo"
 	"dmed/internal/vcs"
 	"dmed/internal/watcher"
+	"dmed/internal/websearch"
 )
 
 type tab struct {
@@ -500,10 +503,40 @@ type Model struct {
 	chatReviewOffY  int
 	chatReviewOffX  int
 
-	// Pending RUN command awaiting explicit user confirmation (allow_run = ask).
-	// While non-nil the chat input is parked: the user types y to execute the
-	// held command, or n to decline. The result is fed back either way.
-	chatRunConfirm string
+	// Tool calls parked for an explicit user decision (today: a RUN command
+	// with allow_run = ask, or an ASK_USER question). While a park is active
+	// the chat input is parked too; the pending ones wait in chatParks so a
+	// single round that needs several approvals asks for them one by one.
+	chatPark  *toolPark
+	chatParks []toolPark
+
+	// The model's checklist and the questions it is waiting an answer for.
+	// Both live behind pointers because they are written from the chat tool
+	// goroutine while the render loop reads them.
+	todo *todo.List
+	asks *ask.Queue
+
+	// aiFallback is set when the session runs on a keyless public provider
+	// because nothing was configured and nothing local answered. chatNotice
+	// explains that in the chat, because prompts and code leave the machine.
+	aiFallback bool
+	chatNotice string
+	// aiFreeURLOverride redirects the keyless fallback to another host; only
+	// tests set it (the public service must never be contacted from a unit
+	// test). Empty means "use the preset".
+	aiFreeURLOverride string
+
+	// Web search: the client (built on first use) and how many queries this
+	// session has spent. webSearchOverride lets tests aim it at a local server.
+	web               *websearch.Client
+	webSearchUsed     int
+	webSearchOverride *websearch.Client
+
+	// The question currently on screen and the answer being typed into it.
+	// askSel indexes into askReq.Choices (-1 while there are none).
+	askReq *ask.Request
+	askIn  []rune
+	askSel int
 
 	// Inline AI request (Ctrl+I)
 	aiInlineOpen     bool
@@ -652,6 +685,8 @@ func New(paths ...string) Model {
 		bookmarks:             map[string]map[int]bool{},
 		chatThreadPos:         -1,
 		chatPromptIdx:         -1,
+		todo:                  todo.New(),
+		asks:                  ask.NewQueue(),
 	}
 	if w, err := watcher.New(func(p string) {
 		select {
@@ -1414,6 +1449,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.handleGhostOutput(msg)
 		return m, cmd
 	case AgentRefreshMsg:
+		// A delegation may have finished while the chat was parked on it; the
+		// queue update is what wakes the conversation back up.
+		m.pollSubAgentPark()
 		return m, waitForAgentRefresh(m.agentCh)
 	case gitTransferMsg:
 		if msg.err != "" {
@@ -1880,6 +1918,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.agentPrompt {
 		return m.handleAgentPrompt(msg)
+	}
+	// A question from ASK_USER grabs the input wherever focus happens to be:
+	// the model is waiting for an answer and any other key would be swallowed
+	// by whatever pane happens to be focused.
+	if m.askReq != nil {
+		return m.handleAskKey(msg)
 	}
 	if m.agentOpen && m.agentFocus {
 		return m.handleAgent(msg)

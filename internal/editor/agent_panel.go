@@ -105,6 +105,12 @@ func (m *Model) agentWorker() {
 			}
 			continue
 		}
+		if task.Kind == agent.KindSubagent {
+			// A delegated task runs its own tool loop; it must not go through
+			// the block-format prompt of a main agent task.
+			m.startSubAgent(task)
+			continue
+		}
 		m.agentRunner.Run(m.agentCtx, task, m.agentTargets())
 	}
 }
@@ -313,6 +319,11 @@ func (m Model) agentPanel(h int) []string {
 		sel := i == m.agentSel
 
 		label := m.agentStatusLabel(t.Status)
+		if t.Kind == agent.KindSubagent {
+			// Mark delegated work: the user must be able to tell at a glance
+			// which tasks the chat started on its own.
+			label += m.t("agent.sub_badge")
+		}
 		title := m.fitPath(t.Prompt, gitPanelWidth-10)
 		line := " " + label + " " + title
 

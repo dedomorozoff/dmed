@@ -59,6 +59,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "ai_chat", title: "cmd.ai_chat_t", desc: "cmd.ai_chat_d", action: func(m *Model) tea.Cmd { m.toggleChat(); return nil }},
 		{id: "ai_inline", title: "cmd.ai_inline_t", desc: "cmd.ai_inline_d", action: func(m *Model) tea.Cmd { m.startInlineRequest(); return nil }},
 		{id: "ai_settings", title: "cmd.ai_settings_t", desc: "cmd.ai_settings_d", action: func(m *Model) tea.Cmd { m.startAISettings(); return nil }},
+		{id: "ai_mode", title: "cmd.ai_mode_t", desc: "cmd.ai_mode_d", action: func(m *Model) tea.Cmd { m.toggleMode(); return nil }},
 		{id: "dap_settings", title: "cmd.dap_settings_t", desc: "cmd.dap_settings_d", action: func(m *Model) tea.Cmd { m.startDAPCfg(); return nil }},
 		{id: "agent_tasks", title: "cmd.agent_tasks_t", desc: "cmd.agent_tasks_d", action: func(m *Model) tea.Cmd { return m.openAgentPanel() }},
 		{id: "agent_new", title: "cmd.agent_new_t", desc: "cmd.agent_new_d", action: func(m *Model) tea.Cmd { return m.startAgentTaskPrompt() }},

@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"dmed/internal/config"
 	"dmed/internal/i18n"
 	"dmed/internal/lsp"
 	"dmed/internal/syntax"
@@ -256,6 +257,7 @@ func (m Model) contextBottomExtraRows() int {
 	case m.diffViewOpen,
 		m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0,
 		m.aiReviewMode, m.agentReviewMode, m.chatReviewMode, m.agentPrompt,
+		m.askReq != nil,
 		m.aiInlineOpen, m.aiInlineBusy, m.aiFixOpen, m.aiFixBusy,
 		m.aiFixReviewMode, m.conflictOpen, m.treeConfirm != "", m.quitConfirm,
 		m.aiCfgOpen, m.gitOpen, m.promptSave, m.promptOpen,
@@ -267,7 +269,7 @@ func (m Model) contextBottomExtraRows() int {
 }
 
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.contextBottomExtraRows() - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows()
+	h := m.height - 2 - m.contextBottomExtraRows() - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows() - m.askExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -287,6 +289,8 @@ func (m Model) contextBottomRow() string {
 		return m.chatReviewBottom()
 	} else if m.agentPrompt {
 		return m.agentPromptLine()
+	} else if m.askReq != nil {
+		return m.askLine()
 	} else if m.aiInlineOpen {
 		return m.aiInlinePrompt()
 	} else if m.aiInlineBusy {
@@ -399,6 +403,9 @@ func (m Model) View() tea.View {
 	}
 	if m.agentPrompt {
 		rows = append(rows, m.agentPromptInputRender()...)
+	}
+	if m.askReq != nil {
+		rows = append(rows, m.askOverlay()...)
 	}
 	if m.finderOpen {
 		rows = append(rows, m.withDivider(m.finderPanel())...)
@@ -1519,6 +1526,14 @@ func (m Model) chatPanel(h int) []string {
 		model = m.t("ai.no_model")
 	}
 	header := statusHiStyle.Render(fmt.Sprintf(" AI "+m.g.dotSep+" %s ", m.fitPath(model, w-6)))
+	if m.aiFallback {
+		// Never let the panel look local while the traffic is not: the model
+		// name alone ("openai") would be misleading.
+		header += statusHiStyle.Render(" " + m.t("chat.fallback_badge") + " ")
+	}
+	if m.cfg.AI.AgentMode() == config.ModePlan {
+		header += statusHiStyle.Render(" " + m.t("ai.mode_plan") + " ")
+	}
 	if m.chatBusy {
 		header += statusStyle.Render(m.t("ai.streaming"))
 	}
@@ -1568,6 +1583,14 @@ func (m Model) chatPanel(h int) []string {
 				st = chatToolLabelStyle
 			case "tool":
 				st = chatToolTextStyle
+			case "label-todo":
+				st = chatTodoLabelStyle
+			case "todo":
+				st = chatTodoTextStyle
+			case "todo-done":
+				st = chatTodoDoneStyle
+			case "notice":
+				st = chatNoticeStyle
 			case "err":
 				st = gitDelStyle
 			default:
