@@ -85,9 +85,12 @@ func (m *Model) syncProviderKind() {
 // suggestion and the user has not pinned one. URL is left untouched for Custom
 // so users with a self-hosted endpoint keep their value.
 //
-// It reloads the model list, because that is the whole point of the wizard: a
-// provider change without the list means the Model row is a guess.
-func (m *Model) cycleAIProvider(d int) tea.Cmd {
+// It does not probe the new endpoint itself: the pick paths report the change
+// to afterChoiceChange, which owns the model-list reload. Starting the probe
+// here would hand a tea.Cmd to a caller that cannot return it, and a command
+// bubbletea never sees is a probe that never runs — with running stuck true
+// and the Model list empty for the rest of the session.
+func (m *Model) cycleAIProvider(d int) {
 	presets := config.AIPresets()
 	cur := config.ResolvePreset(m.cfg.AI.Provider)
 	idx := 0
@@ -118,6 +121,12 @@ func (m *Model) cycleAIProvider(d int) tea.Cmd {
 	}
 	if p.Name != cur.Name { // switching providers invalidates a previous probe
 		m.aiCfgTest = aiTestState{}
+		// Any in-flight reply belongs to the endpoint we just left; bumping the
+		// generation marks it stale before it can repopulate the Model row.
+		m.aiCfgGen++
+		// The fresh probe about to start supersedes a reload parked on the old
+		// one, so a queued request must not fire a second probe later.
+		m.aiCfgNeedsReload = false
 		// Another server means another model list, so ask it instead of showing
 		// the previous provider's models.
 		m.aiCfgModels = nil
@@ -125,9 +134,7 @@ func (m *Model) cycleAIProvider(d int) tea.Cmd {
 		if config.ResolvePreset(cur.Name).Model == "" && m.cfg.AI.Model == p.Model {
 			m.cfg.AI.Model = ""
 		}
-		return m.testAIConnection()
 	}
-	return nil
 }
 
 // aiRunChoices is the order Allow Run cycles through. "ask" comes first because
@@ -467,7 +474,9 @@ func (m *Model) handleAITestResult(res AITestResultMsg) tea.Cmd {
 	// A reply from a superseded request must not overwrite the current state:
 	// the user may have changed provider or URL while the probe was in flight.
 	if res.Gen != m.aiCfgGen {
-		return nil
+		// The reply is dropped, but a reload parked on this probe still has to
+		// run — the endpoint it is waiting for may have changed in the meantime.
+		return m.reloadAfterResult()
 	}
 	status, ok := res.Status, res.OK
 	if !ok {
@@ -481,6 +490,8 @@ func (m *Model) handleAITestResult(res AITestResultMsg) tea.Cmd {
 			}
 		case strings.Contains(l, "401") || strings.Contains(l, "unauthorized") || strings.Contains(l, "invalid"):
 			status = "auth failed — check API Key"
+		case strings.Contains(l, "429") || strings.Contains(l, "too many requests") || strings.Contains(l, "queue full"):
+			status = "rate limited — the free tier allows one request at a time, wait a few seconds"
 		case strings.Contains(l, "no such host") || strings.Contains(l, "dial tcp") || strings.Contains(l, "timeout") || strings.Contains(l, "context deadline"):
 			status = "unreachable — check Base URL"
 		}

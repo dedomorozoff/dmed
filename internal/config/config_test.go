@@ -22,7 +22,12 @@ func TestDefaults(t *testing.T) {
 	if !cfg.Editor.LineNumbers {
 		t.Error("line_numbers should default to true")
 	}
-	if cfg.AI.OllamaURL != "http://localhost:11434" {
+	// The out-of-the-box provider is the keyless one; the Ollama URL default
+	// still exists for people who pick the local preset.
+	if cfg.AI.Provider != PollinationsPreset().Name {
+		t.Errorf("provider = %q, want the keyless default", cfg.AI.Provider)
+	}
+	if cfg.AI.OllamaURL != PollinationsPreset().BaseURL {
 		t.Errorf("ollama_url = %q", cfg.AI.OllamaURL)
 	}
 	if cfg.UI.TreeWidth != 25 {
@@ -272,6 +277,8 @@ func TestWriteAIRetainsMissingKeys(t *testing.T) {
 	}
 
 	ai := Defaults().AI
+	ai.Provider = "Ollama (local)"
+	ai.OllamaURL = DefaultOllamaURL
 	ai.Model = "llama3"
 	n, err := WriteAI(path, ai)
 	if err != nil {
@@ -282,7 +289,7 @@ func TestWriteAIRetainsMissingKeys(t *testing.T) {
 	}
 	data, _ := os.ReadFile(path)
 	out := string(data)
-	for _, want := range []string{"provider = ollama", "model = llama3", "ollama_url = http://localhost:11434", "context_max = 6000"} {
+	for _, want := range []string{"provider = Ollama (local)", "model = llama3", "ollama_url = http://localhost:11434", "context_max = 6000"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in output:\n%s", want, out)
 		}
@@ -483,9 +490,14 @@ func TestUnconfiguredGatesTheFreeFallback(t *testing.T) {
 		t.Error("a custom server must disable the fallback")
 	}
 	aim = Defaults().AI
-	aim.Provider = PollinationsPreset().Name
+	aim.Provider = "OpenAI"
 	if aim.Unconfigured() {
 		t.Error("explicitly choosing a provider is a decision too")
+	}
+	aim = Defaults().AI
+	aim.APIPath = "/v2"
+	if aim.Unconfigured() {
+		t.Error("a hand-tuned endpoint must disable the fallback")
 	}
 	if !Defaults().AI.FreeFallback {
 		t.Error("the fallback should be available out of the box")

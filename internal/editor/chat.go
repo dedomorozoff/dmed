@@ -138,19 +138,26 @@ func (m *Model) toggleChat() tea.Cmd {
 		// instead of after the user happens to open the agent panel.
 		m.ensureAgent()
 	}
-	m.ai = m.aiProvider(m.chatModel)
 	if m.chatOpen && m.chatModel == "" {
+		// Resolve the model before the provider is built: building first would
+		// cache a client with an empty model, and the next turn would send
+		// model: "" — Pollinations answers that with "Model not found".
 		m.pickChatModel()
 	}
+	m.ai = m.aiProvider(m.chatModel)
 	return nil
 }
 
 // pickChatModel resolves the model once: DMED_MODEL wins, otherwise the
-// first model reported by the server. A fresh install with no working provider
-// falls back to a keyless one (and says so) rather than showing a dead panel.
+// configured model, otherwise the first model reported by the server. A fresh
+// install with no working provider falls back to a keyless one (and says so)
+// rather than showing a dead panel. The cached provider is rebuilt whenever the
+// model changes, because a client built earlier (e.g. in toggleChat before the
+// model was known) would keep sending model: "" for every later turn.
 func (m *Model) pickChatModel() {
 	if m.cfg.AI.Model != "" {
 		m.chatModel = m.cfg.AI.Model
+		m.ai = m.aiProvider(m.chatModel)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

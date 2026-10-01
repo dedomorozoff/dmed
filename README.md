@@ -251,10 +251,10 @@ word_wrap = false           # wrap long lines to pane width (Alt+Z toggles)
 skipped_dirs = .git,node_modules,vendor
 
 [ai]
-provider = Ollama (local)   # wizard preset: Ollama (local) | Pollinations (free, no key) | OpenAI | DeepSeek | Groq | LM Studio (local) | vLLM (local) | Unsloth (local) | Custom
+provider = Pollinations (free, no key)   # default: no account needed; wizard presets: Ollama (local) | OpenAI | DeepSeek | Groq | LM Studio (local) | vLLM (local) | Unsloth (local) | Custom
                             # legacy values "ollama"/"openai" still work
 model =                      # empty = first model reported by the server
-ollama_url = http://localhost:11434   # base URL, no /v1 suffix (it is appended automatically)
+ollama_url = https://text.pollinations.ai   # base URL, no /v1 or /openai suffix (it is appended automatically)
 api_key =                    # for OpenAI-compatible providers that need one
 api_path =                   # endpoint prefix; /v1 by default, /openai for Pollinations (set by the wizard)
 models_path =                # model-list path; /v1/models by default, /models for Pollinations
@@ -368,13 +368,14 @@ Worth knowing before you file a bug.
   `tools_enabled` (whitelist) or `tools_disabled` (blacklist) in `[ai]` — the
   names also accept the common aliases (`read_file`, `grep`, `run_command`,
   `write_file`, `edit_file`).
-- **The keyless fallback sends your code to a public service.** On a fresh
-  install with no configured provider, a session that gets no answer from a local
-  model switches to Pollinations and says so in the chat, with a `CLOUD` badge in
-  the chat header. Set `free_fallback = false` to disable it, or pick any
-  provider in `Ctrl+P` → `AI: Preferences...` (that choice is never overridden).
-  The free tier is also rate-limited (roughly one request per 15s), so it is a
-  fallback, not a default.
+- **The default provider is a public service (Pollinations, no account
+  needed).** Prompts and code leave the machine out of the box; prefer everything
+  local by picking `Ollama (local)` in `Ctrl+P` → `AI: Preferences...`.
+  With nothing configured and no answer from the configured provider, a session
+  also falls back to the keyless provider and says so in the chat, with a `CLOUD`
+  badge in the chat header. Set `free_fallback = false` to disable the fallback
+  (the default provider itself is not affected). The free tier is rate-limited
+  (roughly one request per 15s).
 - **`web_search` is off by default.** It is the only tool that reaches outside
   the workspace; turn it on deliberately and watch the per-session budget.
 - **Accepted agent changes are committed to git but cannot be undone from the

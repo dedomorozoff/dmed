@@ -6,6 +6,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -117,6 +118,36 @@ func newHTTPClient() *http.Client {
 }
 
 // NewProvider creates a Provider based on the given config.
+// hostOf returns the host[:port] of a base URL, for the per-host request gate.
+// An unparsable URL yields the whole string, which only costs gate sharing.
+func hostOf(u string) string {
+	if parsed, err := url.Parse(u); err == nil && parsed.Host != "" {
+		return parsed.Host
+	}
+	return u
+}
+
+// normalizeProviderURL corrects the Pollinations domain mix-up: the advertised
+// https://pollinations.ai is the landing site, not the API — a POST there never
+// returns headers and the caller only sees the cryptic "timeout awaiting
+// response headers". The OpenAI-compatible endpoint lives on
+// text.pollinations.ai, so the bare domain is rewritten to it.
+func normalizeProviderURL(u string) string {
+	parsed, err := url.Parse(u)
+	if err != nil || parsed.Host == "" {
+		return u
+	}
+	switch parsed.Hostname() {
+	case "pollinations.ai", "www.pollinations.ai":
+		host := "text.pollinations.ai"
+		if p := parsed.Port(); p != "" {
+			host += ":" + p
+		}
+		parsed.Host = host
+	}
+	return parsed.String()
+}
+
 func NewProvider(cfg Config) Provider {
 	if cfg.URL == "" {
 		switch cfg.Type {
@@ -134,6 +165,9 @@ func NewProvider(cfg Config) Provider {
 	if cfg.Type == OpenAIProvider && strings.HasSuffix(cfg.URL, "/v1") {
 		cfg.URL = strings.TrimSuffix(cfg.URL, "/v1")
 	}
+	if cfg.Type == OpenAIProvider {
+		cfg.URL = normalizeProviderURL(cfg.URL)
+	}
 
 	httpClient := newHTTPClient()
 
@@ -149,6 +183,7 @@ func NewProvider(cfg Config) Provider {
 		}
 		return &openAIProvider{
 			url:        cfg.URL,
+			host:       hostOf(cfg.URL),
 			apiPath:    apiPath,
 			modelsPath: modelsPath,
 			model:      cfg.Model,

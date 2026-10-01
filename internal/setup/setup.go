@@ -25,7 +25,7 @@ func Run() error {
 	presets := config.AIPresets()
 	in := bufio.NewScanner(os.Stdin)
 
-	fmt.Println("dmed AI setup — pick a provider (Enter = Ollama, free & local):")
+	fmt.Println("dmed AI setup — pick a provider (Enter = Pollinations, free, no key):")
 	for i, p := range presets {
 		need := ""
 		switch {

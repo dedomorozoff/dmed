@@ -169,14 +169,17 @@ func (a AIConfig) AgentMode() Mode {
 }
 
 // Unconfigured reports whether the user never set anything up: no model, no key,
-// and the stock local Ollama defaults. It is the only case in which the editor
+// and every value still at its default. It is the only case in which the editor
 // may fall back to a keyless provider — hijacking a user who deliberately
 // pointed dmed at their own server would be worse than not helping.
 func (a AIConfig) Unconfigured() bool {
+	d := Defaults().AI
 	return strings.TrimSpace(a.Model) == "" &&
 		strings.TrimSpace(a.APIKey) == "" &&
-		ResolvePreset(a.Provider).Name == AIPresets()[0].Name &&
-		(strings.TrimSpace(a.OllamaURL) == "" || strings.TrimSpace(a.OllamaURL) == DefaultOllamaURL)
+		a.Provider == d.Provider &&
+		a.OllamaURL == d.OllamaURL &&
+		a.APIPath == d.APIPath &&
+		a.ModelsPath == d.ModelsPath
 }
 
 // UIConfig holds UI-related settings.
@@ -200,6 +203,10 @@ type PluginsConfig struct {
 
 // Defaults returns the default configuration.
 func Defaults() Config {
+	// Pollinations is the out-of-the-box provider: no account, no key, so a
+	// fresh install has a working AI before any configuration. Ollama stays
+	// one pick away in the wizard for people who prefer everything local.
+	free := PollinationsPreset()
 	return Config{
 		Editor: EditorConfig{
 			TabWidth:    4,
@@ -209,10 +216,12 @@ func Defaults() Config {
 			SkippedDirs: []string{".git", "node_modules"},
 		},
 		AI: AIConfig{
-			Provider:    "ollama",
-			Model:       "",
-			OllamaURL:   "http://localhost:11434",
-			ContextMax:  6000,
+			Provider:   free.Name,
+			Model:      "",
+			OllamaURL:  free.BaseURL,
+			APIPath:    free.APIPath,
+			ModelsPath: free.ModelsPath,
+			ContextMax: 6000,
 			Temperature: 0,
 			NumCtx:      0,
 			NumPredict:  0,
@@ -987,15 +996,15 @@ func PollinationsPreset() AIPreset {
 	}
 }
 
-// AIPresets lists the built-in providers in wizard cycle order. Ollama comes
-// first: it is free, local and needs no key, making it the best beginner path.
-// Pollinations follows as the keyless cloud option, so somebody with nothing
-// configured still has a working provider without creating an account. The last
-// entry is Custom — it keeps whatever URL/model the user already had.
+// AIPresets lists the built-in providers in wizard cycle order. Pollinations
+// comes first: it is the default out of the box and needs no account. Ollama
+// follows as the free local option for people who prefer nothing to leave the
+// machine. The last entry is Custom — it keeps whatever URL/model the user
+// already had.
 func AIPresets() []AIPreset {
 	return []AIPreset{
-		{Name: "Ollama (local)", Kind: "ollama", BaseURL: DefaultOllamaURL},
 		PollinationsPreset(),
+		{Name: "Ollama (local)", Kind: "ollama", BaseURL: DefaultOllamaURL},
 		{Name: "OpenAI", Kind: "openai", BaseURL: "https://api.openai.com", Model: "gpt-4o-mini", APIKey: true},
 		{Name: "DeepSeek", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-chat", APIKey: true},
 		{Name: "Groq", Kind: "openai", BaseURL: "https://api.groq.com", Model: "llama-3.3-70b-versatile", APIKey: true},
@@ -1007,13 +1016,18 @@ func AIPresets() []AIPreset {
 }
 
 // ResolvePreset returns the preset matching a stored provider label, falling
-// back to Ollama for unknown/empty values so a hand-edited config never leaves
-// the wizard stuck on a name it cannot cycle from.
+// back to the default provider for unknown/empty values so a hand-edited config
+// never leaves the wizard stuck on a name it cannot cycle from. Bare protocol
+// names from older configs ("ollama") map onto their display preset explicitly.
 func ResolvePreset(name string) AIPreset {
 	for _, p := range AIPresets() {
 		if strings.EqualFold(p.Name, name) {
 			return p
 		}
+	}
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "ollama":
+		return ResolvePreset("Ollama (local)")
 	}
 	return AIPresets()[0]
 }

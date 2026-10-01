@@ -41,6 +41,12 @@ func (m *Model) aiRequestOptions() ai.Options {
 // model overrides the configured model when non-empty (the chat auto-picks
 // the first model the server reports).
 func (m *Model) aiProvider(model string) ai.Provider {
+	if model == "" {
+		// A caller that has not resolved a model yet means "the configured
+		// one": an empty model in a request is a guaranteed "Model not found"
+		// on providers that require an explicit name (Pollinations 404s).
+		model = m.cfg.AI.Model
+	}
 	if m.aiFallback {
 		// The session is running on the keyless fallback (see
 		// tryFreeFallback): the user never configured anything and the
@@ -55,7 +61,11 @@ func (m *Model) aiProvider(model string) ai.Provider {
 		})
 		return m.ai
 	}
-	kind := ai.ProviderType(m.cfg.AI.Provider)
+	// The wire kind comes from the preset the label resolves to, not from the
+	// label itself: "Pollinations (free, no key)" is not a ProviderType, and
+	// any kind NewProvider does not recognise silently becomes an Ollama
+	// client — which is how a saved Pollinations setup kept dialing localhost.
+	kind := ai.ProviderType(m.currentProviderKind())
 	key := strings.Join([]string{
 		string(kind), m.cfg.AI.OllamaURL, model, m.cfg.AI.APIKey,
 		m.cfg.AI.APIPath, m.cfg.AI.ModelsPath, fmt.Sprint(m.aiFallback),

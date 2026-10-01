@@ -5,11 +5,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"dmed/internal/config"
 )
 
 // isolateHomeConfig points the user home dir at a temp dir so the tests run
@@ -48,6 +51,31 @@ func pickAISelect(t *testing.T, m *Model, field int, name string) tea.Cmd {
 	return nil
 }
 
+// TestAIProviderKindFollowsPreset pins the fix for the "saved Pollinations but
+// it still dialed Ollama" bug: the wire kind must come from the preset the
+// provider label resolves to. NewProvider treats any kind it does not recognise
+// as Ollama, so feeding it a display label silently built the wrong client —
+// chat, ghost text and agents all included.
+func TestAIProviderKindFollowsPreset(t *testing.T) {
+	isolateHomeConfig(t)
+	m := New()
+
+	m.cfg.AI.Provider = config.PollinationsPreset().Name
+	m.cfg.AI.OllamaURL = config.PollinationsPreset().BaseURL
+	m.cfg.AI.APIPath = "/openai"
+	m.cfg.AI.ModelsPath = "/models"
+	if got := reflect.TypeOf(m.aiProvider("openai-fast")).String(); got != "*ai.openAIProvider" {
+		t.Fatalf("the keyless preset must build the OpenAI-compatible client, got %s", got)
+	}
+
+	m.cfg.AI.Provider = "Ollama (local)"
+	m.cfg.AI.OllamaURL = config.DefaultOllamaURL
+	m.cfg.AI.APIPath, m.cfg.AI.ModelsPath = "", ""
+	if got := reflect.TypeOf(m.aiProvider("llama3.2")).String(); got != "*ai.ollamaProvider" {
+		t.Fatalf("the local preset must build the Ollama client, got %s", got)
+	}
+}
+
 // TestAISettingsProviderSelect covers the provider row as a list rather than an
 // arrow-cycler: nine presets and a fifty-entry model list cannot be walked one
 // arrow press at a time.
@@ -58,8 +86,13 @@ func TestAISettingsProviderSelect(t *testing.T) {
 	if !m.aiCfgOpen {
 		t.Fatal("wizard should open")
 	}
-	if m.cfg.AI.Provider != "Ollama (local)" {
-		t.Fatalf("prov in default = %q", m.cfg.AI.Provider)
+	if m.cfg.AI.Provider != "Pollinations (free, no key)" {
+		t.Fatalf("prov in default = %q, want the keyless preset", m.cfg.AI.Provider)
+	}
+	// The keyless default must carry its own endpoint prefix, or the probe
+	// would hit /v1 and report a 404 as "auth failed".
+	if m.cfg.AI.APIPath != "/openai" || m.cfg.AI.ModelsPath != "/models" {
+		t.Fatalf("api paths = %q / %q", m.cfg.AI.APIPath, m.cfg.AI.ModelsPath)
 	}
 
 	// Enter opens the list, with the current value highlighted.
@@ -68,12 +101,12 @@ func TestAISettingsProviderSelect(t *testing.T) {
 	if !m.aiCfgSelOpen {
 		t.Fatal("Enter on the Provider row must open the list")
 	}
-	if m.aiCfgSelItems[m.aiCfgSelIdx] != "Ollama (local)" {
+	if m.aiCfgSelItems[m.aiCfgSelIdx] != "Pollinations (free, no key)" {
 		t.Fatalf("the current value must be highlighted, got %q", m.aiCfgSelItems[m.aiCfgSelIdx])
 	}
 	// Arrows must not silently change the value while the list is open.
 	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyDown})
-	if m.cfg.AI.Provider != "Ollama (local)" {
+	if m.cfg.AI.Provider != "Pollinations (free, no key)" {
 		t.Fatalf("the value changed before a pick: %q", m.cfg.AI.Provider)
 	}
 	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyUp}) // no-op at the top
@@ -83,17 +116,17 @@ func TestAISettingsProviderSelect(t *testing.T) {
 	if m.aiCfgSelOpen {
 		t.Fatal("the list must close after a pick")
 	}
-	if m.cfg.AI.Provider != "Pollinations (free, no key)" {
-		t.Fatalf("after pick = %q, want the keyless preset", m.cfg.AI.Provider)
+	if m.cfg.AI.Provider != "Ollama (local)" {
+		t.Fatalf("after pick = %q, want the local preset", m.cfg.AI.Provider)
 	}
-	// The keyless preset must carry its own endpoint prefix, or the probe would
-	// hit /v1 and report a 404 as "auth failed".
-	if m.cfg.AI.APIPath != "/openai" || m.cfg.AI.ModelsPath != "/models" {
-		t.Fatalf("api paths = %q / %q", m.cfg.AI.APIPath, m.cfg.AI.ModelsPath)
+	// Switching away must clear the prefix, or Ollama would be probed at
+	// /openai/models and report a 404.
+	if m.cfg.AI.APIPath != "" || m.cfg.AI.ModelsPath != "" {
+		t.Fatalf("api paths = %q / %q, want them cleared", m.cfg.AI.APIPath, m.cfg.AI.ModelsPath)
 	}
 	// The open-wizard probe is still in flight here, so the reload for the new
-	// provider is queued rather than started; TestAISettingsReloadsAfterDeferredPick
-	// covers that path.
+	// provider is queued rather than started; the pick-during-probe test covers
+	// that path.
 	if !m.aiCfgNeedsReload && !m.aiCfgTest.running {
 		t.Fatal("a new provider must trigger a model reload")
 	}
@@ -320,6 +353,16 @@ func TestAISettingsTestRowConnectionProbe(t *testing.T) {
 	m.handleAITestResult(AITestResultMsg{OK: true, Status: "1 models", Gen: m.aiCfgGen,
 		Models: []string{"first-model"}})
 
+	// A 429 from the free tier must read as "wait a moment", not as raw JSON
+	// about queues and IP addresses.
+	m.handleAISettings(tea.KeyPressMsg{Code: 't'})
+	m.handleAITestResult(AITestResultMsg{OK: false,
+		Status: `openai 429 Too Many Requests: {"error":"Queue full for IP: 1 requests already queued (max: 1)"}`,
+		Gen:    m.aiCfgGen})
+	if !strings.Contains(m.aiCfgTest.status, "rate limited") {
+		t.Fatalf("429 must translate to a rate-limit hint, got %q", m.aiCfgTest.status)
+	}
+
 	m.aiCfgField = len(aiSettingsFields) - 1 // Test row
 	cmd := m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil || !m.aiCfgTest.running {
@@ -345,31 +388,83 @@ func TestAISettingsTestRowConnectionProbe(t *testing.T) {
 	}
 }
 
-// TestAISettingsReloadsAfterDeferredPick covers the race the probe flag exists
-// for: the user picks a new provider while a probe is in flight, so the reload
-// cannot start immediately and must run when the in-flight reply lands.
-func TestAISettingsReloadsAfterDeferredPick(t *testing.T) {
+// TestAISettingsPickDuringProbeCoversTheRace: the user picks a new provider
+// while a probe is in flight, so the in-flight reply belongs to the endpoint
+// just left and must not fill the list; a fresh probe answers with the new
+// provider's models.
+func TestAISettingsPickDuringProbeCoversTheRace(t *testing.T) {
 	isolateHomeConfig(t)
 	m := New()
 	m.startAISettings() // probe in flight
+	oldGen := m.aiCfgGen
 
 	pickAISelect(t, &m, 0, "Groq")
 	if m.cfg.AI.Provider != "Groq" {
 		t.Fatalf("the pick itself must apply immediately, got %q", m.cfg.AI.Provider)
 	}
-	if !m.aiCfgNeedsReload {
-		t.Fatal("a pick during a probe must remember that a reload is due")
+	if m.aiCfgGen == oldGen {
+		t.Fatal("the in-flight reply must be invalidated by a new generation")
+	}
+	if !m.aiCfgTest.running {
+		t.Fatal("a fresh probe must start for the new provider")
 	}
 
 	// The old reply lands; it belongs to the previous endpoint, so it is dropped.
-	gen := m.aiCfgGen
-	m.handleAITestResult(AITestResultMsg{OK: true, Status: "1 models", Gen: gen - 1,
+	m.handleAITestResult(AITestResultMsg{OK: true, Status: "1 models", Gen: oldGen,
 		Models: []string{"stale-model"}})
 	if len(m.aiCfgModels) != 0 {
 		t.Fatalf("a stale reply must not fill the list: %v", m.aiCfgModels)
 	}
 
-	// The current request answers, and the deferred reload starts right after.
+	// The fresh probe answers with the new provider's list.
+	m.handleAITestResult(AITestResultMsg{OK: true, Status: "1 models", Gen: m.aiCfgGen,
+		Models: []string{"groq-model"}})
+	if len(m.aiCfgModels) != 1 || m.aiCfgModels[0] != "groq-model" {
+		t.Fatalf("the fresh reply must fill the list, got %v", m.aiCfgModels)
+	}
+}
+
+// TestAISettingsPickAfterProbeFinishedStartsNewProbe pins the fix for the
+// wedged wizard: picking a provider used to start its probe from a caller that
+// discarded the returned tea.Cmd, so no reply ever arrived, running stayed true
+// and the Model list stayed empty no matter how long the user waited.
+func TestAISettingsPickAfterProbeFinishedStartsNewProbe(t *testing.T) {
+	isolateHomeConfig(t)
+	m := New()
+	m.startAISettings()
+	m.handleAITestResult(AITestResultMsg{OK: true, Status: "1 models", Gen: m.aiCfgGen,
+		Models: []string{"local-model"}})
+
+	cmd := pickAISelect(t, &m, 0, "Groq")
+	if cmd == nil {
+		t.Fatal("picking a provider after the open probe finished must start a new model probe")
+	}
+	if !m.aiCfgTest.running {
+		t.Fatal("the new probe should be in flight")
+	}
+	m.handleAITestResult(AITestResultMsg{OK: true, Status: "1 models", Gen: m.aiCfgGen,
+		Models: []string{"groq-model"}})
+	if len(m.aiCfgModels) != 1 || m.aiCfgModels[0] != "groq-model" {
+		t.Fatalf("model list = %v, want the new provider's", m.aiCfgModels)
+	}
+}
+
+// TestAISettingsReloadAfterDeferredProbe covers the queueing itself: a probe
+// asked for while another is in flight (re-picking the same provider changes
+// nothing, so nothing is invalidated) waits for the in-flight reply and runs
+// right after it.
+func TestAISettingsReloadAfterDeferredProbe(t *testing.T) {
+	isolateHomeConfig(t)
+	m := New()
+	m.startAISettings() // probe in flight
+	gen := m.aiCfgGen
+
+	pickAISelect(t, &m, 0, "Pollinations (free, no key)") // re-picking the same preset is a no-op
+	if !m.aiCfgNeedsReload {
+		t.Fatal("a probe asked for while another is in flight must be remembered")
+	}
+
+	// The in-flight request answers, and the deferred reload starts right after.
 	cmd := m.handleAITestResult(AITestResultMsg{OK: true, Status: "1 models", Gen: gen,
 		Models: []string{"groq-model"}})
 	if cmd == nil {
@@ -526,6 +621,9 @@ func TestAISettingsModelListSortedAndLoaded(t *testing.T) {
 	m := New()
 	m.cfg.AI.OllamaURL = srv.URL
 	m.cfg.AI.Provider = "Groq" // an OpenAI-compatible provider, so /v1/models
+	// Defaults carry the keyless provider's endpoint prefix; Groq is a /v1
+	// server, so the pick must have cleared it.
+	m.cfg.AI.APIPath, m.cfg.AI.ModelsPath = "", ""
 	cmd := m.testAIConnection()
 	if cmd == nil {
 		t.Fatal("probe must start")

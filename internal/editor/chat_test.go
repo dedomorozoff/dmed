@@ -3,6 +3,7 @@ package editor
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -11,6 +12,34 @@ import (
 	"dmed/internal/ai"
 	"dmed/internal/buffer"
 )
+
+// TestPickChatModelRebuildsTheCachedProvider pins the fix for the "Model not
+// found: " 404 from Pollinations: toggleChat used to build the cached provider
+// while the model was still unresolved, and later turns went out with
+// model: "" because nothing rebuilt the client after pickChatModel chose one.
+// aiProvider now substitutes the configured model for an unresolved one, and
+// pickChatModel rebuilds the client after the model changes.
+func TestPickChatModelRebuildsTheCachedProvider(t *testing.T) {
+	isolateHomeConfig(t)
+	m := New()
+	m.cfg.AI.Model = "openai-fast"
+
+	// The provider toggleChat builds before the model is known.
+	m.chatModel = ""
+	m.ai = m.aiProvider(m.chatModel)
+	if got := reflect.ValueOf(m.ai).Elem().FieldByName("model").String(); got != "openai-fast" {
+		t.Fatalf("an unresolved model must fall back to the configured one, got %q", got)
+	}
+
+	m.chatModel = ""
+	m.pickChatModel()
+	if m.chatModel != "openai-fast" {
+		t.Fatalf("chatModel = %q, want the configured model", m.chatModel)
+	}
+	if got := reflect.ValueOf(m.ai).Elem().FieldByName("model").String(); got != "openai-fast" {
+		t.Fatalf("after pick, the cached provider model = %q, want openai-fast", got)
+	}
+}
 
 func TestTrimChatHistoryCondensesOldToolDumps(t *testing.T) {
 	m := Model{}

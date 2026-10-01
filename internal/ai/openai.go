@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // openAIProvider talks to an OpenAI-compatible API (POST <apiPath>/chat/completions,
@@ -17,11 +18,44 @@ import (
 // not always mean "/v1": Pollinations serves the same JSON under /openai.
 type openAIProvider struct {
 	url        string
+	host       string // for the per-host request gate
 	apiPath    string // e.g. "/v1" or "/openai"
 	modelsPath string // e.g. "/v1/models" or "/models"
 	model      string
 	apiKey     string
 	http       *http.Client
+}
+
+// The keyless cloud tiers are strictly one-request-at-a-time per IP:
+// Pollinations answers a second concurrent request with a 429 ("Queue full for
+// IP"), and nothing in a single-user editor gains from pipelining chat, ghost
+// text and agents to the same host anyway. Requests to one host therefore
+// queue on a gate instead of failing; ctx cancellation (Esc) still cuts the
+// wait short.
+var (
+	hostGatesMu sync.Mutex
+	hostGates   = map[string]chan struct{}{}
+)
+
+func gateFor(host string) chan struct{} {
+	hostGatesMu.Lock()
+	defer hostGatesMu.Unlock()
+	g, ok := hostGates[host]
+	if !ok {
+		g = make(chan struct{}, 1)
+		hostGates[host] = g
+	}
+	return g
+}
+
+// acquireGate takes the host's single slot, or gives up when ctx ends first.
+func acquireGate(ctx context.Context, g chan struct{}) error {
+	select {
+	case g <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // modelList covers the three shapes a "list your models" endpoint comes in:
@@ -86,13 +120,16 @@ func firstNonEmpty(vals ...string) string {
 }
 
 func (p *openAIProvider) Models(ctx context.Context) ([]string, error) {
+	g := gateFor(p.host)
+	if err := acquireGate(ctx, g); err != nil {
+		return nil, err
+	}
+	defer func() { <-g }()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.url+p.modelsPath, nil)
 	if err != nil {
 		return nil, err
 	}
-	if p.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	}
+	p.setAuth(req)
 	resp, err := p.http.Do(req)
 	if err != nil {
 		return nil, err
@@ -113,6 +150,21 @@ func (p *openAIProvider) Models(ctx context.Context) ([]string, error) {
 // answer only has to be readable by a person choosing from it.
 const maxModelList = 1 << 20 // 1 MiB
 
+// guestBearer is sent when no API key is configured. Some keyless endpoints
+// (Pollinations) ignore the value but reject a request that carries no
+// Authorization header at all — answering it with an error instead of the
+// completion — so a placeholder always goes out. Servers that do not care
+// about the header simply ignore it.
+const guestBearer = "guest"
+
+func (p *openAIProvider) setAuth(r *http.Request) {
+	if p.apiKey != "" {
+		r.Header.Set("Authorization", "Bearer "+p.apiKey)
+		return
+	}
+	r.Header.Set("Authorization", "Bearer "+guestBearer)
+}
+
 func (p *openAIProvider) ChatStream(ctx context.Context, req Request, h Handler) error {
 	body := map[string]any{
 		"model":    p.model,
@@ -132,14 +184,17 @@ func (p *openAIProvider) ChatStream(ctx context.Context, req Request, h Handler)
 	if err != nil {
 		return err
 	}
+	g := gateFor(p.host)
+	if err := acquireGate(ctx, g); err != nil {
+		return err
+	}
+	defer func() { <-g }()
 	r, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url+p.apiPath+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
 	r.Header.Set("Content-Type", "application/json")
-	if p.apiKey != "" {
-		r.Header.Set("Authorization", "Bearer "+p.apiKey)
-	}
+	p.setAuth(r)
 	resp, err := p.http.Do(r)
 	if err != nil {
 		return err
