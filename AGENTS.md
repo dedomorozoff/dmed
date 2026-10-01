@@ -71,7 +71,14 @@ The code is split into focused internal packages:
   (AI chat), `ai_inline.go` (inline rewrite → diff review), `ghost.go`
   (Copilot-style ghost text), `agent_panel.go` (agent task queue UI),
   `git_panel.go`, `diffview.go`, `plugins.go`, `plugin_store.go`, `lsp.go`,
-  `ai_settings.go`, `transform.go`, `tools.go` (agent READ/SEARCH/RUN/EDIT),
+  `ai_settings.go`, `transform.go`, `tools.go` (agent tools: READ/SEARCH/
+  LIST_DIR/GLOB/RUN/REPLACE/EDIT), `tools_fs.go` (shared project walk plus the
+  LIST_DIR/GLOB tools), `tools_core.go` (`toolEnv`: the TUI-free tool bodies
+  shared by the chat and by background sub-agents), `tools_plan.go`
+  (TODO_* / ASK_USER / SWITCH_MODE tools and the question overlay),
+  `tools_web.go` (WEB_SEARCH plus the plan/act modes),
+  `tools_subagent.go` (SUB_AGENT: the tool, the tool surface a sub-agent gets,
+  and the park that waits for it),
   `dap.go` (DAP session lifecycle: async adapter start, launch/attach,
   breakpoints, continue/step, panel state), `dap_panel.go`
   (threads/stack/variables/console panel rendering).
@@ -81,12 +88,25 @@ The code is split into focused internal packages:
   `Change.Orig` still matches on-disk content (stale patches reject the whole
   series) and writes all-or-nothing with rollback; `commit.go` turns an
   approved, applied series into a single git commit. See `model.go` for the
-  `Task`/`Change`/`Status` lifecycle.
+  `Task`/`Change`/`Status` lifecycle. `subagent.go` adds a delegated task
+  (`Task.Kind = sub`, `Queue.EnqueueSub`): its own tool loop driven by a
+  `ToolExecutor` the editor supplies, reviewed through the very same panel and
+  Applier, so delegation cannot become a back door around review.
 - `internal/ai/` — LLM providers: `provider.go` interface, `ollama.go`
   (local), `openai.go` (OpenAI-compatible, SSE streaming). `[ai]` config.
+  `Config.APIPath`/`ModelsPath` exist because "OpenAI-compatible" does not mean
+  `/v1`: Pollinations serves the same protocol under `/openai` and lists models
+  at `/models`. Anything adding a provider preset must carry those paths into
+  both `NewProvider` and `WriteAI`, or the probe will 404 and be reported as a
+  connection failure.
 - `internal/config/` — INI `.dmed.conf` loader (`[editor]`, `[ai]`, `[agent]`,
   `[ui]`, `[plugins]`, `[debug]`); priority defaults < global < project < env
   vars; hot-reload on save; `WriteAI`/`WriteLang` merge helpers.
+  `WriteAI` deliberately does not write `tools_enabled`/`tools_disabled`: they
+  are a hand-curated list and the wizard must not clobber it.
+  `AIConfig.Unconfigured()` is the gate for the keyless fallback: only a
+  genuinely untouched configuration may reach for a public provider, never one
+  the user pointed at their own server.
 - `internal/dap/` — own DAP client (no external deps): Content-Length framed
   JSON-RPC 2.0 over any stream, stdio and reverse-connect (`--client-addr`)
   launchers, initialize/launch/configurationDone, breakpoints,
@@ -117,6 +137,17 @@ The code is split into focused internal packages:
 - `internal/bundled/` — built-in plugins shipped with the binary (emmet,
   snippets). `internal/i18n/` — en/ru strings. `internal/session/` —
   save/restore open files across restarts. `internal/syntax/` — highlighting.
+- `internal/todo/` — the model's checklist (thread-safe, no TUI): `Replace`
+  from TODO_WRITE, `Merge` from TODO_SET (ticks a known step instead of
+  appending a duplicate), `Render` is the single text both the model and the
+  chat panel show.
+- `internal/ask/` — questions the model asks the user: `Queue.Next` pushes,
+  `Answer`/`Cancel` resolve by id, so a round that asks twice keeps both.
+- `internal/websearch/` — the only component allowed to reach outside the
+  workspace: DuckDuckGo HTML endpoint, own timeouts, `Parse` is pure so the
+  fragile markup can be tested against a fixture. Opt-in (`web_search`), capped
+  per session (`web_search_budget`), and when the budget is spent the tool is
+  withdrawn from the model's list, not just rejected.
 - `main.go` — CLI entry only (`dmed [dir | files...]`, `-h`, `-v`).
 
 Conventions:
@@ -134,6 +165,27 @@ Conventions:
   `Change.Orig` against current content, then write atomically with rollback;
   an approved series becomes one git commit (`agent: <prompt first line>`).
   Do not bypass this for AI-produced edits.
+- Chat tools return one `ToolResult` (text + optional `Change` + optional
+  `Park`). Anything that needs a human decision *parks* the loop instead of
+  writing a marker into the transcript: the result carries a readable
+  placeholder and `resolveParkedResult` swaps in the real outcome once
+  answered. Parks queue (`chatPark` active, `chatParks` waiting), so one round
+  may need several approvals. A `ParkSubAgent` park is resolved by
+  `pollSubAgentPark` when the queue task ends — never block the tool loop on a
+  background task, it runs on the UI thread. Add new tool names to
+  `legacyToolName` so the aliases models reach for keep working.
+- Project walks (SEARCH/LIST_DIR/GLOB) go through `walkProject` +
+  `newProjectSkip` in `internal/editor/tools_fs.go`; never re-implement the
+  skip list. `globMayContain` prunes conservatively — a wrong prune hides a
+  file from the model, so it only returns false when the pattern provably
+  cannot match under that directory.
+- Plan mode is enforced by *absence of tools*, not by a runtime check:
+  `readOnlyToolDefs` removes RUN/EDIT/REPLACE/SWITCH_MODE from the request, so
+  there is nothing to call. Leaving plan mode needs the human (`SWITCH_MODE`
+  parks for y/n; the palette command is the human's other way in).
+- Test seams must stay on the model, never in package globals: `aiFreeURLOverride`
+  and `webSearchOverride` redirect the two network features to local servers so
+  no unit test ever reaches the internet.
 - DAP adapter sessions are async: the adapter is spawned in the background
   (`dapStartCmd`) and results are stamped with a session generation
   (`dapGen`). Stale events/disconnects from superseded sessions are dropped so
