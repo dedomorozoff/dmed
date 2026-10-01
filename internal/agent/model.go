@@ -30,11 +30,27 @@ type Change struct {
 	New  string // proposed content
 }
 
+// TaskKind distinguishes how a task is executed: the built-in agent (a single
+// prompt answered with file blocks) or a sub-agent delegated by the chat, which
+// runs its own tool loop. The queue stays a plain queue; the worker dispatches.
+type TaskKind string
+
+const (
+	// KindAgent is the default background task (M4).
+	KindAgent TaskKind = ""
+	// KindSubagent is a task the chat delegated with SUB_AGENT. It is reviewed
+	// exactly like any other agent task, so delegation cannot bypass the
+	// diff-review rule.
+	KindSubagent TaskKind = "sub"
+)
+
 // Task is a single background agent assignment.
 type Task struct {
 	ID       string
 	Prompt   string
+	Kind     TaskKind
 	Status   Status
+	Parent   string  // chat thread or tool call that delegated the task (KindSubagent)
 	Progress float32 // 0..1; >0 only while running/streaming
 	Changes  []Change
 	Error    string

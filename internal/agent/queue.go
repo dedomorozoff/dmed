@@ -51,6 +51,17 @@ func (q *Queue) publish(id string) {
 // Enqueue appends a new task in queued state and returns a copy of it.
 // The task ID is auto-generated.
 func (q *Queue) Enqueue(prompt string) Task {
+	return q.enqueue(prompt, KindAgent, "")
+}
+
+// EnqueueSub appends a delegated sub-agent task. It goes through the same queue
+// and the same review as a task the user started by hand, so a sub-agent cannot
+// obtain write access the user would not have given a main agent.
+func (q *Queue) EnqueueSub(prompt, parent string) Task {
+	return q.enqueue(prompt, KindSubagent, parent)
+}
+
+func (q *Queue) enqueue(prompt string, kind TaskKind, parent string) Task {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -59,6 +70,8 @@ func (q *Queue) Enqueue(prompt string) Task {
 	t := Task{
 		ID:      newID(q.order, now),
 		Prompt:  prompt,
+		Kind:    kind,
+		Parent:  parent,
 		Status:  StatusQueued,
 		Created: now,
 		Updated: now,

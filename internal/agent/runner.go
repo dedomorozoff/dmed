@@ -48,6 +48,11 @@ func NewRunner(prov ai.Provider, queue *Queue) *Runner {
 	}
 }
 
+// Provider returns the provider the runner was built with. Callers that need a
+// second loop over the same model (a delegated sub-agent) reuse it instead of
+// building a parallel provider, so both always talk to the same model.
+func (r *Runner) Provider() ai.Provider { return r.prov }
+
 // Cancel requests cancellation of a task. A task that is still queued is
 // marked cancelled immediately; a running task has its LLM call stopped
 // (state flips when the Run loop observes ctx cancellation).
