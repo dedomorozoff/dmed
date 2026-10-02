@@ -636,10 +636,10 @@ type Model struct {
 	termSelActive bool
 	termSelAnchor selPos
 	termSelEnd    selPos
-	dragChat      bool // motion events extend the chat selection
-	dragTerm      bool // motion events extend the terminal selection
-	termFocus     bool // the terminal panel owns keyboard input
-	hoverChatBtn chatButtonAction // chat panel button under the cursor
+	dragChat      bool             // motion events extend the chat selection
+	dragTerm      bool             // motion events extend the terminal selection
+	termFocus     bool             // the terminal panel owns keyboard input
+	hoverChatBtn  chatButtonAction // chat panel button under the cursor
 
 	// Double-click detection: last click position/time plus a validity flag so
 	// a third quick click starts a fresh pair instead of chaining.

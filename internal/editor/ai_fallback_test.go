@@ -101,11 +101,11 @@ func TestFreeFallbackRespectsConfiguration(t *testing.T) {
 	srv := pollinationsStub(t)
 
 	cases := map[string]func(*config.AIConfig){
-		"model chosen":  func(a *config.AIConfig) { a.Model = "llama3.2" },
-		"key set":       func(a *config.AIConfig) { a.APIKey = "sk-test" },
-		"custom server": func(a *config.AIConfig) { a.OllamaURL = "http://10.0.0.5:11434" },
+		"model chosen":    func(a *config.AIConfig) { a.Model = "llama3.2" },
+		"key set":         func(a *config.AIConfig) { a.APIKey = "sk-test" },
+		"custom server":   func(a *config.AIConfig) { a.OllamaURL = "http://10.0.0.5:11434" },
 		"provider chosen": func(a *config.AIConfig) { a.Provider = "OpenAI" },
-		"fallback off":  func(a *config.AIConfig) { a.FreeFallback = false },
+		"fallback off":    func(a *config.AIConfig) { a.FreeFallback = false },
 	}
 	for name, mutate := range cases {
 		m := New()
