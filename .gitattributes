@@ -1,0 +1,7 @@
+# Go sources must stay LF everywhere: gofmt treats CRLF as needing a rewrite,
+# which made `make fmt-check` fail on Windows runners that check the repo out
+# with CRLF (core.autocrlf).
+*.go text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+Makefile text eol=lf
