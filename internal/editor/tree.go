@@ -133,21 +133,13 @@ func (m *Model) buildTree() []treeEntry {
 	return rows
 }
 
-// treeEntryRows is the number of tree rows that fit in a panel of height h
-// before the key-hint lines.
+// treeEntryRows is the number of tree rows that fit in a panel of height h;
+// every row carries an entry next to the vertical button rail.
 func (m Model) treeEntryRows(h int) int {
 	if h <= 0 {
 		return 0
 	}
-	inner := m.cfg.UI.TreeWidth - 1
-	if inner < 1 {
-		inner = 1
-	}
-	er := h - len(m.treeHint(inner))
-	if er < 0 {
-		er = 0
-	}
-	return er
+	return h
 }
 
 func (m *Model) clampTreeScroll(h int) {

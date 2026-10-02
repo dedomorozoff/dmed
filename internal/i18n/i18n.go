@@ -206,7 +206,11 @@ var enCatalog = map[string]string{
 	"msg.no_definition":       "no definition found",
 
 	// Project tree bottom hint bar (wrapped to the panel width at render time)
-	"tree.hint": " n:new file N:new folder r:rename d:copy Del:delete t:trash Esc:focus editor ",
+	"tree.tip_new_file":     "new file · n",
+	"tree.tip_new_dir":      "new folder · N",
+	"tree.tip_rename":       "rename · r",
+	"tree.tip_duplicate":    "duplicate · d",
+	"tree.tip_delete":       "delete · Del",
 
 	// Diff bottom bar
 	"git.diff_hint":  " Space stage  c commit  a stage-all  r refresh  d full-diff  l log  Tab diff",
@@ -243,7 +247,11 @@ var enCatalog = map[string]string{
 	"ai.fix_cancelled":      "fix cancelled",
 	"ai.fix_empty":          "AI returned no changes",
 	"ai.fix_review_hint":    "  (y: accept, n: discard, \u2191\u2193 scroll)",
-	"chat.hint":             "Ctrl+U new thread / Ctrl+P/N / Ctrl+L clear / Ctrl+Y copy / Esc",
+	"chat.tip_new":         "new thread · Ctrl+U",
+	"chat.tip_copy":        "copy reply · Ctrl+Y",
+	"chat.tip_clear":       "clear history · Ctrl+L",
+	"chat.tip_close":       "close · Esc",
+	"term.unfocused":        "terminal paused — click it to type again",
 	"chat.thread":           "thread: %s",
 	"chat.thread_new":       "new chat thread",
 	"chat.cleared":          "AI history cleared",
@@ -302,6 +310,10 @@ var enCatalog = map[string]string{
 	"cmd.pane_focus_t": "View: Focus Other Pane", "cmd.pane_focus_d": "Ctrl+Alt+P — Switch pane",
 	"cmd.pane_close_t": "View: Close Current Pane", "cmd.pane_close_d": "Ctrl+Alt+W — Unsplit",
 	"cmd.tree_toggle_t": "View: Toggle Project Tree", "cmd.tree_toggle_d": "Ctrl+B — Sidebar tree",
+	"cmd.tree_rename_t": "Project: Rename", "cmd.tree_rename_d": "rename the selected file or folder",
+	"cmd.tree_duplicate_t": "Project: Duplicate", "cmd.tree_duplicate_d": "copy the selected file next to itself",
+	"cmd.tree_delete_t": "Project: Delete", "cmd.tree_delete_d": "delete the selected file or folder (with confirmation)",
+	"tree.no_selection": "select an entry in the project panel first",
 	"cmd.terminal_t": "View: Toggle Terminal", "cmd.terminal_d": "Alt+T — ConPTY/PTY shell panel at the bottom",
 	"cmd.debug_t": "Debug: Toggle Debug Panel", "cmd.debug_d": "Ctrl+Alt+D — DAP panel (Go/Delve by default), F5 run/pause, F4 breakpoint",
 	"msg.debug_panel_opened": "Debug panel (F5 run/pause, F4 breakpoint, F6/F7 step, Shift+F5 stop)",
@@ -537,7 +549,11 @@ var ruCatalog = map[string]string{
 	"msg.no_definition":       "определение не найдено",
 
 	// Project tree bottom hint bar (wrapped to the panel width at render time)
-	"tree.hint": " n:файл N:папка r:переимен d:копия Del:удалить t:корзина Esc:фокус на редактор ",
+	"tree.tip_new_file":     "новый файл · n",
+	"tree.tip_new_dir":      "новая папка · N",
+	"tree.tip_rename":       "переименовать · r",
+	"tree.tip_duplicate":    "копия · d",
+	"tree.tip_delete":       "удалить · Del",
 
 	// Diff bottom bar
 	"git.diff_hint":  " Space stage  c commit  a все  r refresh  d full-diff  l log  Tab diff",
@@ -574,7 +590,11 @@ var ruCatalog = map[string]string{
 	"ai.fix_cancelled":      "исправление отменено",
 	"ai.fix_empty":          "ИИ не вернул изменений",
 	"ai.fix_review_hint":    "  (Y/н: принять, N/т: отклонить, \u2191\u2193 прокрутка)",
-	"chat.hint":             "Ctrl+U новый поток / Ctrl+P/N / Ctrl+L очистить / Ctrl+Y копировать / Esc",
+	"chat.tip_new":         "новый поток · Ctrl+U",
+	"chat.tip_copy":        "копировать ответ · Ctrl+Y",
+	"chat.tip_clear":       "очистить историю · Ctrl+L",
+	"chat.tip_close":       "закрыть · Esc",
+	"term.unfocused":        "терминал на паузе — кликните по нему, чтобы вводить",
 	"chat.thread":           "поток: %s",
 	"chat.thread_new":       "новый поток чата",
 	"chat.cleared":          "история ИИ очищена",
@@ -634,6 +654,10 @@ var ruCatalog = map[string]string{
 	"cmd.pane_focus_t": "Вид: Фокус на другой панели", "cmd.pane_focus_d": "Ctrl+Alt+P — переключить панель",
 	"cmd.pane_close_t": "Вид: Закрыть текущую панель", "cmd.pane_close_d": "Ctrl+Alt+W — без сплита",
 	"cmd.tree_toggle_t": "Вид: Показать дерево проекта", "cmd.tree_toggle_d": "Ctrl+B — дерево в сайдбаре",
+	"cmd.tree_rename_t": "Проект: Переименовать", "cmd.tree_rename_d": "переименовать выбранный файл или папку",
+	"cmd.tree_duplicate_t": "Проект: Копия", "cmd.tree_duplicate_d": "скопировать выбранный файл рядом",
+	"cmd.tree_delete_t": "Проект: Удалить", "cmd.tree_delete_d": "удалить выбранный файл или папку (с подтверждением)",
+	"tree.no_selection": "сначала выберите запись в панели проекта",
 	"cmd.terminal_t": "Вид: Включить терминал", "cmd.terminal_d": "Alt+T — панель ConPTY/PTY снизу",
 	"cmd.debug_t": "Отладка: Панель отладки", "cmd.debug_d": "Ctrl+Alt+D — DAP-панель (по умолчанию Go/Delve), F5 запуск/пауза, F4 брейкпоинт",
 	"msg.debug_panel_opened": "Панель отладки (F5 запуск/пауза, F4 брейкпоинт, F6/F7 шаг, Shift+F5 стоп)",

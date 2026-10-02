@@ -627,6 +627,20 @@ type Model struct {
 	hoverIcon  statusAction // status-bar icon under the cursor (actNone if none)
 	hoverSplit statusAction // top-right split icon under the cursor
 
+	// Panel text selection: drag with the mouse over the chat transcript or
+	// (with Shift held) over the terminal output; on release the selected
+	// text lands in the system clipboard.
+	chatSelActive bool
+	chatSelAnchor selPos
+	chatSelEnd    selPos
+	termSelActive bool
+	termSelAnchor selPos
+	termSelEnd    selPos
+	dragChat      bool // motion events extend the chat selection
+	dragTerm      bool // motion events extend the terminal selection
+	termFocus     bool // the terminal panel owns keyboard input
+	hoverChatBtn chatButtonAction // chat panel button under the cursor
+
 	// Double-click detection: last click position/time plus a validity flag so
 	// a third quick click starts a fresh pair instead of chaining.
 	lastClickX     int
@@ -1503,7 +1517,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case tea.MouseReleaseMsg:
 		m.mouseDown = false
-		if m.termOpen && msg.Y >= m.termStartRow() && msg.Y < m.termStartRow()+m.termPanelHeight() {
+		switch {
+		case m.dragChat:
+			m.dragChat = false
+			m.copyToClipboard(m.chatSelectionText())
+		case m.dragTerm:
+			m.dragTerm = false
+			m.copyToClipboard(m.termSelectionText())
+		case m.termOpen && msg.Y >= m.termStartRow() && msg.Y < m.termStartRow()+m.termPanelHeight():
 			button := 0
 			if msg.Button == tea.MouseMiddle {
 				button = 1
@@ -1711,14 +1732,17 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// English equivalents used only for keybinding matching.
 	msg.Text = origText
 
-	// The PTY owns input while the panel is focused. Alt+T remains the local
-	// toggle; every other key (including Ctrl+C/Ctrl+Q) is forwarded verbatim.
+	// The PTY owns input while the panel is focused. Alt+T closes the panel
+	// from anywhere; clicking the editor or the chat rail takes focus back,
+	// so the editor and chat keep working while the terminal stays open.
 	if m.termOpen {
 		if s == "alt+t" {
 			m.termOpen = false
 			return nil
 		}
-		return m.handleTerm(msg)
+		if m.termFocus {
+			return m.handleTerm(msg)
+		}
 	}
 
 	// JetBrains-style double Shift opens the palette ("search everywhere").
@@ -2844,6 +2868,19 @@ func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
 	if !m.mouseDown {
 		return nil
 	}
+	if m.dragChat {
+		if row, col, ok := m.chatSelHit(msg.Y, msg.X); ok {
+			m.extendChatSelection(row, col)
+		}
+		return nil
+	}
+	if m.dragTerm {
+		row := msg.Y - m.termStartRow() - 1
+		if row >= 0 && row < len(m.termRows) {
+			m.extendTermSelection(row, msg.X)
+		}
+		return nil
+	}
 	y := msg.Y
 	x := msg.X
 
@@ -2867,11 +2904,22 @@ func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
 // events with no button pressed (requires MouseModeAllMotion).
 func (m *Model) updateStatusHover(msg tea.MouseMotionMsg) {
 	m.updateSplitHover(msg)
+	m.updateChatHover(msg)
 	if m.statusIconsVisible() && msg.Y == m.statusBarRow() {
 		m.hoverIcon = m.statusIconAt(msg.X)
 		return
 	}
 	m.hoverIcon = actNone
+}
+
+// updateChatHover tracks which chat panel button the cursor is over so the
+// hovered cell can highlight, mirroring the status-bar icon strip.
+func (m *Model) updateChatHover(msg tea.MouseMotionMsg) {
+	if m.chatOpen && msg.Y == m.chatButtonsRow() {
+		m.hoverChatBtn = m.chatButtonAt(msg.X)
+		return
+	}
+	m.hoverChatBtn = chatBtnNone
 }
 
 // toggleDebugPanel mirrors the Ctrl+Alt+D shortcut so the status-bar icon and

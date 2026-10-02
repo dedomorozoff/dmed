@@ -39,6 +39,9 @@ type glyphSet struct {
 	iconSplitH string // ▤ / H    tab-bar horizontal-split toggle
 	mask       string // • / *     obscured secret (API key fields)
 	iconTool   string // ⛏ / >     tool-call card marker in chat
+	btnNew     string // ✚ / +     chat: new-thread button
+	btnCopy    string // ⎘ / c     chat: copy-reply button
+	btnClear   string // ⌫ / d     chat: clear-history button
 }
 
 var unicodeGlyphs = glyphSet{
@@ -68,6 +71,9 @@ var unicodeGlyphs = glyphSet{
 	iconSplitH: "▤",
 	mask:       "•",
 	iconTool:   "⛏",
+	btnNew:     "✚",
+	btnCopy:    "⎘",
+	btnClear:   "⌫",
 }
 
 var asciiGlyphs = glyphSet{
@@ -97,6 +103,9 @@ var asciiGlyphs = glyphSet{
 	iconSplitH: "H",
 	mask:       "*",
 	iconTool:   ">",
+	btnNew:     "+",
+	btnCopy:    "c",
+	btnClear:   "d",
 }
 
 // ApplyTerminalCompat switches the render glyph set to ASCII when the running

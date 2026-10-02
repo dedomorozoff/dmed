@@ -152,6 +152,7 @@ func (m *Model) toggleTerminal() tea.Cmd {
 		return nil
 	}
 	m.termOpen = true
+	m.termFocus = true
 	m.msg = ""
 	return tea.Batch(waitForTermOutput(m.termCh), waitForTermExit(m.termExitCh))
 }
@@ -323,7 +324,7 @@ func terminalColor(c vt10x.Color, fg bool) (color.Color, bool) {
 	return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", r, g, b)), true
 }
 
-func renderTerminalRow(row terminalRow, width, cursorX int) string {
+func renderTerminalRow(row terminalRow, width, cursorX, selStart, selEnd int) string {
 	if width < 1 {
 		return ""
 	}
@@ -353,7 +354,7 @@ func renderTerminalRow(row terminalRow, width, cursorX int) string {
 		if c.Mode&16 != 0 {
 			style = style.Italic(true)
 		}
-		if i == cursorX {
+		if i == cursorX || (i >= selStart && i < selEnd) {
 			style = style.Reverse(true)
 		}
 		b.WriteString(style.Render(ch))

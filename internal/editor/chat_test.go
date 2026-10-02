@@ -437,13 +437,15 @@ func TestChatNewThreadClearsConversation(t *testing.T) {
 	}
 }
 
-// TestChatPanelShowsHintBar verifies the chat panel reserves a bottom line that
-// tells the user how to start a new thread and close the panel.
+// TestChatPanelShowsHintBar verifies the chat panel replaces the old key
+// hint line with the clickable icon button strip.
 func TestChatPanelShowsHintBar(t *testing.T) {
 	m := newChatModel()
 	m.toggleChat()
-	if !strings.Contains(m.View().Content, "Ctrl+U new thread") {
-		t.Fatalf("chat panel must render the key hint, got:\n%s", m.View().Content)
+	for _, glyph := range []string{m.g.btnNew, m.g.btnCopy, m.g.btnClear, m.g.cross} {
+		if !strings.Contains(m.View().Content, " "+glyph+" ") {
+			t.Fatalf("chat panel must render the %q button, got:\n%s", glyph, m.View().Content)
+		}
 	}
 }
 

@@ -83,6 +83,7 @@ var helpEntries = []helpEntry{
 	{"Alt+L", "help.agent"},
 	{"Ctrl+B / F9", "help.tree"},
 	{"↑↓/Enter/←→ in tree", "help.tree_nav"},
+	{"n / N / r / d / Del / t in tree", "help.tree_ops"},
 	{"Alt+←/→", "help.tab_switch"},
 	{"Alt+1..9", "help.tab_jump"},
 	{"Ctrl+\\ / F6", "help.split_vert"},
@@ -433,6 +434,8 @@ func (m Model) View() tea.View {
 	rows = m.overlayStatusTooltip(rows)
 	// The split-icon hover callout floats just under the tab bar.
 	rows = m.overlaySplitTooltip(rows)
+	// The chat button hover callout floats above the chat button strip.
+	rows = m.overlayChatTooltip(rows)
 	var v tea.View
 	v.SetContent(lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n")))
 	v.AltScreen = true
@@ -860,11 +863,10 @@ func (m Model) tabBar() string {
 
 func (m Model) treePanel(h int) []string {
 	inner := m.cfg.UI.TreeWidth - 1
-	hint := m.treeHint(inner)
-	if len(hint) > h {
-		hint = hint[:h]
+	entryRows := h
+	if entryRows < 0 {
+		entryRows = 0
 	}
-	entryRows := h - len(hint)
 	off := m.clampedTreeOffset(entryRows)
 	rows := make([]string, 0, h)
 	for row := 0; row < entryRows; row++ {
@@ -924,62 +926,11 @@ func (m Model) treePanel(h int) []string {
 		} else {
 			cell = strings.Repeat(" ", inner)
 		}
-		rows = append(rows, cell+" ")
-	}
-	for _, line := range hint {
-		fill := inner - lipgloss.Width(line)
-		if fill < 0 {
-			fill = 0
-		}
-		rows = append(rows, hintStyle.Render(line+strings.Repeat(" ", fill))+" ")
-	}
-	return rows
+	rows = append(rows, cell+" ")
+}
+return rows
 }
 
-// treeHint wraps the project-panel key hint to the panel width. It is always
-// rendered (even when the tree is visible but unfocused) so the file
-// operations are discoverable.
-func (m Model) treeHint(inner int) []string {
-	if inner < 8 {
-		return []string{m.t("tree.hint")[:maxInt(1, inner)]}
-	}
-	return wrapHint(m.t("tree.hint"), inner)
-}
-
-// wrapHint wraps words from s to at most w runes per line.
-func wrapHint(s string, w int) []string {
-	var lines []string
-	var cur []rune
-	for _, word := range strings.Fields(s) {
-		ww := []rune(word)
-		add := len(cur) > 0
-		if add {
-			add = len(cur)+1+len(ww) <= w
-		} else if len(ww) > w {
-			ww = ww[:w]
-		}
-		if add {
-			cur = append(cur, ' ')
-			cur = append(cur, ww...)
-		} else {
-			if len(cur) > 0 {
-				lines = append(lines, string(cur))
-			}
-			cur = append([]rune{}, ww...)
-		}
-		if len(cur) == w {
-			lines = append(lines, string(cur))
-			cur = nil
-		}
-	}
-	if len(cur) > 0 {
-		lines = append(lines, string(cur))
-	}
-	if len(lines) == 0 {
-		lines = []string{""}
-	}
-	return lines
-}
 
 func maxInt(a, b int) int {
 	if a > b {
@@ -1518,7 +1469,13 @@ func (m Model) terminalPanel() []string {
 		if m.termCursorOK && m.termCursorY == y {
 			cursorX = m.termCursorX
 		}
-		rows = append(rows, renderTerminalRow(row, w, cursorX))
+		selStart, selEnd := -1, -1
+		if m.termSelActive {
+			if s, e, ok := m.termSelRange(y, len(row.cells)); ok {
+				selStart, selEnd = s, e
+			}
+		}
+		rows = append(rows, renderTerminalRow(row, w, cursorX, selStart, selEnd))
 	}
 	return rows
 }
@@ -1557,25 +1514,32 @@ func (m Model) chatPanel(h int) []string {
 	}
 	rows = append(rows, header)
 
-	inputH := m.chatInputHeight()
-	bodyH := h - 1 - inputH // header + multi-line input
-	showHint := h >= 5
-	if showHint {
-		bodyH = h - 2 - inputH // also reserve room for the hint bar
-	}
-	if bodyH < 1 {
-		bodyH = 1
-	}
+	showButtons := h >= 5
 	total := len(m.chatRows)
-	start := total - bodyH + m.chatScroll
-	if start > total-bodyH {
-		start = total - bodyH
+	start, bodyH := m.chatBodyRange(total)
+	// Scrollbar: a one-column track on the right edge of the body with a
+	// thumb showing where the visible window sits inside the transcript.
+	maxTop := total - bodyH
+	sbOn := maxTop > 0
+	thumbH, thumbTop := 0, 0
+	if sbOn {
+		thumbH = bodyH * bodyH / total
+		if thumbH < 1 {
+			thumbH = 1
+		}
+		thumbTop = start * (bodyH - thumbH) / maxTop
 	}
-	if start < 0 {
-		start = 0
+	sbCell := func(rel int) string {
+		if !sbOn {
+			return " "
+		}
+		if rel >= thumbTop && rel < thumbTop+thumbH {
+			return chatScrollThumbStyle.Render(m.g.progFull)
+		}
+		return hintStyle.Render(m.g.vline)
 	}
 	for i := start; i < start+bodyH; i++ {
-		cell := strings.Repeat(" ", w)
+		body := strings.Repeat(" ", w-1)
 		if i >= 0 && i < total {
 			var st lipgloss.Style
 			switch m.chatRows[i].kind {
@@ -1587,6 +1551,12 @@ func (m Model) chatPanel(h int) []string {
 				st = chatAILabelStyle
 			case "ai":
 				st = chatAITextStyle
+			case "ai-code":
+				st = chatMDCodeStyle
+			case "ai-head":
+				st = chatMDHeadStyle
+			case "ai-quote":
+				st = chatMDQuoteStyle
 			case "label-tool":
 				st = chatToolLabelStyle
 			case "tool":
@@ -1604,23 +1574,48 @@ func (m Model) chatPanel(h int) []string {
 			default:
 				st = hintStyle
 			}
-			line := st.Render(m.chatRows[i].text)
-			cell = line + strings.Repeat(" ", maxInt(0, w-lipgloss.Width(line)))
+			var line string
+			if rich := m.chatRows[i].rich; len(rich) > 0 {
+				for _, seg := range rich {
+					line += seg.style.Render(seg.text)
+				}
+			} else {
+				line = st.Render(m.chatRows[i].text)
+			}
+			if m.chatSelActive && m.chatRows[i].kind != "user" {
+				// A selected row renders as plain text with the covered range
+				// highlighted; styled segments give way for the duration.
+				// User rows handle their own highlight inside the bubble.
+				plain := []rune(chatRowPlain(m.chatRows[i]))
+				if c0, c1, ok := m.chatSelRange(i, len(plain)); ok {
+					line = st.Render(string(plain[:c0])) +
+						chatSelStyle.Render(string(plain[c0:c1])) +
+						st.Render(string(plain[c1:]))
+				}
+			}
+			if m.chatRows[i].kind == "user" {
+				// Chat look: user messages sit in a right-aligned bubble; the
+				// selection highlights inside the bubble, keeping alignment.
+				bubbleRunes := []rune(" " + strings.TrimSpace(m.chatRows[i].text) + " ")
+				bubble := chatUserBubbleStyle.Render(string(bubbleRunes))
+				if m.chatSelActive {
+					if c0, c1, ok := m.chatSelRange(i, len(bubbleRunes)); ok {
+						bubble = chatUserBubbleStyle.Render(string(bubbleRunes[:c0])) +
+							chatSelStyle.Render(string(bubbleRunes[c0:c1])) +
+							chatUserBubbleStyle.Render(string(bubbleRunes[c1:]))
+					}
+				}
+				body = strings.Repeat(" ", maxInt(0, w-1-len(bubbleRunes))) + bubble
+			} else {
+				body = strings.Repeat(" ", chatBodyPad) + line +
+					strings.Repeat(" ", maxInt(0, w-1-chatBodyPad-lipgloss.Width(line)))
+			}
 		}
-		rows = append(rows, cell)
+		rows = append(rows, body+sbCell(i-start))
 	}
 
-	if showHint {
-		hintText := m.t("chat.hint")
-		r := []rune(hintText)
-		if len(r) > w {
-			hintText = string(r[:w])
-		}
-		hint := statusStyle.Render(hintText)
-		if fill := w - lipgloss.Width(hint); fill > 0 {
-			hint += statusStyle.Render(strings.Repeat(" ", fill))
-		}
-		rows = append(rows, hint)
+	if showButtons {
+		rows = append(rows, m.chatButtonsString())
 	}
 
 	inputTextW := w - 4 // " ❯ " (3) + cursor (1)

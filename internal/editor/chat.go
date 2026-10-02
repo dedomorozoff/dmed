@@ -43,11 +43,16 @@ var (
 	chatTodoTextStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 	chatTodoDoneStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
 	chatNoticeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("179"))
+	chatUserBubbleStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("236"))
+	chatScrollThumbStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("61"))
+	chatBtnStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("240"))
+	chatSelStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("61"))
 )
 
 type chatRow struct {
-	kind string // "label-you" | "user" | "label-ai" | "ai" | "tool" | "label-todo" | "todo" | "todo-done" | "notice" | "hint" | "err"
+	kind string // "label-you" | "user" | "label-ai" | "ai" | "ai-code" | "ai-head" | "ai-quote" | "tool" | "label-todo" | "todo" | "todo-done" | "notice" | "hint" | "err"
 	text string
+	rich []mdSeg
 }
 
 type chatEvent struct {
@@ -195,21 +200,13 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 		if m.chatBusy {
 			return m.chatStop()
 		}
-		m.chatOpen = false
-		m.chatFocus = false
-		m.chatReviewMode = false
-		m.chatClearArm = false
-		m.msg = ""
+		m.closeChat()
 	case "ctrl+q", "ctrl+c":
 		// Ctrl+C stops a running stream; if idle it closes the chat.
 		if m.chatBusy {
 			return m.chatStop()
 		}
-		m.chatOpen = false
-		m.chatFocus = false
-		m.chatReviewMode = false
-		m.chatClearArm = false
-		m.msg = ""
+		m.closeChat()
 	case "enter":
 		return m.chatSubmit()
 	case "backspace":
@@ -229,10 +226,7 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+n": // newer thread (from the newest one: a new thread)
 		m.switchChatThread(-1)
 	case "ctrl+u": // start a new conversation thread
-		m.saveChatThread()
-		m.chatThreadPos = -1
-		m.chatClearArm = false
-		m.resetChatConversation()
+		m.newChatThread()
 	case "ctrl+l": // clear all chat history (press twice to confirm)
 		m.armChatClear()
 	case "ctrl+y": // copy the last error / AI reply to the system clipboard
@@ -251,6 +245,209 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
+// closeChat hides the rail; shared by Esc, Ctrl+C/Ctrl+Q and the close button.
+func (m *Model) closeChat() {
+	m.chatOpen = false
+	m.chatFocus = false
+	m.chatReviewMode = false
+	m.chatClearArm = false
+	m.msg = ""
+}
+
+// newChatThread starts a fresh conversation, saving the current one; shared
+// by Ctrl+U and the new-thread button.
+func (m *Model) newChatThread() {
+	m.saveChatThread()
+	m.chatThreadPos = -1
+	m.chatClearArm = false
+	m.resetChatConversation()
+}
+
+// ---- Chat action buttons ---------------------------------------------------
+
+// The hint bar under the transcript is a row of pseudo-buttons in the same
+// clickable-cell style as the status-bar icon strip: each renders as
+// " label ", highlights on hover and reacts to a mouse click.
+
+type chatButtonAction int
+
+const (
+	chatBtnNone chatButtonAction = iota
+	chatBtnNew
+	chatBtnCopy
+	chatBtnClear
+	chatBtnClose
+)
+
+var chatButtons = []struct {
+	act chatButtonAction
+	tip string // i18n key for the hover callout
+}{
+	{chatBtnNew, "chat.tip_new"},
+	{chatBtnCopy, "chat.tip_copy"},
+	{chatBtnClear, "chat.tip_clear"},
+	{chatBtnClose, "chat.tip_close"},
+}
+
+type chatBtnCell struct {
+	act   chatButtonAction
+	start int // column inside the panel
+	w     int
+}
+
+// chatButtonCells lays the buttons out right to left so the strip hugs the
+// right edge of the panel, one column clear of the border; buttons that
+// would not fit are dropped, narrow rails keep the rightmost ones.
+func (m Model) chatButtonCells() []chatBtnCell {
+	w := m.chatPanelWidth()
+	cells := make([]chatBtnCell, 0, len(chatButtons))
+	pos := w - 1
+	for i := len(chatButtons) - 1; i >= 0; i-- {
+		b := chatButtons[i]
+		cw := lipgloss.Width(" " + m.chatButtonGlyph(b.act) + " ")
+		if pos-cw < chatBodyPad {
+			break
+		}
+		cells = append(cells, chatBtnCell{b.act, pos - cw, cw})
+		pos -= cw
+	}
+	for i, j := 0, len(cells)-1; i < j; i, j = i+1, j-1 {
+		cells[i], cells[j] = cells[j], cells[i]
+	}
+	return cells
+}
+
+// chatButtonGlyph returns the icon cell content for a chat button.
+func (m Model) chatButtonGlyph(a chatButtonAction) string {
+	switch a {
+	case chatBtnNew:
+		return m.g.btnNew
+	case chatBtnCopy:
+		return m.g.btnCopy
+	case chatBtnClear:
+		return m.g.btnClear
+	case chatBtnClose:
+		return m.g.cross
+	}
+	return "?"
+}
+
+// chatTip returns the hover callout text (label + shortcut) for a button.
+func (m Model) chatTip(a chatButtonAction) string {
+	for _, b := range chatButtons {
+		if b.act == a {
+			return m.t(b.tip)
+		}
+	}
+	return ""
+}
+
+// chatButtonsRow returns the screen row the button strip occupies, or -1 when
+// the panel is too short to show it. The panel starts at screen row 1 (under
+// the tab bar), so its strip sits one row lower than the panel-local index.
+func (m Model) chatButtonsRow() int {
+	h := m.viewHeight()
+	if h < 5 {
+		return -1
+	}
+	return h - m.chatInputHeight()
+}
+
+// chatButtonAt maps a screen column on the button row to an action.
+func (m Model) chatButtonAt(x int) chatButtonAction {
+	local := x - (m.width - m.rightRailWidth())
+	for _, c := range m.chatButtonCells() {
+		if local >= c.start && local < c.start+c.w {
+			return c.act
+		}
+	}
+	return chatBtnNone
+}
+
+// activateChatButton runs the action behind a clicked chat button.
+func (m *Model) activateChatButton(a chatButtonAction) tea.Cmd {
+	if m.chatPark != nil {
+		return nil // a parked decision owns the input; keys and buttons wait
+	}
+	switch a {
+	case chatBtnNew:
+		m.newChatThread()
+	case chatBtnCopy:
+		m.copyChatLast()
+	case chatBtnClear:
+		m.armChatClear()
+	case chatBtnClose:
+		m.closeChat()
+	}
+	return nil
+}
+
+// chatButtonsString renders the button strip as one row of raised icon
+// cells right-aligned over an unstyled background so the strip does not
+// blend into the input line below it.
+func (m Model) chatButtonsString() string {
+	w := m.chatPanelWidth()
+	var b strings.Builder
+	pos := 0
+	for _, c := range m.chatButtonCells() {
+		b.WriteString(strings.Repeat(" ", c.start-pos))
+		pos = c.start
+		st := chatBtnStyle
+		if m.hoverChatBtn == c.act {
+			st = statusHiStyle
+		}
+		b.WriteString(st.Render(" " + m.chatButtonGlyph(c.act) + " "))
+		pos += c.w
+	}
+	b.WriteString(strings.Repeat(" ", maxInt(0, w-pos)))
+	return b.String()
+}
+
+// overlayChatTooltip draws a one-row floating callout directly above the chat
+// button strip, anchored to the hovered button: label plus key combination,
+// mirroring overlayStatusTooltip. The rail is only composed in the plain
+// editor mode, so the overlay must not fire in full-screen modes.
+func (m Model) overlayChatTooltip(rows []string) []string {
+	if m.hoverChatBtn == chatBtnNone || !m.chatOpen {
+		return rows
+	}
+	switch {
+	case m.diffViewOpen, m.aiReviewMode, m.aiFixReviewMode, m.agentReviewMode,
+		m.chatReviewMode, m.conflictOpen, m.aiCfgOpen, m.dapCfgOpen, m.helpOpen:
+		return rows
+	}
+	row := m.chatButtonsRow() - 1
+	if row < 1 || row >= len(rows) {
+		return rows
+	}
+	tip := m.chatTip(m.hoverChatBtn)
+	if tip == "" {
+		return rows
+	}
+	text := statusHiStyle.Render(" " + tip + " ")
+	w := lipgloss.Width(text)
+	x := -1
+	for _, c := range m.chatButtonCells() {
+		if c.act == m.hoverChatBtn {
+			x = m.width - m.rightRailWidth() + c.start
+		}
+	}
+	if x < 0 {
+		return rows
+	}
+	if x+w > m.width {
+		x = m.width - w
+	}
+	if x < 0 {
+		x = 0
+	}
+	fill := m.width - x - w
+	if fill < 0 {
+		fill = 0
+	}
+	rows[row] = strings.Repeat(" ", x) + text + strings.Repeat(" ", fill)
+	return rows
+}
 // copyChatLast puts the most useful chunk of the transcript into the system
 // clipboard: the last error if there is one, otherwise the last assistant
 // reply. It is the way to grab AI output (error text included) since the
@@ -364,6 +561,12 @@ func (m *Model) chatStop() tea.Cmd {
 // native tool definitions. When the stream finishes, tool calls (if any) are
 // delivered together with the Done marker on the channel.
 func (m *Model) startChatTurn() tea.Cmd {
+	if m.ai == nil {
+		// The settings wizard nils the cached provider whenever the [ai]
+		// config changes; the next turn must rebuild it here, or the stream
+		// goroutine below dies on a nil interface call.
+		m.ai = m.aiProvider(m.chatModel)
+	}
 	msgs := m.chatRequestMessages()
 	if m.chatCancel != nil {
 		m.chatCancel()
@@ -973,6 +1176,29 @@ func (m *Model) clampChatScroll() {
 	}
 }
 
+// chatBodyRange returns the first visible chatRows index and the body height;
+// shared by the panel renderer, scroll clamping and selection hit-testing so
+// all three agree on the geometry.
+func (m Model) chatBodyRange(total int) (start, bodyH int) {
+	h := m.viewHeight()
+	inputH := m.chatInputHeight()
+	bodyH = h - 1 - inputH // header + multi-line input
+	if h >= 5 {
+		bodyH = h - 2 - inputH // also reserve room for the button strip
+	}
+	if bodyH < 1 {
+		bodyH = 1
+	}
+	start = total - bodyH + m.chatScroll
+	if start > total-bodyH {
+		start = total - bodyH
+	}
+	if start < 0 {
+		start = 0
+	}
+	return start, bodyH
+}
+
 func (m *Model) rebuildChatRows() {
 	inner := m.chatInnerWidth()
 	rows := make([]chatRow, 0, 64)
@@ -995,14 +1221,14 @@ func (m *Model) rebuildChatRows() {
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {
 				if msg.Content != "" {
-					addText(" ai", "label-ai", "ai", msg.Content)
+					m.addAIRows(&rows, msg.Content)
 				}
 				for _, tc := range msg.ToolCalls {
 					add("label-tool", " "+m.g.iconTool+" "+tc.Name+" "+toolArgSummary(tc))
 				}
 				add("hint", "")
 			} else {
-				addText(" ai", "label-ai", "ai", msg.Content)
+				m.addAIRows(&rows, msg.Content)
 			}
 		}
 	}
@@ -1010,7 +1236,7 @@ func (m *Model) rebuildChatRows() {
 		add("hint", " thinking...")
 	}
 	if m.chatReply != "" {
-		addText(" ai", "label-ai", "ai", m.chatReply)
+		m.addAIRows(&rows, m.chatReply)
 	}
 	if m.chatErr != "" {
 		for _, l := range wrapRunes("[error] "+m.chatErr, inner) {
