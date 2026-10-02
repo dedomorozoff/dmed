@@ -161,9 +161,6 @@ func TestViewRendersTreePanel(t *testing.T) {
 	if !strings.Contains(v.Content, "▸ sub") || !strings.Contains(v.Content, "b.txt") {
 		t.Fatalf("sidebar must render entries, got:\n%s", v.Content)
 	}
-	if !strings.Contains(v.Content, "n:new file") {
-		t.Fatalf("sidebar must render the key hint bar, got:\n%s", v.Content)
-	}
 }
 
 func TestTreeScrollKeepsSelectionVisible(t *testing.T) {

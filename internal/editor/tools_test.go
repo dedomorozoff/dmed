@@ -7,8 +7,18 @@ import (
 	"strings"
 	"testing"
 
+	"dmed/internal/agent"
 	"dmed/internal/ai"
 )
+
+// toolText runs one tool call and returns just its text and proposed change.
+// execChatTool returns a single ToolResult; the wrapper keeps the assertions
+// below focused on the two things they care about.
+func toolText(t *testing.T, m *Model, name, args string) (string, *agent.Change) {
+	t.Helper()
+	r := m.execChatTool(ai.ToolCall{Name: name, Args: args})
+	return r.Text, r.Change
+}
 
 func TestChatToolDefsIncludesCoreTools(t *testing.T) {
 	defs := chatToolDefs()
@@ -16,7 +26,7 @@ func TestChatToolDefsIncludesCoreTools(t *testing.T) {
 	for _, d := range defs {
 		names[d.Name] = true
 	}
-	for _, want := range []string{"READ", "SEARCH", "RUN", "REPLACE", "EDIT"} {
+	for _, want := range []string{"READ", "SEARCH", "RUN", "REPLACE", "EDIT", "LIST_DIR", "GLOB"} {
 		if !names[want] {
 			t.Fatalf("missing tool %s in %v", want, names)
 		}
@@ -30,7 +40,7 @@ func TestExecChatToolReadAndSearch(t *testing.T) {
 
 	m := Model{root: dir}
 
-	res, chg := m.execChatTool(ai.ToolCall{Name: "READ", Args: `{"arg":"hello.go"}`})
+	res, chg := toolText(t, &m, "READ", `{"arg":"hello.go"}`)
 	if chg != nil {
 		t.Fatalf("READ must not produce a change")
 	}
@@ -41,7 +51,7 @@ func TestExecChatToolReadAndSearch(t *testing.T) {
 		t.Fatalf("READ errored: %q", res)
 	}
 
-	res, chg = m.execChatTool(ai.ToolCall{Name: "SEARCH", Args: `{"arg":"greeting"}`})
+	res, chg = toolText(t, &m, "SEARCH", `{"arg":"greeting"}`)
 	if chg != nil {
 		t.Fatalf("SEARCH must not produce a change")
 	}
@@ -49,7 +59,7 @@ func TestExecChatToolReadAndSearch(t *testing.T) {
 		t.Fatalf("SEARCH result missing file: %q", res)
 	}
 
-	res, _ = m.execChatTool(ai.ToolCall{Name: "READ", Args: `{"arg":"missing.go"}`})
+	res, _ = toolText(t, &m, "READ", `{"arg":"missing.go"}`)
 	if !containsStr(res, "[READ error]") {
 		t.Fatalf("expected error for missing file: %q", res)
 	}
@@ -60,7 +70,7 @@ func TestExecChatToolEditProposesChangeButDoesNotWrite(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "t.txt"), "old content\n")
 	m := Model{root: dir}
 
-	res, chg := m.execChatTool(ai.ToolCall{Name: "EDIT", Args: `{"path":"t.txt","content":"new content"}`})
+	res, chg := toolText(t, &m, "EDIT", `{"path":"t.txt","content":"new content"}`)
 	if chg == nil {
 		t.Fatalf("EDIT must propose a change, got %q", res)
 	}
@@ -84,7 +94,7 @@ func TestExecChatToolEditCreatesNewFile(t *testing.T) {
 	dir := t.TempDir()
 	m := Model{root: dir}
 
-	_, chg := m.execChatTool(ai.ToolCall{Name: "EDIT", Args: `{"path":"new/file.txt","content":"hi"}`})
+	_, chg := toolText(t, &m, "EDIT", `{"path":"new/file.txt","content":"hi"}`)
 	if chg == nil {
 		t.Fatalf("EDIT of a missing file must propose a create")
 	}
@@ -101,7 +111,7 @@ func TestExecChatToolEditNoChangeIsSkipped(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "t.txt"), "same\n")
 	m := Model{root: dir}
 
-	res, chg := m.execChatTool(ai.ToolCall{Name: "EDIT", Args: `{"path":"t.txt","content":"same"}`})
+	res, chg := toolText(t, &m, "EDIT", `{"path":"t.txt","content":"same"}`)
 	if chg != nil {
 		t.Fatalf("no-change edit must not propose, got change")
 	}
@@ -115,7 +125,7 @@ func TestChatSearchReturnsLineLocations(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "a.go"), "line one\nline two\nthree\n")
 	m := Model{root: dir}
 	args, _ := json.Marshal(map[string]string{"arg": "two"})
-	res, chg := m.execChatTool(ai.ToolCall{Name: "SEARCH", Args: string(args)})
+	res, chg := toolText(t, &m, "SEARCH", string(args))
 	if chg != nil {
 		t.Fatalf("SEARCH must not produce a change")
 	}
@@ -129,7 +139,7 @@ func TestExecChatToolReplaceProposesChange(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "t.txt"), "alpha beta\nomega\n")
 	m := Model{root: dir}
 	args, _ := json.Marshal(map[string]string{"path": "t.txt", "search": "beta", "replace": "GAMMA"})
-	res, chg := m.execChatTool(ai.ToolCall{Name: "REPLACE", Args: string(args)})
+	res, chg := toolText(t, &m, "REPLACE", string(args))
 	if chg == nil {
 		t.Fatalf("REPLACE must propose a change: %q", res)
 	}
@@ -150,7 +160,7 @@ func TestExecChatToolReplaceMissingBlock(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "t.txt"), "one two\n")
 	m := Model{root: dir}
 	args, _ := json.Marshal(map[string]string{"path": "t.txt", "search": "zzz", "replace": "x"})
-	res, chg := m.execChatTool(ai.ToolCall{Name: "REPLACE", Args: string(args)})
+	res, chg := toolText(t, &m, "REPLACE", string(args))
 	if chg != nil || !containsStr(res, "not found") {
 		t.Fatalf("want not-found error, got %q chg=%v", res, chg != nil)
 	}
@@ -161,7 +171,7 @@ func TestRunBlockedWhenDisabled(t *testing.T) {
 	m := Model{root: dir}
 	m.cfg.AI.AllowRun = "never"
 	args, _ := json.Marshal(map[string]string{"arg": "echo hi"})
-	res, chg := m.execChatTool(ai.ToolCall{Name: "RUN", Args: string(args)})
+	res, chg := toolText(t, &m, "RUN", string(args))
 	if chg != nil || !containsStr(res, "blocked") {
 		t.Fatalf("want blocked message, got %q", res)
 	}
@@ -204,7 +214,7 @@ func TestChatSearchRegexMode(t *testing.T) {
 
 	// Regex matches lines containing "line" followed by a space.
 	args, _ := json.Marshal(map[string]any{"arg": `line\s+\w+`, "regex": true})
-	res, chg := m.execChatTool(ai.ToolCall{Name: "SEARCH", Args: string(args)})
+	res, chg := toolText(t, &m, "SEARCH", string(args))
 	if chg != nil {
 		t.Fatalf("SEARCH must not produce a change")
 	}
@@ -217,7 +227,7 @@ func TestChatSearchRegexMode(t *testing.T) {
 
 	// Invalid regex returns an error, not a panic.
 	args, _ = json.Marshal(map[string]any{"arg": `[invalid(`, "regex": true})
-	res, _ = m.execChatTool(ai.ToolCall{Name: "SEARCH", Args: string(args)})
+	res, _ = toolText(t, &m, "SEARCH", string(args))
 	if !containsStr(res, "invalid regex") {
 		t.Fatalf("invalid regex should error gracefully: %q", res)
 	}
@@ -230,7 +240,7 @@ func TestChatSearchLiteralStillWorks(t *testing.T) {
 	m := Model{root: dir}
 	// Plain literal search (regex:false) behaves as before.
 	args, _ := json.Marshal(map[string]any{"arg": "two", "regex": false})
-	res, _ := m.execChatTool(ai.ToolCall{Name: "SEARCH", Args: string(args)})
+	res, _ := toolText(t, &m, "SEARCH", string(args))
 	if !containsStr(res, "a.go:2") {
 		t.Fatalf("literal search should locate line 2: %q", res)
 	}

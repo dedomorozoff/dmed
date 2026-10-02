@@ -338,7 +338,7 @@ func TestChatRunParksForConfirmationByDefault(t *testing.T) {
 	if m.cfg.AI.AllowRun != "ask" {
 		t.Fatalf("this test assumes the shipped default; got %q", m.cfg.AI.AllowRun)
 	}
-	m.chatRunConfirm = ""
+	m.clearChatParks()
 	cmd := m.handleChatToolsDone("", []ai.ToolCall{{ID: "c1", Name: "RUN", Args: `{"arg":"rm -rf /"}`}})
 	if m.chatReviewMode {
 		t.Fatal("a RUN must never enter diff review")
@@ -346,11 +346,96 @@ func TestChatRunParksForConfirmationByDefault(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("the loop must park for a human decision, not continue")
 	}
-	if m.chatRunConfirm != "rm -rf /" {
-		t.Fatalf("held command = %q, want the command parked for confirmation", m.chatRunConfirm)
+	if m.chatPark == nil || m.chatPark.park.Text != "rm -rf /" {
+		t.Fatalf("held command = %+v, want the command parked for confirmation", m.chatPark)
 	}
 	if !strings.Contains(m.msg, "y run") {
 		t.Fatalf("the pending decision must be visible in the status line, got %q", m.msg)
+	}
+	// The transcript must show the question, not a binary marker, so the user
+	// can see what is being asked before answering.
+	if !strings.Contains(m.chatPendingResults[0].Content, "rm -rf /") {
+		t.Fatalf("parked result = %q, want a readable placeholder", m.chatPendingResults[0].Content)
+	}
+}
+
+// TestChatRunDeclineFeedsModelItsFailure pins the other half of the park: a
+// declined command must be reported to the model as declined, and the loop must
+// resume without running anything.
+func TestChatRunDeclineFeedsModelItsFailure(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "keep.txt"), "keep\n")
+	m := chatEditHarness(t, dir)
+	m.cfg.AI.AllowRun = config.Defaults().AI.AllowRun
+	m.handleChatToolsDone("", []ai.ToolCall{{ID: "c1", Name: "RUN", Args: `{"arg":"rm keep.txt"}`}})
+
+	m.finishChatRunConfirm(false)
+
+	if m.chatPark != nil {
+		t.Fatal("the park must be cleared once answered")
+	}
+	if m.chatReviewMode {
+		t.Fatal("a declined RUN must not enter diff review")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "keep.txt")); err != nil {
+		t.Fatalf("a declined command must not run: %v", err)
+	}
+	var sawDecline bool
+	for _, res := range m.chatMsgs {
+		if strings.Contains(res.Content, "not approved") {
+			sawDecline = true
+		}
+	}
+	if !sawDecline {
+		t.Fatalf("the model must learn the command was declined: %+v", m.chatMsgs)
+	}
+}
+
+// TestChatSeveralParksAskOneByOne verifies that a round needing more than one
+// approval does not lose decisions: each is asked separately, and the loop only
+// continues once all are answered.
+func TestChatSeveralParksAskOneByOne(t *testing.T) {
+	m := chatEditHarness(t, t.TempDir())
+	m.cfg.AI.AllowRun = "ask"
+	m.handleChatToolsDone("", []ai.ToolCall{
+		{ID: "c1", Name: "RUN", Args: `{"arg":"echo one"}`},
+		{ID: "c2", Name: "READ", Args: `{"arg":"main.go"}`},
+		{ID: "c3", Name: "RUN", Args: `{"arg":"echo two"}`},
+	})
+	if m.chatPark == nil || m.chatPark.park.Text != "echo one" {
+		t.Fatalf("first park = %+v, want the first command", m.chatPark)
+	}
+	if len(m.chatParks) != 1 {
+		t.Fatalf("the second RUN must stay queued, got %d", len(m.chatParks))
+	}
+
+	m.finishChatRunConfirm(true)
+
+	if m.chatPark == nil || m.chatPark.park.Text != "echo two" {
+		t.Fatalf("second park = %+v, want the second command", m.chatPark)
+	}
+	// The non-parked result must have survived untouched while the loop waits.
+	if len(m.chatPendingResults) != 3 {
+		t.Fatalf("want 3 results, got %d", len(m.chatPendingResults))
+	}
+	if strings.Contains(m.chatPendingResults[1].Content, "awaiting confirmation") {
+		t.Fatalf("a non-parked result must not be marked as awaiting: %q", m.chatPendingResults[1].Content)
+	}
+
+	m.finishChatRunConfirm(true)
+
+	if m.chatPark != nil || len(m.chatParks) != 0 {
+		t.Fatalf("all parks must be resolved, got %+v / %d", m.chatPark, len(m.chatParks))
+	}
+	// Every result, including both resolved commands, must reach the model.
+	var ran int
+	for _, res := range m.chatMsgs {
+		if res.Role == "tool" && strings.Contains(res.Content, "[RUN echo one]") {
+			ran++
+		}
+	}
+	if ran != 1 {
+		t.Fatalf("the approved command must run exactly once, got %d", ran)
 	}
 }
 
@@ -362,7 +447,7 @@ func TestChatRunBlockedWhenNever(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("a blocked RUN still returns a result to the model, so the loop continues")
 	}
-	if m.chatRunConfirm != "" {
+	if m.chatPark != nil {
 		t.Fatal("a blocked RUN must not park for confirmation")
 	}
 	var blocked bool

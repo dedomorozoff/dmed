@@ -62,8 +62,9 @@ func TestDoubleClickActivatesTreeItem(t *testing.T) {
 	m.width, m.height = 100, 24
 
 	// Double-click the file row (b.txt is index 1 in the tree: dirs first).
-	_ = m.handleMouseClick(tea.MouseClickMsg{X: 1, Y: 2})
-	_ = m.handleMouseClick(tea.MouseClickMsg{X: 1, Y: 2})
+	// Entries start right of the vertical button rail (3 columns).
+	_ = m.handleMouseClick(tea.MouseClickMsg{X: 5, Y: 2})
+	_ = m.handleMouseClick(tea.MouseClickMsg{X: 5, Y: 2})
 
 	if m.activeTab().path != filepath.Join(root, "b.txt") {
 		t.Fatalf("double-click on file must open it, got %q", m.activeTab().path)

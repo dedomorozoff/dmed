@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -21,7 +22,12 @@ func TestDefaults(t *testing.T) {
 	if !cfg.Editor.LineNumbers {
 		t.Error("line_numbers should default to true")
 	}
-	if cfg.AI.OllamaURL != "http://localhost:11434" {
+	// The out-of-the-box provider is the keyless one; the Ollama URL default
+	// still exists for people who pick the local preset.
+	if cfg.AI.Provider != PollinationsPreset().Name {
+		t.Errorf("provider = %q, want the keyless default", cfg.AI.Provider)
+	}
+	if cfg.AI.OllamaURL != PollinationsPreset().BaseURL {
 		t.Errorf("ollama_url = %q", cfg.AI.OllamaURL)
 	}
 	if cfg.UI.TreeWidth != 25 {
@@ -245,8 +251,8 @@ tree_width = 20
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 10 {
-		t.Errorf("wrote %d keys, want 10", n)
+	if n != 12 {
+		t.Errorf("wrote %d keys, want 12", n)
 	}
 
 	data, _ := os.ReadFile(path)
@@ -271,20 +277,47 @@ func TestWriteAIRetainsMissingKeys(t *testing.T) {
 	}
 
 	ai := Defaults().AI
+	ai.Provider = "Ollama (local)"
+	ai.OllamaURL = DefaultOllamaURL
 	ai.Model = "llama3"
 	n, err := WriteAI(path, ai)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 10 {
-		t.Errorf("wrote %d keys, want 10 (2 existing + 8 added)", n)
+	if n != 12 {
+		t.Errorf("wrote %d keys, want 12 (2 existing + 10 added)", n)
 	}
 	data, _ := os.ReadFile(path)
 	out := string(data)
-	for _, want := range []string{"provider = ollama", "model = llama3", "ollama_url = http://localhost:11434", "context_max = 6000"} {
+	for _, want := range []string{"provider = Ollama (local)", "model = llama3", "ollama_url = http://localhost:11434", "context_max = 6000"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in output:\n%s", want, out)
 		}
+	}
+}
+
+// TestWriteAIPersistsEndpointPrefix: the wizard must save the provider's API
+// prefix, otherwise picking Pollinations and restarting the editor would probe
+// /v1 and report a 404 as a connection failure.
+func TestWriteAIPersistsEndpointPrefix(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	p := PollinationsPreset()
+	if _, err := WriteAI(path, AIConfig{
+		Provider:   p.Name,
+		Model:      p.Model,
+		OllamaURL:  p.BaseURL,
+		APIPath:    p.APIPath,
+		ModelsPath: p.ModelsPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := Load(dir)
+	if got.AI.APIPath != "/openai" || got.AI.ModelsPath != "/models" {
+		t.Fatalf("round-trip lost the endpoint prefix: %q / %q", got.AI.APIPath, got.AI.ModelsPath)
+	}
+	if got.AI.OllamaURL != p.BaseURL {
+		t.Fatalf("url = %q, want %q", got.AI.OllamaURL, p.BaseURL)
 	}
 }
 
@@ -333,6 +366,166 @@ restrict_to_root = true
 	}
 	if !cfg.AI.RestrictToRoot {
 		t.Error("restrict_to_root = false, want true")
+	}
+}
+
+// TestLoadAIToolLists pins the tool whitelist/blacklist parsing. Both keys are
+// hand-edited lists, so the trimming of whitespace and empty entries matters:
+// a trailing comma must not turn into an unnamed tool.
+func TestLoadAIToolLists(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[ai]
+tools_enabled = read, search ,run,
+tools_disabled = run , ,
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if want := []string{"read", "search", "run"}; !slices.Equal(cfg.AI.ToolsEnabled, want) {
+		t.Errorf("tools_enabled = %v, want %v", cfg.AI.ToolsEnabled, want)
+	}
+	if want := []string{"run"}; !slices.Equal(cfg.AI.ToolsDisabled, want) {
+		t.Errorf("tools_disabled = %v, want %v", cfg.AI.ToolsDisabled, want)
+	}
+}
+
+// TestToolListsDefaultToEverything guards the default: with no configuration
+// every tool stays available, because a user who never touched these keys must
+// not silently lose EDIT.
+func TestToolListsDefaultToEverything(t *testing.T) {
+	cfg := Defaults()
+	if len(cfg.AI.ToolsEnabled) != 0 || len(cfg.AI.ToolsDisabled) != 0 {
+		t.Fatalf("default tool lists = %v / %v, want empty (no filtering)",
+			cfg.AI.ToolsEnabled, cfg.AI.ToolsDisabled)
+	}
+}
+
+// TestLoadAIWebSearchAndMode covers the opt-in web tool and the agent mode.
+func TestLoadAIWebSearchAndMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[ai]
+web_search = true
+web_search_budget = 5
+mode = plan
+api_path = /openai
+models_path = /models
+free_fallback = false
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if !cfg.AI.WebSearch {
+		t.Error("web_search = false, want true")
+	}
+	if cfg.AI.WebSearchBudget != 5 {
+		t.Errorf("web_search_budget = %d, want 5", cfg.AI.WebSearchBudget)
+	}
+	if cfg.AI.AgentMode() != ModePlan {
+		t.Errorf("mode = %q, want plan", cfg.AI.Mode_)
+	}
+	if cfg.AI.APIPath != "/openai" || cfg.AI.ModelsPath != "/models" {
+		t.Errorf("api paths = %q / %q", cfg.AI.APIPath, cfg.AI.ModelsPath)
+	}
+	if cfg.AI.FreeFallback {
+		t.Error("free_fallback = true, want false")
+	}
+}
+
+// TestWebSearchIsOptIn pins the only tool that leaves the workspace: it must be
+// off until the user asks for it.
+func TestWebSearchIsOptIn(t *testing.T) {
+	cfg := Defaults()
+	if cfg.AI.WebSearch {
+		t.Error("web_search must be off by default")
+	}
+	if cfg.AI.WebSearchBudget <= 0 {
+		t.Errorf("web_search_budget = %d, want a positive cap", cfg.AI.WebSearchBudget)
+	}
+}
+
+// TestAgentModeDefaultsToAct: a typo in the mode key must not silently turn the
+// model into a reader, and a missing key must not either.
+func TestAgentModeDefaultsToAct(t *testing.T) {
+	if got := Defaults().AI.AgentMode(); got != ModeAct {
+		t.Fatalf("default mode = %q, want act", got)
+	}
+	for _, v := range []string{"", "  ", "planning", "ACT", "nonsense"} {
+		ai := Defaults().AI
+		ai.Mode_ = v
+		if got := ai.AgentMode(); got != ModeAct {
+			t.Errorf("mode %q resolved to %q, want act", v, got)
+		}
+	}
+	ai := Defaults().AI
+	ai.Mode_ = "  Plan "
+	if got := ai.AgentMode(); got != ModePlan {
+		t.Errorf("mode %q resolved to %q, want plan", ai.Mode_, got)
+	}
+}
+
+// TestUnconfiguredGatesTheFreeFallback is the privacy-relevant rule: the editor
+// may reach for a keyless public provider only when the user never configured
+// anything. Pointing dmed at your own server is a decision, not an oversight.
+func TestUnconfiguredGatesTheFreeFallback(t *testing.T) {
+	if !Defaults().AI.Unconfigured() {
+		t.Error("a fresh install must count as unconfigured")
+	}
+	aim := Defaults().AI
+	aim.Model = "llama3.2"
+	if aim.Unconfigured() {
+		t.Error("a configured model must disable the fallback")
+	}
+	aim = Defaults().AI
+	aim.APIKey = "sk-test"
+	if aim.Unconfigured() {
+		t.Error("a configured key must disable the fallback")
+	}
+	aim = Defaults().AI
+	aim.OllamaURL = "http://192.168.1.10:11434"
+	if aim.Unconfigured() {
+		t.Error("a custom server must disable the fallback")
+	}
+	aim = Defaults().AI
+	aim.Provider = "OpenAI"
+	if aim.Unconfigured() {
+		t.Error("explicitly choosing a provider is a decision too")
+	}
+	aim = Defaults().AI
+	aim.APIPath = "/v2"
+	if aim.Unconfigured() {
+		t.Error("a hand-tuned endpoint must disable the fallback")
+	}
+	if !Defaults().AI.FreeFallback {
+		t.Error("the fallback should be available out of the box")
+	}
+}
+
+// TestPollinationsPresetNeedsNoKey pins the reason the fallback is possible: the
+// provider is keyless and speaks the OpenAI protocol under its own path.
+func TestPollinationsPresetNeedsNoKey(t *testing.T) {
+	p := PollinationsPreset()
+	if p.APIKey {
+		t.Error("Pollinations must not ask for a key")
+	}
+	if !p.Free {
+		t.Error("Pollinations must be marked as the keyless fallback")
+	}
+	if p.Kind != "openai" || p.APIPath != "/openai" || p.ModelsPath != "/models" {
+		t.Fatalf("preset = %+v", p)
+	}
+	names := make([]string, 0, len(AIPresets()))
+	for _, p := range AIPresets() {
+		names = append(names, p.Name)
+	}
+	if len(names) < 2 || names[0] != AIPresets()[0].Name {
+		t.Fatalf("Ollama must stay the first preset: %v", names)
+	}
+	if ResolvePreset(p.Name).Name != p.Name {
+		t.Error("the preset must be resolvable by name")
 	}
 }
 

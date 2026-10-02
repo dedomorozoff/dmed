@@ -39,7 +39,20 @@ AI agents can read, propose, and apply changes directly to your codebase — but
 ### AI Integration
 
 - **Chat panel** (`Alt+A`) — streaming conversation with your code
+- **Works with zero setup**: no provider, no key, no account — the session falls
+  back to a keyless public provider and says so in the chat (a `CLOUD` badge
+  stays in the header). Set `free_fallback = false` to keep every request local.
 - **Inline rewrite** (`Alt+I`) — select text, describe change, review diff, accept/reject
+- **Tools the model can call**: `READ`, `SEARCH` (regex-capable), `LIST_DIR`,
+  `GLOB`, `RUN`, `REPLACE`, `EDIT`, `TODO_WRITE`/`TODO_SET`/`TODO_READ` (a
+  visible plan), `ASK_USER` (a question that pauses the loop until you answer),
+  `SWITCH_MODE` (ask to leave plan mode) and `WEB_SEARCH` (DuckDuckGo, opt-in),
+  plus `SUB_AGENT` to delegate a self-contained task to a background sub-agent
+  (read-only plus proposals — its diff waits in the agent panel, `Esc` cancels).
+  Read-only tools need no confirmation; every proposed change arrives as a diff
+  for you to accept or reject
+- **Plan mode** (`Ctrl+P` → `AI: Toggle Plan/Act Mode`): the model gets read-only
+  tools, writes down a plan, and asks you before it is allowed to edit anything
 - **Zero-config start**: with a running Ollama the chat just works — the first
   model reported by the server is picked automatically
 - Built-in provider presets (wizard cycles them with `←`/`→`):
@@ -48,7 +61,10 @@ AI agents can read, propose, and apply changes directly to your codebase — but
 - **First-time setup, three ways**:
   - `dmed setup-ai` — interactive CLI wizard (provider → key → test → saved)
   - In the editor: `Ctrl+P` → `AI: Preferences...` — pick a preset with
-    `←`/`→`, paste the API key, press `t` to test the connection, `Ctrl+S` to save
+    `←`/`→`, paste the API key, press `t` to test the connection, `Ctrl+S` to save.
+    The **model list is fetched from the provider as soon as the panel opens**,
+    so the Model row shows what the server actually has (`←`/`→` to walk it)
+    instead of asking you to guess a name
   - Environment variables (highest priority, nothing written to disk):
     `DMED_PROVIDER`, `DMED_API_KEY`, `DMED_MODEL`, `DMED_OLLAMA_URL`
 
@@ -236,11 +252,13 @@ word_wrap = false           # wrap long lines to pane width (Alt+Z toggles)
 skipped_dirs = .git,node_modules,vendor
 
 [ai]
-provider = Ollama (local)   # wizard preset: Ollama (local) | OpenAI | DeepSeek | Groq | LM Studio (local) | vLLM (local) | Unsloth (local) | Custom
+provider = Pollinations (free, no key)   # default: no account needed; wizard presets: Ollama (local) | OpenAI | DeepSeek | Groq | LM Studio (local) | vLLM (local) | Unsloth (local) | Custom
                             # legacy values "ollama"/"openai" still work
 model =                      # empty = first model reported by the server
-ollama_url = http://localhost:11434   # base URL, no /v1 suffix (it is appended automatically)
-api_key =                    # for OpenAI-compatible providers
+ollama_url = https://text.pollinations.ai   # base URL, no /v1 or /openai suffix (it is appended automatically)
+api_key =                    # for OpenAI-compatible providers that need one
+api_path =                   # endpoint prefix; /v1 by default, /openai for Pollinations (set by the wizard)
+models_path =                # model-list path; /v1/models by default, /models for Pollinations
 context_max = 6000           # max runes sent as file context
 temperature = 0              # generation temperature in tenths (7 => 0.7); 0 = provider default
 num_ctx = 0                  # context window in tokens for Ollama (num_ctx); 0 = default
@@ -248,11 +266,19 @@ num_predict = 0              # max output tokens; 0 = provider default
 tool_rounds = 0              # chat tool-calling loop cap; 0 = built-in (6)
 allow_run = ask                # always | never | ask — ask (default) confirms each shell command the model proposes
 restrict_to_root = true       # true (default) keeps READ/EDIT/REPLACE inside the project root
+tools_enabled =               # optional whitelist of chat tools, e.g. read,search,list_dir,glob,run,replace,edit
+tools_disabled =              # optional blacklist applied after the whitelist
+mode = act                   # act | plan — plan exposes read-only tools only
+web_search = false            # true enables WEB_SEARCH (DuckDuckGo): the only tool that leaves this machine
+web_search_budget = 20        # web queries allowed per session
+free_fallback = true          # true (default): with nothing configured and no local answer, use the keyless provider
 system_prompt = You are a helpful coding assistant...
 
 [agent]                       # background agent tasks (M4): defaults are fine for most users
 system_prompt =               # instruction override for agents producing edits; empty = built-in
 context_max = 262144          # total bytes of file context gathered for the task
+subagent_prompt =             # instruction override for delegated sub-agents; empty = built-in
+subagent_rounds = 0           # tool-loop cap for one delegated task; 0 = built-in (6)
 
 [ui]
 tree_width = 25
@@ -324,6 +350,10 @@ then set `launch_request = attach` with `launch_json =
   ordered by cost/benefit
 - [docs/AUDIT-2026-10-01.md](docs/AUDIT-2026-10-01.md) — the audit that led there
 
+[docs/AI-TOOLS-PLAN.md](docs/AI-TOOLS-PLAN.md) records the design behind the AI
+tool surface (why every tool is gated the way it is, and what was deliberately
+not done).
+
 ## Known limitations
 
 Worth knowing before you file a bug.
@@ -335,6 +365,20 @@ Worth knowing before you file a bug.
   the model has to ask before running a shell command, and
   `restrict_to_root = true` keeps `READ`/`EDIT`/`REPLACE` inside the project.
   Set both to `always`/`false` in `.dmed.conf` if you prefer the old behaviour.
+- **Small local models pick tools worse as the list grows.** Trim it with
+  `tools_enabled` (whitelist) or `tools_disabled` (blacklist) in `[ai]` — the
+  names also accept the common aliases (`read_file`, `grep`, `run_command`,
+  `write_file`, `edit_file`).
+- **The default provider is a public service (Pollinations, no account
+  needed).** Prompts and code leave the machine out of the box; prefer everything
+  local by picking `Ollama (local)` in `Ctrl+P` → `AI: Preferences...`.
+  With nothing configured and no answer from the configured provider, a session
+  also falls back to the keyless provider and says so in the chat, with a `CLOUD`
+  badge in the chat header. Set `free_fallback = false` to disable the fallback
+  (the default provider itself is not affected). The free tier is rate-limited
+  (roughly one request per 15s).
+- **`web_search` is off by default.** It is the only tool that reaches outside
+  the workspace; turn it on deliberately and watch the per-session budget.
 - **Accepted agent changes are committed to git but cannot be undone from the
   editor yet.** Use `git revert` for now.
 - **Large repositories get slow between AI tool rounds**, because the editor

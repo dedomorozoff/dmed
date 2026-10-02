@@ -10,8 +10,11 @@ func TestAIPresetsCoverBasics(t *testing.T) {
 	if len(ps) < 5 {
 		t.Fatalf("too few presets: %d", len(ps))
 	}
-	if ps[0].Name != "Ollama (local)" || ps[0].Kind != "ollama" || ps[0].APIKey {
-		t.Fatalf("first preset must be keyless local ollama, got %+v", ps[0])
+	if ps[0].Name != "Pollinations (free, no key)" || ps[0].Kind != "openai" || ps[0].APIKey {
+		t.Fatalf("first preset must be the keyless default provider, got %+v", ps[0])
+	}
+	if ps[1].Name != "Ollama (local)" || ps[1].Kind != "ollama" || ps[1].APIKey {
+		t.Fatalf("second preset must be keyless local ollama, got %+v", ps[1])
 	}
 	for _, p := range ps {
 		switch p.Kind {
@@ -33,8 +36,8 @@ func TestAIPresetsCoverBasics(t *testing.T) {
 }
 
 func TestResolvePreset(t *testing.T) {
-	if got := ResolvePreset(""); got.Name != "Ollama (local)" {
-		t.Fatalf("empty value must fall back to ollama, got %q", got.Name)
+	if got := ResolvePreset(""); got.Name != "Pollinations (free, no key)" {
+		t.Fatalf("empty value must fall back to the default provider, got %q", got.Name)
 	}
 	if got := ResolvePreset("ollama"); got.Name != "Ollama (local)" {
 		t.Fatalf("legacy config value must map to a preset, got %q", got.Name)
@@ -42,7 +45,7 @@ func TestResolvePreset(t *testing.T) {
 	if got := ResolvePreset("DeepSeek"); got.Name != "DeepSeek" || got.Kind != "openai" {
 		t.Fatalf("case-insensitive match failed: %+v", got)
 	}
-	if got := ResolvePreset("no-such-thing"); got.Name != "Ollama (local)" {
-		t.Fatalf("unknown value must fall back to ollama, got %q", got.Name)
+	if got := ResolvePreset("no-such-thing"); got.Name != "Pollinations (free, no key)" {
+		t.Fatalf("unknown value must fall back to the default provider, got %q", got.Name)
 	}
 }

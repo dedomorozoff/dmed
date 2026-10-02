@@ -48,6 +48,32 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "pane_focus", title: "cmd.pane_focus_t", desc: "cmd.pane_focus_d", action: func(m *Model) tea.Cmd { m.focusOtherPane(); return nil }},
 		{id: "pane_close", title: "cmd.pane_close_t", desc: "cmd.pane_close_d", action: func(m *Model) tea.Cmd { m.closePane(); return nil }},
 		{id: "tree_toggle", title: "cmd.tree_toggle_t", desc: "cmd.tree_toggle_d", action: func(m *Model) tea.Cmd { m.toggleTree(); return nil }},
+		{id: "tree_rename", title: "cmd.tree_rename_t", desc: "cmd.tree_rename_d", action: func(m *Model) tea.Cmd {
+			if rel, ok := m.treeSelectedRel(); ok {
+				m.startTreeRenamePrompt(rel)
+			} else {
+				m.msg = m.t("tree.no_selection")
+			}
+			return nil
+		}},
+		{id: "tree_duplicate", title: "cmd.tree_duplicate_t", desc: "cmd.tree_duplicate_d", action: func(m *Model) tea.Cmd {
+			if rel, ok := m.treeSelectedRel(); ok {
+				m.duplicateTreeEntry(rel)
+				m.rebuildTree()
+				m.refreshGitFiles()
+			} else {
+				m.msg = m.t("tree.no_selection")
+			}
+			return nil
+		}},
+		{id: "tree_delete", title: "cmd.tree_delete_t", desc: "cmd.tree_delete_d", action: func(m *Model) tea.Cmd {
+			if rel, ok := m.treeSelectedRel(); ok {
+				m.beginTreeConfirm("delete", rel)
+			} else {
+				m.msg = m.t("tree.no_selection")
+			}
+			return nil
+		}},
 		{id: "terminal", title: "cmd.terminal_t", desc: "cmd.terminal_d", action: func(m *Model) tea.Cmd { return m.toggleTerminal() }},
 		{id: "debug", title: "cmd.debug_t", desc: "cmd.debug_d", action: func(m *Model) tea.Cmd {
 			m.dapOpen = !m.dapOpen
@@ -58,7 +84,8 @@ func (m *Model) getPaletteCommands() []commandItem {
 		}},
 		{id: "ai_chat", title: "cmd.ai_chat_t", desc: "cmd.ai_chat_d", action: func(m *Model) tea.Cmd { m.toggleChat(); return nil }},
 		{id: "ai_inline", title: "cmd.ai_inline_t", desc: "cmd.ai_inline_d", action: func(m *Model) tea.Cmd { m.startInlineRequest(); return nil }},
-		{id: "ai_settings", title: "cmd.ai_settings_t", desc: "cmd.ai_settings_d", action: func(m *Model) tea.Cmd { m.startAISettings(); return nil }},
+		{id: "ai_settings", title: "cmd.ai_settings_t", desc: "cmd.ai_settings_d", action: func(m *Model) tea.Cmd { return m.startAISettings() }},
+		{id: "ai_mode", title: "cmd.ai_mode_t", desc: "cmd.ai_mode_d", action: func(m *Model) tea.Cmd { m.toggleMode(); return nil }},
 		{id: "dap_settings", title: "cmd.dap_settings_t", desc: "cmd.dap_settings_d", action: func(m *Model) tea.Cmd { m.startDAPCfg(); return nil }},
 		{id: "agent_tasks", title: "cmd.agent_tasks_t", desc: "cmd.agent_tasks_d", action: func(m *Model) tea.Cmd { return m.openAgentPanel() }},
 		{id: "agent_new", title: "cmd.agent_new_t", desc: "cmd.agent_new_d", action: func(m *Model) tea.Cmd { return m.startAgentTaskPrompt() }},

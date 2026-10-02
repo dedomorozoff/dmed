@@ -121,17 +121,31 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 		return nil
 	}
 
-	// The docked debug panel sits between the editor and the status bar.
-	if m.termOpen && y >= m.termStartRow()+1 && y < m.termStartRow()+m.termExtraRows() {
-		button := 0
-		if left {
-			button = 0
-		} else if msg.Button == tea.MouseMiddle {
-			button = 1
-		} else {
-			button = 2
+	// The docked terminal panel. A click focuses it (the PTY owns the keys
+	// while focused); Shift+click starts a text selection instead of reaching
+	// the application running inside. The chat rail keeps priority so the
+	// chat stays reachable while the terminal is docked.
+	termArea := m.termOpen && y >= m.termStartRow()+1 && y < m.termStartRow()+m.termExtraRows()
+	chatArea := m.chatOpen && x >= m.width-m.rightRailWidth()
+	if termArea && !chatArea {
+		if msg.Mod&tea.ModShift != 0 && left {
+			m.startTermSelection(y-m.termStartRow()-1, x)
+			m.dragTerm = true
+			m.mouseDown = true
+			return nil
 		}
-		m.forwardTerminalMouse(button, x, y-m.termStartRow()-1)
+		m.termFocus = true
+		m.chatFocus = false
+		m.msg = ""
+		if left {
+			button := 0
+			if msg.Button == tea.MouseMiddle {
+				button = 1
+			} else if msg.Button == tea.MouseRight {
+				button = 2
+			}
+			m.forwardTerminalMouse(button, x, y-m.termStartRow()-1)
+		}
 		return nil
 	}
 	if handled, cmd := m.clickDebugPanel(x, y, dbl); handled {
@@ -145,8 +159,25 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 
 	// Right AI chat rail.
 	if m.chatOpen && x >= m.width-m.rightRailWidth() && y >= 1 && y <= h {
+		if !m.chatReviewMode {
+			if row, col, ok := m.chatSelHit(y, x); ok {
+				m.startChatSelection(row, col)
+				m.dragChat = true
+				m.mouseDown = true
+				return nil
+			}
+		}
+		if left && y == m.chatButtonsRow() {
+			if b := m.chatButtonAt(x); b != chatBtnNone {
+				return m.activateChatButton(b)
+			}
+		}
 		m.chatFocus = true
+		m.termFocus = false
 		m.gitFocus = false
+		if m.termOpen {
+			m.msg = m.t("term.unfocused")
+		}
 		return nil
 	}
 
@@ -481,6 +512,10 @@ func (m *Model) clickBuffer(x, y int, btn tea.MouseButton, mod tea.KeyMod) tea.C
 	m.gitFocus = false
 	m.gitDiffFocused = false
 	m.chatFocus = false
+	m.termFocus = false
+	if m.termOpen {
+		m.msg = m.t("term.unfocused")
+	}
 	m.mouseDown = true
 	return nil
 }
@@ -561,6 +596,27 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 
 	// Terminal applications that enabled mouse reporting receive wheel events
 	// in panel-local coordinates; otherwise the event is ignored by the panel.
+	// The chat rail keeps priority: with the terminal docked the wheel over
+	// the rail still scrolls the transcript.
+	if m.chatOpen && x >= m.width-m.rightRailWidth() && y >= 1 && y <= h {
+		if m.chatReviewMode {
+			m.chatReviewOffY += dir
+			if m.chatReviewOffY < 0 {
+				m.chatReviewOffY = 0
+			}
+			if maxOff := len(m.chatReviewRows) - 1; m.chatReviewOffY > maxOff {
+				m.chatReviewOffY = maxInt(0, maxOff)
+			}
+			return nil
+		}
+		step := m.paneViewHeight(m.activePane) / 2
+		if step < 1 {
+			step = 1
+		}
+		m.chatScroll -= dir * step
+		m.clampChatScroll()
+		return nil
+	}
 	if m.termOpen && y >= m.termStartRow()+1 && y < m.termStartRow()+m.termExtraRows() {
 		button := 64
 		if dir > 0 {

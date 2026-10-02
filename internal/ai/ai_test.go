@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -189,6 +191,195 @@ func TestOpenAIStream(t *testing.T) {
 	}
 	if got.String() != "Hello world" {
 		t.Fatalf("streamed %q", got.String())
+	}
+}
+
+// TestOpenAICustomAPIPath covers providers that are OpenAI-compatible but do not
+// live under /v1 — Pollinations serves the same protocol under /openai and
+// lists its models at /models, and hardcoding the prefix would make the
+// no-signup provider unusable.
+// TestOpenAIKeylessStillSendsAuth pins the Pollinations quirk: the endpoint
+// rejects a request that carries no Authorization header at all (answering with
+// an error instead of a completion) even though it ignores the value, so a
+// keyless provider must send a placeholder Bearer token.
+// TestNormalizeProviderURL pins the Pollinations domain fix: the bare
+// https://pollinations.ai is the landing page, and a POST there hangs until the
+// header timeout fires with no hint of what is wrong. The API lives on
+// text.pollinations.ai, so the advertised domain must be rewritten; every other
+// URL passes through untouched.
+// TestOpenAIHostGateSerializesRequests pins the keyless-tier guard: the
+// free Pollinations tier allows a single in-flight request per IP and rejects
+// the second one with a 429, so concurrent features (chat, ghost text, agent)
+// must queue on the host instead of racing.
+func TestOpenAIHostGateSerializesRequests(t *testing.T) {
+	var cur, max int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&cur, 1)
+		for {
+			old := atomic.LoadInt32(&max)
+			if n <= old || atomic.CompareAndSwapInt32(&max, old, n) {
+				break
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+		atomic.AddInt32(&cur, -1)
+		_, _ = w.Write([]byte(`{"data":[{"id":"m"}]}`))
+	}))
+	defer srv.Close()
+
+	p := NewProvider(Config{Type: OpenAIProvider, URL: srv.URL, APIPath: "/v1"})
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := p.Models(ctx); err != nil {
+				t.Errorf("Models: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := atomic.LoadInt32(&max); got != 1 {
+		t.Fatalf("max concurrent requests to one host = %d, want 1", got)
+	}
+}
+
+// TestNormalizeProviderURL pins the Pollinations domain fix: the bare
+func TestNormalizeProviderURL(t *testing.T) {
+	cases := map[string]string{
+		"https://pollinations.ai":       "https://text.pollinations.ai",
+		"https://www.pollinations.ai":   "https://text.pollinations.ai",
+		"https://text.pollinations.ai":  "https://text.pollinations.ai",
+		"https://api.openai.com":        "https://api.openai.com",
+		"http://localhost:1234":         "http://localhost:1234",
+		"https://api.deepseek.com":      "https://api.deepseek.com",
+		"https://pollinations.ai:8443/": "https://text.pollinations.ai:8443/",
+		"not a url at all":              "not a url at all",
+	}
+	for in, want := range cases {
+		if got := normalizeProviderURL(in); got != want {
+			t.Errorf("normalizeProviderURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestOpenAIKeylessStillSendsAuth pins the Pollinations quirk: the endpoint
+func TestOpenAIKeylessStillSendsAuth(t *testing.T) {
+	var authModels, authChat string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openai/chat/completions":
+			authChat = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		case "/models":
+			authModels = r.Header.Get("Authorization")
+			_, _ = w.Write([]byte(`{"data":[{"id":"openai"}]}`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	p := NewProvider(Config{Type: OpenAIProvider, URL: srv.URL, Model: "openai",
+		APIPath: "/openai", ModelsPath: "/models"})
+
+	if _, err := p.Models(context.Background()); err != nil {
+		t.Fatalf("Models: %v", err)
+	}
+	if authModels == "" {
+		t.Error("the model list request must carry an Authorization header even without a key")
+	}
+	if err := p.ChatStream(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}},
+		Handler{Delta: func(string) {}}); err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	if authChat == "" {
+		t.Error("the chat request must carry an Authorization header even without a key")
+	}
+}
+
+// TestOpenAICustomAPIPath covers providers that are OpenAI-compatible but do not
+func TestOpenAICustomAPIPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openai/chat/completions":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		case "/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"openai"},{"id":"mistral"}]}`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	p := NewProvider(Config{Type: OpenAIProvider, URL: srv.URL, Model: "openai",
+		APIPath: "/openai", ModelsPath: "/models"})
+
+	models, err := p.Models(context.Background())
+	if err != nil {
+		t.Fatalf("Models: %v", err)
+	}
+	if len(models) != 2 || models[0] != "openai" {
+		t.Fatalf("models = %v", models)
+	}
+
+	var got strings.Builder
+	if err := p.ChatStream(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}},
+		Handler{Delta: func(d string) { got.WriteString(d) }}); err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	if got.String() != "hi" {
+		t.Fatalf("streamed %q", got.String())
+	}
+}
+
+// TestOpenAIModelListShapes covers the endpoints that claim to be
+// OpenAI-compatible and then answer with something else. Pollinations — the
+// keyless provider — returns a bare array of objects with "name", not the
+// {"data":[{"id":...}]} envelope; parsing only the envelope left it with an empty
+// list, which looks exactly like "this server has no models".
+func TestOpenAIModelListShapes(t *testing.T) {
+	cases := map[string]struct {
+		body string
+		want []string
+	}{
+		"openai envelope": {`{"data":[{"id":"gpt-4o-mini"},{"id":"gpt-4o"}]}`, []string{"gpt-4o-mini", "gpt-4o"}},
+		"pollinations":    {`[{"name":"openai-fast","aliases":["openai"]},{"name":"mistral"}]`, []string{"openai-fast", "mistral"}},
+		"array of names":  {`["openai","mistral","searchgpt"]`, []string{"openai", "mistral", "searchgpt"}},
+		"envelope empty":  {`{"data":[]}`, []string{}},
+	}
+	for name, c := range cases {
+		body := c.body
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/models" {
+				t.Errorf("%s: unexpected path %q", name, r.URL.Path)
+			}
+			_, _ = w.Write([]byte(body))
+		}))
+
+		p := NewProvider(Config{Type: OpenAIProvider, URL: srv.URL, APIPath: "/openai", ModelsPath: "/models"})
+		got, err := p.Models(context.Background())
+		srv.Close()
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if len(got) != len(c.want) {
+			t.Errorf("%s: models = %v, want %v", name, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("%s: models = %v, want %v", name, got, c.want)
+				break
+			}
+		}
 	}
 }
 

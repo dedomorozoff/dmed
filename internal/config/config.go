@@ -81,6 +81,12 @@ type AgentConfig struct {
 	// ContextMax is the total size budget (bytes) of file context gathered
 	// from the project and sent to the agent.
 	ContextMax int
+	// SubagentPrompt overrides the instruction a delegated sub-agent follows.
+	// Empty uses the built-in one.
+	SubagentPrompt string
+	// SubagentRounds caps the tool loop of one delegated task; 0 means the
+	// built-in cap (6).
+	SubagentRounds int
 }
 
 // EditorConfig holds editor-related settings.
@@ -93,6 +99,17 @@ type EditorConfig struct {
 }
 
 // AIConfig holds AI-related settings.
+// Mode is how much freedom the model has: plan reads and plans, act may edit.
+type Mode string
+
+const (
+	// ModeAct lets the model use every tool; edits still go through review.
+	ModeAct Mode = "act"
+	// ModePlan exposes read-only tools only, so the model can investigate and
+	// plan but cannot touch a file.
+	ModePlan Mode = "plan"
+)
+
 type AIConfig struct {
 	Provider     string // ollama | openai
 	Model        string
@@ -113,6 +130,56 @@ type AIConfig struct {
 	AllowRun string
 	// RestrictToRoot bounds READ/EDIT/REPLACE paths to the project root when true.
 	RestrictToRoot bool
+	// ToolsEnabled, when non-empty, is a whitelist of the tool names the chat
+	// exposes to the model (comma separated, case-insensitive). Empty means
+	// "everything available"; a longer list still shrinks the prompt, which is
+	// what small local models need to pick the right tool.
+	ToolsEnabled []string
+	// ToolsDisabled removes tool names from the list after ToolsEnabled is
+	// applied, so a curated whitelist can still be trimmed.
+	ToolsDisabled []string
+	// WebSearch enables the WEB_SEARCH tool, the only tool that reaches outside
+	// the workspace. It is off by default.
+	WebSearch bool
+	// WebSearchBudget caps how many web queries one session may make, so a
+	// model cannot burn the free tier (or the user's patience) in a loop.
+	WebSearchBudget int
+	// FreeFallback lets the editor use a keyless provider (Pollinations) when
+	// nothing is configured and the configured provider does not answer. It is
+	// on by default because a dead AI with no explanation is a worse first run;
+	// set it to false to keep every request on the machine.
+	FreeFallback bool
+	// APIPath / ModelsPath override the OpenAI-compatible endpoint paths, for
+	// providers that speak the protocol somewhere other than /v1.
+	APIPath    string
+	ModelsPath string
+	// Mode_ is the agent mode ("plan" | "act"). The trailing underscore avoids
+	// colliding with the Mode() accessor.
+	Mode_ string
+}
+
+// AgentMode returns the configured agent mode, defaulting to act. An unknown
+// value is treated as act: a typo must not silently turn the model into a
+// reader, and the status bar always shows which mode is in effect.
+func (a AIConfig) AgentMode() Mode {
+	if Mode(strings.ToLower(strings.TrimSpace(a.Mode_))) == ModePlan {
+		return ModePlan
+	}
+	return ModeAct
+}
+
+// Unconfigured reports whether the user never set anything up: no model, no key,
+// and every value still at its default. It is the only case in which the editor
+// may fall back to a keyless provider — hijacking a user who deliberately
+// pointed dmed at their own server would be worse than not helping.
+func (a AIConfig) Unconfigured() bool {
+	d := Defaults().AI
+	return strings.TrimSpace(a.Model) == "" &&
+		strings.TrimSpace(a.APIKey) == "" &&
+		a.Provider == d.Provider &&
+		a.OllamaURL == d.OllamaURL &&
+		a.APIPath == d.APIPath &&
+		a.ModelsPath == d.ModelsPath
 }
 
 // UIConfig holds UI-related settings.
@@ -136,6 +203,10 @@ type PluginsConfig struct {
 
 // Defaults returns the default configuration.
 func Defaults() Config {
+	// Pollinations is the out-of-the-box provider: no account, no key, so a
+	// fresh install has a working AI before any configuration. Ollama stays
+	// one pick away in the wizard for people who prefer everything local.
+	free := PollinationsPreset()
 	return Config{
 		Editor: EditorConfig{
 			TabWidth:    4,
@@ -145,10 +216,12 @@ func Defaults() Config {
 			SkippedDirs: []string{".git", "node_modules"},
 		},
 		AI: AIConfig{
-			Provider:    "ollama",
-			Model:       "",
-			OllamaURL:   "http://localhost:11434",
-			ContextMax:  6000,
+			Provider:   free.Name,
+			Model:      "",
+			OllamaURL:  free.BaseURL,
+			APIPath:    free.APIPath,
+			ModelsPath: free.ModelsPath,
+			ContextMax: 6000,
 			Temperature: 0,
 			NumCtx:      0,
 			NumPredict:  0,
@@ -159,9 +232,18 @@ func Defaults() Config {
 			// Safe by default: READ/EDIT/REPLACE stay inside the project root.
 			// Set restrict_to_root = false to opt out.
 			RestrictToRoot: true,
+			// The web tool reaches outside the workspace, so it is opt-in.
+			WebSearch:       false,
+			WebSearchBudget: 20,
+			// Nothing configured yet: allow the keyless fallback so a fresh
+			// install still has a working AI, and say so in the chat.
+			FreeFallback: true,
+			Mode_:        string(ModeAct),
 			SystemPrompt: "You are a helpful coding assistant inside the dmed editor. " +
 				"Answer concisely. You have tools: EDIT creates or rewrites a whole file, " +
-				"READ reads a file, SEARCH finds text, RUN executes a shell command. " +
+				"READ reads a file, SEARCH finds text, LIST_DIR and GLOB navigate the project, " +
+				"RUN executes a shell command, TODO_WRITE/TODO_SET keep a visible plan, and " +
+				"ASK_USER asks the user when a decision is theirs. " +
 				"When the user asks to create, change or fix files, you MUST call EDIT " +
 				"(after READ for existing files) instead of printing code in the reply.",
 		},
@@ -365,10 +447,7 @@ func loadFile(path string, cfg *Config) {
 			cfg.Editor.WordWrap = parseBool(v)
 		}
 		if v, ok := s["skipped_dirs"]; ok {
-			cfg.Editor.SkippedDirs = strings.Split(v, ",")
-			for i := range cfg.Editor.SkippedDirs {
-				cfg.Editor.SkippedDirs[i] = strings.TrimSpace(cfg.Editor.SkippedDirs[i])
-			}
+			cfg.Editor.SkippedDirs = parseList(v)
 		}
 	}
 
@@ -422,6 +501,34 @@ func loadFile(path string, cfg *Config) {
 		if v, ok := s["restrict_to_root"]; ok {
 			cfg.AI.RestrictToRoot = parseBool(v)
 		}
+		if v, ok := s["tools_enabled"]; ok {
+			cfg.AI.ToolsEnabled = parseList(v)
+		}
+		if v, ok := s["tools_disabled"]; ok {
+			cfg.AI.ToolsDisabled = parseList(v)
+		}
+		if v, ok := s["web_search"]; ok {
+			cfg.AI.WebSearch = parseBool(v)
+		}
+		if v, ok := s["web_search_budget"]; ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				cfg.AI.WebSearchBudget = n
+			}
+		}
+		if v, ok := s["free_fallback"]; ok {
+			cfg.AI.FreeFallback = parseBool(v)
+		}
+		if v, ok := s["api_path"]; ok {
+			cfg.AI.APIPath = v
+		}
+		if v, ok := s["models_path"]; ok {
+			cfg.AI.ModelsPath = v
+		}
+		if v, ok := s["mode"]; ok {
+			if m := Mode(strings.ToLower(strings.TrimSpace(v))); m == ModePlan || m == ModeAct {
+				cfg.AI.Mode_ = string(m)
+			}
+		}
 	}
 
 	// [agent]
@@ -432,6 +539,14 @@ func loadFile(path string, cfg *Config) {
 		if v, ok := s["context_max"]; ok {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				cfg.Agent.ContextMax = n
+			}
+		}
+		if v, ok := s["subagent_prompt"]; ok {
+			cfg.Agent.SubagentPrompt = v
+		}
+		if v, ok := s["subagent_rounds"]; ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				cfg.Agent.SubagentRounds = n
 			}
 		}
 	}
@@ -581,6 +696,18 @@ func parseBool(s string) bool {
 	return s == "true" || s == "yes" || s == "1"
 }
 
+// parseList splits a comma separated config value into trimmed, non-empty
+// entries (used for skipped_dirs, tools_enabled, tools_disabled).
+func parseList(v string) []string {
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
 // WriteAI merges the AI settings into the INI file at path, updating the
 // [ai] section in place and preserving all other sections, keys, and comments.
 // If the file or the [ai] section is missing it is appended. Returns the
@@ -597,7 +724,12 @@ func WriteAI(path string, ai AIConfig) (int, error) {
 		{"num_predict", strconv.Itoa(ai.NumPredict)},
 		{"tool_rounds", strconv.Itoa(ai.ToolRounds)},
 		{"allow_run", ai.AllowRun},
+		{"api_path", ai.APIPath},
+		{"models_path", ai.ModelsPath},
 	}
+	// tools_enabled / tools_disabled are deliberately absent: they are a
+	// curated, hand-edited whitelist, and the wizard must not clobber it when
+	// it rewrites the [ai] section.
 
 	data, err := os.ReadFile(path)
 	var lines []string
@@ -822,24 +954,56 @@ func boolStr(b bool) string {
 // pick without reading docs: choosing it fills the base URL (and a sensible
 // default model when the provider exposes a stable one) so only the API key
 // is left to type. The base URL is the origin only — internal/ai appends the
-// API paths (/v1/chat/completions, /v1/models) itself.
+// API paths itself (/v1/chat/completions by default).
 type AIPreset struct {
 	Name    string // display name shown in the wizard
 	Kind    string // wire protocol: "ollama" | "openai"
 	BaseURL string // origin, no path suffix ("" = keep the current URL)
 	Model   string // optional suggested model ("" = resolved from the server)
 	APIKey  bool   // whether this provider needs an API key
+	// APIPath overrides the OpenAI-compatible endpoint prefix ("/v1" is the
+	// default). Pollinations serves the same protocol under "/openai".
+	APIPath string
+	// ModelsPath overrides the model-list path when it is not APIPath+"/models".
+	ModelsPath string
+	// Free marks a provider that needs no account at all — the only kind the
+	// editor may fall back to on its own (see AIConfig.FreeFallback).
+	Free bool
 }
 
 // DefaultOllamaURL is the address a stock local Ollama install listens on.
 // Exported so the wizard test button and the CLI setup can share the hint.
 const DefaultOllamaURL = "http://localhost:11434"
 
-// AIPresets lists the built-in providers in wizard cycle order. Ollama comes
-// first: it is free, local and needs no key, making it the best beginner path.
-// The last entry is Custom — it keeps whatever URL/model the user already had.
+// PollinationsPreset is the no-signup provider: a public OpenAI-compatible
+// endpoint that answers without a key. The anonymous tier is rate-limited to
+// roughly one request per 15 seconds, which is fine for a human-driven chat and
+// useless for a batch job — that is why it is offered as a fallback, not as the
+// default.
+func PollinationsPreset() AIPreset {
+	return AIPreset{
+		Name:  "Pollinations (free, no key)",
+		Kind:  "openai",
+		Model: "openai-fast",
+		// The documented model name is the alias "openai", but the anonymous tier
+		// publishes "openai-fast" as the real entry, and the wizard's list comes
+		// from the server — a name the server never reports would look like a
+		// mistake on the Model row.
+		BaseURL:    "https://text.pollinations.ai",
+		APIPath:    "/openai",
+		ModelsPath: "/models",
+		Free:       true,
+	}
+}
+
+// AIPresets lists the built-in providers in wizard cycle order. Pollinations
+// comes first: it is the default out of the box and needs no account. Ollama
+// follows as the free local option for people who prefer nothing to leave the
+// machine. The last entry is Custom — it keeps whatever URL/model the user
+// already had.
 func AIPresets() []AIPreset {
 	return []AIPreset{
+		PollinationsPreset(),
 		{Name: "Ollama (local)", Kind: "ollama", BaseURL: DefaultOllamaURL},
 		{Name: "OpenAI", Kind: "openai", BaseURL: "https://api.openai.com", Model: "gpt-4o-mini", APIKey: true},
 		{Name: "DeepSeek", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-chat", APIKey: true},
@@ -852,13 +1016,18 @@ func AIPresets() []AIPreset {
 }
 
 // ResolvePreset returns the preset matching a stored provider label, falling
-// back to Ollama for unknown/empty values so a hand-edited config never leaves
-// the wizard stuck on a name it cannot cycle from.
+// back to the default provider for unknown/empty values so a hand-edited config
+// never leaves the wizard stuck on a name it cannot cycle from. Bare protocol
+// names from older configs ("ollama") map onto their display preset explicitly.
 func ResolvePreset(name string) AIPreset {
 	for _, p := range AIPresets() {
 		if strings.EqualFold(p.Name, name) {
 			return p
 		}
+	}
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "ollama":
+		return ResolvePreset("Ollama (local)")
 	}
 	return AIPresets()[0]
 }

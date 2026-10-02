@@ -274,6 +274,54 @@ in the Makefile as insurance).
       `pgdown`, while handlers matched the outdated `pgdn` (dead branches in chat,
       DAP, git, terminal, diff, AI panels, completion).
 
+### M8 — agentic tooling
+
+The AI stops answering and starts working through a proper tool surface. The
+plan with per-item estimates, design decisions and open questions lives in
+[docs/AI-TOOLS-PLAN.md](docs/AI-TOOLS-PLAN.md).
+
+- [x] One tool result type for every tool: `ToolResult` (text + optional
+      `Change` + optional `Park`) instead of a `(text, change)` pair plus a
+      binary marker smuggled through the transcript.
+- [x] One parking mechanism instead of one per tool: `Park`/`chatParks` queue,
+      readable placeholders, `resolveParkedResult` on answer. Several approvals
+      in one round are asked one by one and no decision is lost.
+- [x] `[ai] tools_enabled` / `tools_disabled`: a small local model picks tools
+      worse as the list grows, so the list is configurable and the wizard never
+      rewrites it.
+- [x] Alias table (`legacyToolName`): `read_file`, `write_file`, `edit_file`,
+      `grep`, `run_command`, `list_dir`, `glob` all reach the shipped tool.
+- [x] `LIST_DIR` and `GLOB` tools: the model learns the project layout without
+      shelling out to `ls` (which needs confirmation under `allow_run = ask`).
+- [x] `GLOB` understands `**` (zero or more path segments) and prunes the walk
+      conservatively — a wrong prune would hide a file from the model.
+- [x] One shared project walk (`walkProject` + `newProjectSkip`) for
+      SEARCH/LIST_DIR/GLOB, with `.git`/`.dmed` skipped unconditionally.
+- [x] `internal/todo` + `TODO_WRITE`/`TODO_SET`/`TODO_READ`: the model keeps a
+      visible plan, `TODO_SET` ticks a known step instead of duplicating it, and
+      the same rendered text goes to the model and to the chat panel.
+- [x] `ask_user` (`internal/ask`): a question with a real overlay answer
+      (choices with ↑↓, free text, Esc to skip) — the loop parks, the chat opens
+      itself, and the answer replaces the placeholder. Several questions in one
+      round queue up.
+- [x] `web_search` (`internal/websearch`): DuckDuckGo HTML endpoint, own
+      timeouts, pure parser tested against a fixture. Opt-in, capped per session,
+      and when the budget is spent the tool is withdrawn from the model's list
+      instead of only being rejected.
+- [x] `switch_mode` + plan/act: plan mode exposes read-only tools only (a
+      guarantee, not a policy — the tool is absent), the model must ask the human
+      to leave it, and the status/header shows which mode is active.
+- [x] Keyless default provider: `internal/ai` learned `APIPath`/`ModelsPath`
+      ("OpenAI-compatible" is not always `/v1`), Pollinations is the second
+      wizard preset, and a genuinely unconfigured session falls back to it once
+      with a `CLOUD` badge and an explicit "this leaves your machine" notice.
+      `free_fallback = false` opts out.
+- [x] `sub_agent` (`internal/agent/subagent.go`): delegation to a nested agent
+      with its own tool loop, capped rounds and a timeout. It can only read and
+      propose (no shell, no questions, no second level of delegation), its task
+      goes through the same queue and the same diff review, and the chat parks
+      instead of blocking the UI while it runs.
+
 ## Infrastructure: CI and releases
 
 - [x] GitHub Actions CI (`ci.yml`): vet + unit tests + cross-build for 8 platforms

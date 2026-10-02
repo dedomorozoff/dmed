@@ -16,6 +16,7 @@ import (
 
 	"dmed/internal/agent"
 	"dmed/internal/ai"
+	"dmed/internal/ask"
 	"dmed/internal/buffer"
 	"dmed/internal/config"
 	"dmed/internal/dap"
@@ -26,8 +27,10 @@ import (
 	"dmed/internal/ptyterm"
 	"dmed/internal/session"
 	"dmed/internal/syntax"
+	"dmed/internal/todo"
 	"dmed/internal/vcs"
 	"dmed/internal/watcher"
+	"dmed/internal/websearch"
 )
 
 type tab struct {
@@ -305,6 +308,21 @@ type Model struct {
 	aiCfgEdit  bool
 	aiCfgIn    []rune
 	aiCfgTest  aiTestState // last connection probe from the wizard Test row
+	// aiCfgModels is the list the provider reported, so the Model row can offer
+	// real choices; aiCfgGen discards replies from a superseded request.
+	aiCfgModels []string
+	aiCfgGen    int
+	// aiCfgNeedsReload remembers a probe that was skipped because one was
+	// already in flight when the endpoint changed.
+	aiCfgNeedsReload bool
+	// The open option list for a choice row (Provider, Model, Allow Run,
+	// Restrict Root). A list, not a value cycler: fifty models cannot be walked
+	// one arrow press at a time.
+	aiCfgSelOpen  bool
+	aiCfgSelField int
+	aiCfgSelItems []string
+	aiCfgSelIdx   int
+	aiCfgSelOff   int
 
 	treeVisible    bool
 	treeFocus      bool
@@ -500,10 +518,40 @@ type Model struct {
 	chatReviewOffY  int
 	chatReviewOffX  int
 
-	// Pending RUN command awaiting explicit user confirmation (allow_run = ask).
-	// While non-nil the chat input is parked: the user types y to execute the
-	// held command, or n to decline. The result is fed back either way.
-	chatRunConfirm string
+	// Tool calls parked for an explicit user decision (today: a RUN command
+	// with allow_run = ask, or an ASK_USER question). While a park is active
+	// the chat input is parked too; the pending ones wait in chatParks so a
+	// single round that needs several approvals asks for them one by one.
+	chatPark  *toolPark
+	chatParks []toolPark
+
+	// The model's checklist and the questions it is waiting an answer for.
+	// Both live behind pointers because they are written from the chat tool
+	// goroutine while the render loop reads them.
+	todo *todo.List
+	asks *ask.Queue
+
+	// aiFallback is set when the session runs on a keyless public provider
+	// because nothing was configured and nothing local answered. chatNotice
+	// explains that in the chat, because prompts and code leave the machine.
+	aiFallback bool
+	chatNotice string
+	// aiFreeURLOverride redirects the keyless fallback to another host; only
+	// tests set it (the public service must never be contacted from a unit
+	// test). Empty means "use the preset".
+	aiFreeURLOverride string
+
+	// Web search: the client (built on first use) and how many queries this
+	// session has spent. webSearchOverride lets tests aim it at a local server.
+	web               *websearch.Client
+	webSearchUsed     int
+	webSearchOverride *websearch.Client
+
+	// The question currently on screen and the answer being typed into it.
+	// askSel indexes into askReq.Choices (-1 while there are none).
+	askReq *ask.Request
+	askIn  []rune
+	askSel int
 
 	// Inline AI request (Ctrl+I)
 	aiInlineOpen     bool
@@ -579,6 +627,20 @@ type Model struct {
 	hoverIcon  statusAction // status-bar icon under the cursor (actNone if none)
 	hoverSplit statusAction // top-right split icon under the cursor
 
+	// Panel text selection: drag with the mouse over the chat transcript or
+	// (with Shift held) over the terminal output; on release the selected
+	// text lands in the system clipboard.
+	chatSelActive bool
+	chatSelAnchor selPos
+	chatSelEnd    selPos
+	termSelActive bool
+	termSelAnchor selPos
+	termSelEnd    selPos
+	dragChat      bool // motion events extend the chat selection
+	dragTerm      bool // motion events extend the terminal selection
+	termFocus     bool // the terminal panel owns keyboard input
+	hoverChatBtn chatButtonAction // chat panel button under the cursor
+
 	// Double-click detection: last click position/time plus a validity flag so
 	// a third quick click starts a fresh pair instead of chaining.
 	lastClickX     int
@@ -652,6 +714,8 @@ func New(paths ...string) Model {
 		bookmarks:             map[string]map[int]bool{},
 		chatThreadPos:         -1,
 		chatPromptIdx:         -1,
+		todo:                  todo.New(),
+		asks:                  ask.NewQueue(),
 	}
 	if w, err := watcher.New(func(p string) {
 		select {
@@ -1402,8 +1466,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, waitForChatOutput(m.chatCh, m.chatGen)
 		}
 	case AITestResultMsg:
-		m.handleAITestResult(msg)
-		return m, nil
+		return m, m.handleAITestResult(msg)
 	case InlineOutputMsg:
 		cmd := m.handleInlineOutput(msg)
 		return m, cmd
@@ -1414,6 +1477,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.handleGhostOutput(msg)
 		return m, cmd
 	case AgentRefreshMsg:
+		// A delegation may have finished while the chat was parked on it; the
+		// queue update is what wakes the conversation back up.
+		m.pollSubAgentPark()
 		return m, waitForAgentRefresh(m.agentCh)
 	case gitTransferMsg:
 		if msg.err != "" {
@@ -1451,7 +1517,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case tea.MouseReleaseMsg:
 		m.mouseDown = false
-		if m.termOpen && msg.Y >= m.termStartRow() && msg.Y < m.termStartRow()+m.termPanelHeight() {
+		switch {
+		case m.dragChat:
+			m.dragChat = false
+			m.copyToClipboard(m.chatSelectionText())
+		case m.dragTerm:
+			m.dragTerm = false
+			m.copyToClipboard(m.termSelectionText())
+		case m.termOpen && msg.Y >= m.termStartRow() && msg.Y < m.termStartRow()+m.termPanelHeight():
 			button := 0
 			if msg.Button == tea.MouseMiddle {
 				button = 1
@@ -1659,14 +1732,17 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// English equivalents used only for keybinding matching.
 	msg.Text = origText
 
-	// The PTY owns input while the panel is focused. Alt+T remains the local
-	// toggle; every other key (including Ctrl+C/Ctrl+Q) is forwarded verbatim.
+	// The PTY owns input while the panel is focused. Alt+T closes the panel
+	// from anywhere; clicking the editor or the chat rail takes focus back,
+	// so the editor and chat keep working while the terminal stays open.
 	if m.termOpen {
 		if s == "alt+t" {
 			m.termOpen = false
 			return nil
 		}
-		return m.handleTerm(msg)
+		if m.termFocus {
+			return m.handleTerm(msg)
+		}
 	}
 
 	// JetBrains-style double Shift opens the palette ("search everywhere").
@@ -1880,6 +1956,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.agentPrompt {
 		return m.handleAgentPrompt(msg)
+	}
+	// A question from ASK_USER grabs the input wherever focus happens to be:
+	// the model is waiting for an answer and any other key would be swallowed
+	// by whatever pane happens to be focused.
+	if m.askReq != nil {
+		return m.handleAskKey(msg)
 	}
 	if m.agentOpen && m.agentFocus {
 		return m.handleAgent(msg)
@@ -2786,6 +2868,19 @@ func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
 	if !m.mouseDown {
 		return nil
 	}
+	if m.dragChat {
+		if row, col, ok := m.chatSelHit(msg.Y, msg.X); ok {
+			m.extendChatSelection(row, col)
+		}
+		return nil
+	}
+	if m.dragTerm {
+		row := msg.Y - m.termStartRow() - 1
+		if row >= 0 && row < len(m.termRows) {
+			m.extendTermSelection(row, msg.X)
+		}
+		return nil
+	}
 	y := msg.Y
 	x := msg.X
 
@@ -2809,11 +2904,22 @@ func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
 // events with no button pressed (requires MouseModeAllMotion).
 func (m *Model) updateStatusHover(msg tea.MouseMotionMsg) {
 	m.updateSplitHover(msg)
+	m.updateChatHover(msg)
 	if m.statusIconsVisible() && msg.Y == m.statusBarRow() {
 		m.hoverIcon = m.statusIconAt(msg.X)
 		return
 	}
 	m.hoverIcon = actNone
+}
+
+// updateChatHover tracks which chat panel button the cursor is over so the
+// hovered cell can highlight, mirroring the status-bar icon strip.
+func (m *Model) updateChatHover(msg tea.MouseMotionMsg) {
+	if m.chatOpen && msg.Y == m.chatButtonsRow() {
+		m.hoverChatBtn = m.chatButtonAt(msg.X)
+		return
+	}
+	m.hoverChatBtn = chatBtnNone
 }
 
 // toggleDebugPanel mirrors the Ctrl+Alt+D shortcut so the status-bar icon and

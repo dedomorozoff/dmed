@@ -134,4 +134,4 @@ jobs:
           mapfile -t assets < <(find dist -type f)
           gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
             --title "$GITHUB_REF_NAME" \
-            --generate-notes
+            --notes-from-tag

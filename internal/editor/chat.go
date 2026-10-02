@@ -15,6 +15,7 @@ import (
 
 	"dmed/internal/agent"
 	"dmed/internal/ai"
+	"dmed/internal/ask"
 	"dmed/internal/debug"
 	"dmed/internal/vcs"
 
@@ -38,11 +39,20 @@ var (
 	chatAITextStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 	chatToolLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 	chatToolTextStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))
+	chatTodoLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("108")).Bold(true)
+	chatTodoTextStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	chatTodoDoneStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
+	chatNoticeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("179"))
+	chatUserBubbleStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("236"))
+	chatScrollThumbStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("61"))
+	chatBtnStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("240"))
+	chatSelStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("61"))
 )
 
 type chatRow struct {
-	kind string // "label-you" | "user" | "label-ai" | "ai" | "tool" | "hint" | "err"
+	kind string // "label-you" | "user" | "label-ai" | "ai" | "ai-code" | "ai-head" | "ai-quote" | "tool" | "label-todo" | "todo" | "todo-done" | "notice" | "hint" | "err"
 	text string
+	rich []mdSeg
 }
 
 type chatEvent struct {
@@ -127,18 +137,32 @@ func (m *Model) toggleChat() tea.Cmd {
 	if m.chatOpen && !m.chatHistLoaded {
 		m.loadChatPanelHistory()
 	}
-	m.ai = m.aiProvider(m.chatModel)
+	if m.chatOpen {
+		// The chat may delegate a task to a sub-agent, which needs the agent
+		// queue; wire it now so the model is offered SUB_AGENT right away
+		// instead of after the user happens to open the agent panel.
+		m.ensureAgent()
+	}
 	if m.chatOpen && m.chatModel == "" {
+		// Resolve the model before the provider is built: building first would
+		// cache a client with an empty model, and the next turn would send
+		// model: "" — Pollinations answers that with "Model not found".
 		m.pickChatModel()
 	}
+	m.ai = m.aiProvider(m.chatModel)
 	return nil
 }
 
 // pickChatModel resolves the model once: DMED_MODEL wins, otherwise the
-// first model reported by the server.
+// configured model, otherwise the first model reported by the server. A fresh
+// install with no working provider falls back to a keyless one (and says so)
+// rather than showing a dead panel. The cached provider is rebuilt whenever the
+// model changes, because a client built earlier (e.g. in toggleChat before the
+// model was known) would keep sending model: "" for every later turn.
 func (m *Model) pickChatModel() {
 	if m.cfg.AI.Model != "" {
 		m.chatModel = m.cfg.AI.Model
+		m.ai = m.aiProvider(m.chatModel)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -147,6 +171,11 @@ func (m *Model) pickChatModel() {
 	models, err := prov.Models(ctx)
 	switch {
 	case err != nil:
+		if m.tryFreeFallback() {
+			m.msg = m.t("chat.fallback_status")
+			m.rebuildChatRows()
+			return
+		}
 		m.msg = "provider offline (" + err.Error() + ")"
 	case len(models) == 0:
 		m.msg = "no models available"
@@ -159,18 +188,11 @@ func (m *Model) pickChatModel() {
 
 func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 	s := msg.String()
-	// While a RUN command awaits confirmation (allow_run = ask) the input is
-	// parked: y runs the held command, n declines it. Either way the decision
-	// is fed back as the tool result and the loop continues.
-	if m.chatRunConfirm != "" {
-		switch gitKeyName(msg) {
-		case "y", "enter":
-			return m.finishChatRunConfirm(true)
-		case "n", "esc", "r":
-			return m.finishChatRunConfirm(false)
-		default:
-			return nil // ignore other keys while parked
-		}
+	// While a tool call is parked for a human decision (e.g. a RUN command with
+	// allow_run = ask) the input is parked too: the decision is fed back as the
+	// tool result and the loop continues.
+	if m.chatPark != nil {
+		return m.handleChatParkKey(msg)
 	}
 	switch s {
 	case "esc":
@@ -178,21 +200,13 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 		if m.chatBusy {
 			return m.chatStop()
 		}
-		m.chatOpen = false
-		m.chatFocus = false
-		m.chatReviewMode = false
-		m.chatClearArm = false
-		m.msg = ""
+		m.closeChat()
 	case "ctrl+q", "ctrl+c":
 		// Ctrl+C stops a running stream; if idle it closes the chat.
 		if m.chatBusy {
 			return m.chatStop()
 		}
-		m.chatOpen = false
-		m.chatFocus = false
-		m.chatReviewMode = false
-		m.chatClearArm = false
-		m.msg = ""
+		m.closeChat()
 	case "enter":
 		return m.chatSubmit()
 	case "backspace":
@@ -212,10 +226,7 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+n": // newer thread (from the newest one: a new thread)
 		m.switchChatThread(-1)
 	case "ctrl+u": // start a new conversation thread
-		m.saveChatThread()
-		m.chatThreadPos = -1
-		m.chatClearArm = false
-		m.resetChatConversation()
+		m.newChatThread()
 	case "ctrl+l": // clear all chat history (press twice to confirm)
 		m.armChatClear()
 	case "ctrl+y": // copy the last error / AI reply to the system clipboard
@@ -234,6 +245,209 @@ func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
+// closeChat hides the rail; shared by Esc, Ctrl+C/Ctrl+Q and the close button.
+func (m *Model) closeChat() {
+	m.chatOpen = false
+	m.chatFocus = false
+	m.chatReviewMode = false
+	m.chatClearArm = false
+	m.msg = ""
+}
+
+// newChatThread starts a fresh conversation, saving the current one; shared
+// by Ctrl+U and the new-thread button.
+func (m *Model) newChatThread() {
+	m.saveChatThread()
+	m.chatThreadPos = -1
+	m.chatClearArm = false
+	m.resetChatConversation()
+}
+
+// ---- Chat action buttons ---------------------------------------------------
+
+// The hint bar under the transcript is a row of pseudo-buttons in the same
+// clickable-cell style as the status-bar icon strip: each renders as
+// " label ", highlights on hover and reacts to a mouse click.
+
+type chatButtonAction int
+
+const (
+	chatBtnNone chatButtonAction = iota
+	chatBtnNew
+	chatBtnCopy
+	chatBtnClear
+	chatBtnClose
+)
+
+var chatButtons = []struct {
+	act chatButtonAction
+	tip string // i18n key for the hover callout
+}{
+	{chatBtnNew, "chat.tip_new"},
+	{chatBtnCopy, "chat.tip_copy"},
+	{chatBtnClear, "chat.tip_clear"},
+	{chatBtnClose, "chat.tip_close"},
+}
+
+type chatBtnCell struct {
+	act   chatButtonAction
+	start int // column inside the panel
+	w     int
+}
+
+// chatButtonCells lays the buttons out right to left so the strip hugs the
+// right edge of the panel, one column clear of the border; buttons that
+// would not fit are dropped, narrow rails keep the rightmost ones.
+func (m Model) chatButtonCells() []chatBtnCell {
+	w := m.chatPanelWidth()
+	cells := make([]chatBtnCell, 0, len(chatButtons))
+	pos := w - 1
+	for i := len(chatButtons) - 1; i >= 0; i-- {
+		b := chatButtons[i]
+		cw := lipgloss.Width(" " + m.chatButtonGlyph(b.act) + " ")
+		if pos-cw < chatBodyPad {
+			break
+		}
+		cells = append(cells, chatBtnCell{b.act, pos - cw, cw})
+		pos -= cw
+	}
+	for i, j := 0, len(cells)-1; i < j; i, j = i+1, j-1 {
+		cells[i], cells[j] = cells[j], cells[i]
+	}
+	return cells
+}
+
+// chatButtonGlyph returns the icon cell content for a chat button.
+func (m Model) chatButtonGlyph(a chatButtonAction) string {
+	switch a {
+	case chatBtnNew:
+		return m.g.btnNew
+	case chatBtnCopy:
+		return m.g.btnCopy
+	case chatBtnClear:
+		return m.g.btnClear
+	case chatBtnClose:
+		return m.g.cross
+	}
+	return "?"
+}
+
+// chatTip returns the hover callout text (label + shortcut) for a button.
+func (m Model) chatTip(a chatButtonAction) string {
+	for _, b := range chatButtons {
+		if b.act == a {
+			return m.t(b.tip)
+		}
+	}
+	return ""
+}
+
+// chatButtonsRow returns the screen row the button strip occupies, or -1 when
+// the panel is too short to show it. The panel starts at screen row 1 (under
+// the tab bar), so its strip sits one row lower than the panel-local index.
+func (m Model) chatButtonsRow() int {
+	h := m.viewHeight()
+	if h < 5 {
+		return -1
+	}
+	return h - m.chatInputHeight()
+}
+
+// chatButtonAt maps a screen column on the button row to an action.
+func (m Model) chatButtonAt(x int) chatButtonAction {
+	local := x - (m.width - m.rightRailWidth())
+	for _, c := range m.chatButtonCells() {
+		if local >= c.start && local < c.start+c.w {
+			return c.act
+		}
+	}
+	return chatBtnNone
+}
+
+// activateChatButton runs the action behind a clicked chat button.
+func (m *Model) activateChatButton(a chatButtonAction) tea.Cmd {
+	if m.chatPark != nil {
+		return nil // a parked decision owns the input; keys and buttons wait
+	}
+	switch a {
+	case chatBtnNew:
+		m.newChatThread()
+	case chatBtnCopy:
+		m.copyChatLast()
+	case chatBtnClear:
+		m.armChatClear()
+	case chatBtnClose:
+		m.closeChat()
+	}
+	return nil
+}
+
+// chatButtonsString renders the button strip as one row of raised icon
+// cells right-aligned over an unstyled background so the strip does not
+// blend into the input line below it.
+func (m Model) chatButtonsString() string {
+	w := m.chatPanelWidth()
+	var b strings.Builder
+	pos := 0
+	for _, c := range m.chatButtonCells() {
+		b.WriteString(strings.Repeat(" ", c.start-pos))
+		pos = c.start
+		st := chatBtnStyle
+		if m.hoverChatBtn == c.act {
+			st = statusHiStyle
+		}
+		b.WriteString(st.Render(" " + m.chatButtonGlyph(c.act) + " "))
+		pos += c.w
+	}
+	b.WriteString(strings.Repeat(" ", maxInt(0, w-pos)))
+	return b.String()
+}
+
+// overlayChatTooltip draws a one-row floating callout directly above the chat
+// button strip, anchored to the hovered button: label plus key combination,
+// mirroring overlayStatusTooltip. The rail is only composed in the plain
+// editor mode, so the overlay must not fire in full-screen modes.
+func (m Model) overlayChatTooltip(rows []string) []string {
+	if m.hoverChatBtn == chatBtnNone || !m.chatOpen {
+		return rows
+	}
+	switch {
+	case m.diffViewOpen, m.aiReviewMode, m.aiFixReviewMode, m.agentReviewMode,
+		m.chatReviewMode, m.conflictOpen, m.aiCfgOpen, m.dapCfgOpen, m.helpOpen:
+		return rows
+	}
+	row := m.chatButtonsRow() - 1
+	if row < 1 || row >= len(rows) {
+		return rows
+	}
+	tip := m.chatTip(m.hoverChatBtn)
+	if tip == "" {
+		return rows
+	}
+	text := statusHiStyle.Render(" " + tip + " ")
+	w := lipgloss.Width(text)
+	x := -1
+	for _, c := range m.chatButtonCells() {
+		if c.act == m.hoverChatBtn {
+			x = m.width - m.rightRailWidth() + c.start
+		}
+	}
+	if x < 0 {
+		return rows
+	}
+	if x+w > m.width {
+		x = m.width - w
+	}
+	if x < 0 {
+		x = 0
+	}
+	fill := m.width - x - w
+	if fill < 0 {
+		fill = 0
+	}
+	rows[row] = strings.Repeat(" ", x) + text + strings.Repeat(" ", fill)
+	return rows
+}
 // copyChatLast puts the most useful chunk of the transcript into the system
 // clipboard: the last error if there is one, otherwise the last assistant
 // reply. It is the way to grab AI output (error text included) since the
@@ -347,6 +561,12 @@ func (m *Model) chatStop() tea.Cmd {
 // native tool definitions. When the stream finishes, tool calls (if any) are
 // delivered together with the Done marker on the channel.
 func (m *Model) startChatTurn() tea.Cmd {
+	if m.ai == nil {
+		// The settings wizard nils the cached provider whenever the [ai]
+		// config changes; the next turn must rebuild it here, or the stream
+		// goroutine below dies on a nil interface call.
+		m.ai = m.aiProvider(m.chatModel)
+	}
 	msgs := m.chatRequestMessages()
 	if m.chatCancel != nil {
 		m.chatCancel()
@@ -362,7 +582,7 @@ func (m *Model) startChatTurn() tea.Cmd {
 	go debug.CapturePanicReport(func() {
 		defer close(ch)
 		var tools []ai.ToolCall
-		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs, Tools: chatToolDefs(), Options: m.aiRequestOptions()}, ai.Handler{
+		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs, Tools: m.activeChatToolDefs(), Options: m.aiRequestOptions()}, ai.Handler{
 			Delta: func(d string) {
 				select {
 				case ch <- chatEvent{delta: d, gen: gen}:
@@ -396,6 +616,11 @@ func (m *Model) startChatTurn() tea.Cmd {
 func (m *Model) chatRequestMessages() []ai.Message {
 	var b strings.Builder
 	b.WriteString(m.cfg.AI.SystemPrompt)
+	if notice := m.modeNotice(); notice != "" {
+		// Plan mode is enforced by which tools exist, but the model still has to
+		// be told, or it will keep trying to edit and reporting failure.
+		b.WriteString("\n\n" + notice)
+	}
 	if len(m.chatMsgs) == 0 {
 		if t := m.cur(); t != nil && t.path != "" {
 			b.WriteString("\n\nCurrent file: " + t.path + "\n```")
@@ -497,22 +722,35 @@ type chatEditTrack struct {
 	label     string
 }
 
+// toolPark is one parked tool call waiting for a human decision, together with
+// the slot in the pending results whose placeholder gets replaced when the
+// decision is made. Parks are queued rather than handled one at a time inline
+// so a single round may park on several commands without losing any of them.
+type toolPark struct {
+	park      Park
+	resultIdx int
+}
+
 // handleChatToolsDone runs a batch of native tool calls after a stream ends.
 // Non-edit results are finalised immediately; EDIT proposals pause the loop
 // for a side-by-side diff review. It returns a tea.Cmd that continues the
-// conversation, or nil when waiting on human review.
+// conversation, or nil when waiting on human review or a parked decision.
 func (m *Model) handleChatToolsDone(content string, tools []ai.ToolCall) tea.Cmd {
 	before := snapshotFiles(m.root)
 	results := make([]ai.Message, 0, len(tools))
 	var pending []agent.Change
 	var tracks []chatEditTrack
+	var parks []toolPark
 	for _, tc := range tools {
-		res, chg := m.execChatTool(tc)
-		if chg != nil {
-			pending = append(pending, *chg)
-			tracks = append(tracks, chatEditTrack{resultIdx: len(results), label: shortenPath(m.baseDir(), chg.Path)})
+		res := m.execChatTool(tc)
+		if res.Change != nil {
+			pending = append(pending, *res.Change)
+			tracks = append(tracks, chatEditTrack{resultIdx: len(results), label: shortenPath(m.baseDir(), res.Change.Path)})
 		}
-		results = append(results, ai.Message{Role: "tool", ToolCallID: tc.ID, ToolName: tc.Name, Content: res})
+		if res.Park.Kind != ParkNone {
+			parks = append(parks, toolPark{park: res.Park, resultIdx: len(results)})
+		}
+		results = append(results, ai.Message{Role: "tool", ToolCallID: tc.ID, ToolName: tc.Name, Content: res.Text})
 	}
 
 	// Open every file the tools created or rewrote (e.g. by RUN) in tabs and
@@ -524,11 +762,10 @@ func (m *Model) handleChatToolsDone(content string, tools []ai.ToolCall) tea.Cmd
 	m.chatPendingResults = results
 	m.chatPendingChanges = pending
 	m.chatEditTracks = tracks
+	m.chatParks = parks
 	m.rebuildChatRows()
 
-	if confirm := m.pendingRunConfirm(); confirm != "" {
-		m.chatRunConfirm = confirm
-		m.msg = "RUN: " + confirm + "  (y run / n deny)"
+	if m.startNextPark() {
 		return nil
 	}
 	if len(pending) > 0 {
@@ -538,46 +775,85 @@ func (m *Model) handleChatToolsDone(content string, tools []ai.ToolCall) tea.Cmd
 	return m.finalizeChatTools()
 }
 
+// startNextPark activates the next parked tool call (if any) and puts the
+// decision in front of the user. It reports whether the loop is now parked.
+// This is the single place that suspends the tool loop, so every park kind
+// behaves the same way in the transcript, in the status line and in key
+// handling.
+func (m *Model) startNextPark() bool {
+	if len(m.chatParks) == 0 {
+		m.chatPark = nil
+		return false
+	}
+	p := m.chatParks[0]
+	m.chatParks = m.chatParks[1:]
+	m.chatPark = &p
+	switch p.park.Kind {
+	case ParkRunConfirm:
+		m.msg = "RUN: " + p.park.Text + "  (y run / n deny)"
+		return true
+	case ParkAskUser:
+		m.startAsk(p.park.Ask)
+		return true
+	case ParkSwitchMode:
+		m.msg = m.t("chat.switch_status")
+		return true
+	case ParkSubAgent:
+		// A delegation is already running in the background; the status line
+		// shows the wait and Esc cancels it.
+		m.msg = m.t("chat.subagent_status")
+		return true
+	default:
+		m.chatPark = nil
+		return false
+	}
+}
+
+// startAsk puts a question on screen: the chat is opened (a question the user
+// cannot see is a hang, not a decision), and the input is cleared so the answer
+// starts from nothing. The chosen suggestion defaults to the first one.
+func (m *Model) startAsk(req *ask.Request) {
+	m.askReq = req
+	m.askIn = nil
+	m.askSel = 0
+	m.chatOpen = true
+	m.chatFocus = true
+	m.msg = m.t("chat.ask_status")
+}
+
 // finishChatRunConfirm resolves a parked RUN confirmation: true executes the
 // held command via runCommand (capped output), false records a decline. The
-// marker placeholder in the pending results is replaced with the real outcome
-// so the model sees exactly what happened, then the tool loop continues.
+// placeholder in the pending results is replaced with the real outcome so the
+// model sees exactly what happened, then the loop continues (with the next
+// parked call, if any, or with the next turn).
 func (m *Model) finishChatRunConfirm(run bool) tea.Cmd {
-	cmd := m.chatRunConfirm
-	m.chatRunConfirm = ""
+	park := m.chatPark
+	m.chatPark = nil
+	if park == nil {
+		return m.finalizeChatTools()
+	}
+	cmd := park.park.Text
 	var out string
 	if run {
 		out = runCommand(m.root, cmd)
 	} else {
 		out = "[RUN not approved by user] " + cmd
 	}
-	for i, res := range m.chatPendingResults {
-		if strings.HasPrefix(res.Content, "\x00DMED_RUN_CONFIRM\x00") {
-			m.chatPendingResults[i].Content = out
-		}
-	}
+	resolveParkedResult(m.chatPendingResults, park.resultIdx, out)
 	m.msg = ""
 	m.rebuildChatRows()
+	if m.startNextPark() {
+		return nil
+	}
 	return m.finalizeChatTools()
 }
 
-// pendingRunConfirm scans the just-executed tool results and, if the model
-// issued a RUN while allow_run = ask, returns the held command (so the loop can
-// park for confirmation); otherwise it returns "".
-func (m *Model) pendingRunConfirm() string {
-	if !strings.EqualFold(m.cfg.AI.AllowRun, "ask") {
-		return ""
-	}
-	for _, res := range m.chatPendingResults {
-		if strings.HasPrefix(res.Content, "\x00DMED_RUN_CONFIRM\x00") {
-			cmd := res.Content[len("\x00DMED_RUN_CONFIRM\x00"):]
-			if i := strings.Index(cmd, "\x00"); i >= 0 {
-				cmd = cmd[:i]
-			}
-			return cmd
-		}
-	}
-	return ""
+// clearChatParks drops every parked decision and the active one. Used when the
+// conversation is reset or a new thread is loaded, so a stale park can never be
+// resumed into an unrelated conversation.
+func (m *Model) clearChatParks() {
+	m.chatPark = nil
+	m.chatParks = nil
 }
 
 // openTouchedFiles diffs on-disk snapshots taken before and after a tool round
@@ -618,6 +894,45 @@ func (m *Model) openTouchedFiles(before map[string]fileState, results []ai.Messa
 	}
 }
 
+// handleChatParkKey routes keys while the tool loop is parked. Every park kind
+// gets its own decision here, and keys the active decision does not understand
+// are ignored so a stray keystroke cannot approve anything.
+func (m *Model) handleChatParkKey(msg tea.KeyPressMsg) tea.Cmd {
+	park := m.chatPark
+	if park == nil {
+		return nil
+	}
+	switch park.park.Kind {
+	case ParkRunConfirm:
+		switch gitKeyName(msg) {
+		case "y", "enter":
+			return m.finishChatRunConfirm(true)
+		case "n", "esc", "r":
+			return m.finishChatRunConfirm(false)
+		}
+		return nil // ignore other keys while parked
+	case ParkAskUser:
+		return m.handleAskKey(msg)
+	case ParkSwitchMode:
+		switch gitKeyName(msg) {
+		case "y", "enter":
+			return m.finishChatSwitchMode(true)
+		case "n", "esc", "r":
+			return m.finishChatSwitchMode(false)
+		}
+		return nil
+	case ParkSubAgent:
+		// Nothing to answer: the loop resumes by itself when the task ends.
+		// Esc is the escape hatch, or the wait could last minutes.
+		if gitKeyName(msg) == "esc" {
+			m.cancelParkedSubAgent()
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
 // finalizeChatTools commits the pending assistant + tool-result messages into
 // the conversation and starts the next turn, capping the tool loop depth.
 func (m *Model) finalizeChatTools() tea.Cmd {
@@ -627,6 +942,7 @@ func (m *Model) finalizeChatTools() tea.Cmd {
 	m.chatPendingResults = nil
 	m.chatPendingChanges = nil
 	m.chatEditTracks = nil
+	m.clearChatParks()
 	m.chatToolRound++
 	m.saveChatThread()
 	m.rebuildChatRows()
@@ -860,6 +1176,29 @@ func (m *Model) clampChatScroll() {
 	}
 }
 
+// chatBodyRange returns the first visible chatRows index and the body height;
+// shared by the panel renderer, scroll clamping and selection hit-testing so
+// all three agree on the geometry.
+func (m Model) chatBodyRange(total int) (start, bodyH int) {
+	h := m.viewHeight()
+	inputH := m.chatInputHeight()
+	bodyH = h - 1 - inputH // header + multi-line input
+	if h >= 5 {
+		bodyH = h - 2 - inputH // also reserve room for the button strip
+	}
+	if bodyH < 1 {
+		bodyH = 1
+	}
+	start = total - bodyH + m.chatScroll
+	if start > total-bodyH {
+		start = total - bodyH
+	}
+	if start < 0 {
+		start = 0
+	}
+	return start, bodyH
+}
+
 func (m *Model) rebuildChatRows() {
 	inner := m.chatInnerWidth()
 	rows := make([]chatRow, 0, 64)
@@ -882,14 +1221,14 @@ func (m *Model) rebuildChatRows() {
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {
 				if msg.Content != "" {
-					addText(" ai", "label-ai", "ai", msg.Content)
+					m.addAIRows(&rows, msg.Content)
 				}
 				for _, tc := range msg.ToolCalls {
 					add("label-tool", " "+m.g.iconTool+" "+tc.Name+" "+toolArgSummary(tc))
 				}
 				add("hint", "")
 			} else {
-				addText(" ai", "label-ai", "ai", msg.Content)
+				m.addAIRows(&rows, msg.Content)
 			}
 		}
 	}
@@ -897,13 +1236,21 @@ func (m *Model) rebuildChatRows() {
 		add("hint", " thinking...")
 	}
 	if m.chatReply != "" {
-		addText(" ai", "label-ai", "ai", m.chatReply)
+		m.addAIRows(&rows, m.chatReply)
 	}
 	if m.chatErr != "" {
 		for _, l := range wrapRunes("[error] "+m.chatErr, inner) {
 			add("err", l)
 		}
 	}
+	if m.chatNotice != "" {
+		for _, l := range wrapRunes(m.chatNotice, inner) {
+			add("notice", l)
+		}
+		add("hint", "")
+	}
+	// The plan goes last so it stays visible without scrolling back.
+	m.todoBlock(add, inner)
 	if len(rows) == 0 {
 		add("hint", " AI works through presets: Ollama, OpenAI, DeepSeek,")
 		add("hint", " Groq, LM Studio, vLLM, Unsloth or any OpenAI-compatible server.")

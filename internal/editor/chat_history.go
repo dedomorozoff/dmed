@@ -144,7 +144,20 @@ func (m *Model) resetChatConversation() {
 	m.chatIn = nil
 	m.chatScroll = 0
 	m.chatReviewMode = false
-	m.chatRunConfirm = ""
+	m.clearChatParks()
+	m.askReq = nil
+	m.askIn = nil
+	m.askSel = 0
+	if m.asks != nil {
+		// A question from the discarded conversation must not stay pending:
+		// the user would be asked about work that no longer exists.
+		for _, id := range m.asks.Pending() {
+			m.asks.Cancel(id)
+		}
+	}
+	if m.todo != nil {
+		m.todo.Clear()
+	}
 	m.rebuildChatRows()
 }
 

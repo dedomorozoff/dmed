@@ -54,7 +54,7 @@ func (m Model) statusIconsVisible() bool {
 		m.finderOpen, m.paletteOpen, m.langChooserOpen, m.pluginStoreOpen,
 		m.aiInlineOpen, m.aiInlineBusy, m.aiFixOpen, m.aiFixBusy,
 		m.aiReviewMode, m.aiFixReviewMode, m.agentReviewMode, m.chatReviewMode,
-		m.agentPrompt, m.treeConfirm != "", m.aiCfgOpen, m.helpOpen:
+		m.agentPrompt, m.askReq != nil, m.treeConfirm != "", m.aiCfgOpen, m.helpOpen:
 		return false
 	case m.gitOpen:
 		// Git keeps its context/diff line above the application status bar.

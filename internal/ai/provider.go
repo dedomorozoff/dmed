@@ -6,6 +6,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -83,6 +84,13 @@ type Config struct {
 	URL    string       // base URL
 	Model  string       // model tag
 	APIKey string       // API key (OpenAI only)
+	// APIPath is the path prefix of the OpenAI-compatible endpoints. Almost
+	// every server uses /v1, but Pollinations serves the same protocol under
+	// /openai, so the prefix is configurable instead of hardcoded.
+	APIPath string
+	// ModelsPath overrides the model-list path when it differs from
+	// APIPath + "/models" (Pollinations lists its text models at /models).
+	ModelsPath string
 }
 
 // Stream timeouts are deliberately split: the header wait is bounded so a
@@ -110,6 +118,36 @@ func newHTTPClient() *http.Client {
 }
 
 // NewProvider creates a Provider based on the given config.
+// hostOf returns the host[:port] of a base URL, for the per-host request gate.
+// An unparsable URL yields the whole string, which only costs gate sharing.
+func hostOf(u string) string {
+	if parsed, err := url.Parse(u); err == nil && parsed.Host != "" {
+		return parsed.Host
+	}
+	return u
+}
+
+// normalizeProviderURL corrects the Pollinations domain mix-up: the advertised
+// https://pollinations.ai is the landing site, not the API — a POST there never
+// returns headers and the caller only sees the cryptic "timeout awaiting
+// response headers". The OpenAI-compatible endpoint lives on
+// text.pollinations.ai, so the bare domain is rewritten to it.
+func normalizeProviderURL(u string) string {
+	parsed, err := url.Parse(u)
+	if err != nil || parsed.Host == "" {
+		return u
+	}
+	switch parsed.Hostname() {
+	case "pollinations.ai", "www.pollinations.ai":
+		host := "text.pollinations.ai"
+		if p := parsed.Port(); p != "" {
+			host += ":" + p
+		}
+		parsed.Host = host
+	}
+	return parsed.String()
+}
+
 func NewProvider(cfg Config) Provider {
 	if cfg.URL == "" {
 		switch cfg.Type {
@@ -127,16 +165,30 @@ func NewProvider(cfg Config) Provider {
 	if cfg.Type == OpenAIProvider && strings.HasSuffix(cfg.URL, "/v1") {
 		cfg.URL = strings.TrimSuffix(cfg.URL, "/v1")
 	}
+	if cfg.Type == OpenAIProvider {
+		cfg.URL = normalizeProviderURL(cfg.URL)
+	}
 
 	httpClient := newHTTPClient()
 
 	switch cfg.Type {
 	case OpenAIProvider:
+		apiPath := "/" + strings.Trim(cfg.APIPath, "/")
+		if apiPath == "/" {
+			apiPath = "/v1"
+		}
+		modelsPath := apiPath + "/models"
+		if p := "/" + strings.Trim(cfg.ModelsPath, "/"); cfg.ModelsPath != "" {
+			modelsPath = p
+		}
 		return &openAIProvider{
-			url:    cfg.URL,
-			model:  cfg.Model,
-			apiKey: cfg.APIKey,
-			http:   httpClient,
+			url:        cfg.URL,
+			host:       hostOf(cfg.URL),
+			apiPath:    apiPath,
+			modelsPath: modelsPath,
+			model:      cfg.Model,
+			apiKey:     cfg.APIKey,
+			http:       httpClient,
 		}
 	default:
 		return &ollamaProvider{
