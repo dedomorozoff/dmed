@@ -926,11 +926,10 @@ func (m Model) treePanel(h int) []string {
 		} else {
 			cell = strings.Repeat(" ", inner)
 		}
-	rows = append(rows, cell+" ")
+		rows = append(rows, cell+" ")
+	}
+	return rows
 }
-return rows
-}
-
 
 func maxInt(a, b int) int {
 	if a > b {

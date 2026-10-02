@@ -33,16 +33,16 @@ import (
 // "propose then review" flow instead of parsing fragile text markers.
 
 var (
-	chatUserLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true)
-	chatAILabelStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("176")).Bold(true)
-	chatUserTextStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("255"))
-	chatAITextStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	chatToolLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-	chatToolTextStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))
-	chatTodoLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("108")).Bold(true)
-	chatTodoTextStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	chatTodoDoneStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
-	chatNoticeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("179"))
+	chatUserLabelStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true)
+	chatAILabelStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("176")).Bold(true)
+	chatUserTextStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("255"))
+	chatAITextStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
+	chatToolLabelStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	chatToolTextStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))
+	chatTodoLabelStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("108")).Bold(true)
+	chatTodoTextStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	chatTodoDoneStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
+	chatNoticeStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("179"))
 	chatUserBubbleStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("236"))
 	chatScrollThumbStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("61"))
 	chatBtnStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("240"))
@@ -448,6 +448,7 @@ func (m Model) overlayChatTooltip(rows []string) []string {
 	rows[row] = strings.Repeat(" ", x) + text + strings.Repeat(" ", fill)
 	return rows
 }
+
 // copyChatLast puts the most useful chunk of the transcript into the system
 // clipboard: the last error if there is one, otherwise the last assistant
 // reply. It is the way to grab AI output (error text included) since the
