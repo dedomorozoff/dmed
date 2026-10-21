@@ -3,7 +3,9 @@ package vcs
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -369,5 +371,70 @@ func TestGitRemoteFetchPush(t *testing.T) {
 	}
 	if remoteRef.Hash() != head.Hash() {
 		t.Fatalf("origin/master = %s, want %s", remoteRef.Hash(), head.Hash())
+	}
+}
+
+// TestStageWithAlternateSpelling reproduces the GitHub Windows-runner failing
+// shape without real 8.3 names: go-git exposes the worktree root in its
+// resolved form, and a Caller may hold the same directory spelled with a
+// different letter case (or a short name). On a naive Rel that grows ".."
+// hops, and these go-git's Windows worktree checks reject outright; Stage
+// must canonicalize instead. This is the exact failure seen with a %TEMP%
+// at C:\Users\RUNNER~1\AppData\Local\Temp.
+func TestStageWithAlternateSpelling(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("casing divergence is a Windows path reserve, not a Linux one")
+	}
+	dir := t.TempDir()
+	// A caller's spelling of the same directory with the first path component
+	// after the volume flipped in case.
+	parts := strings.Split(dir, string(filepath.Separator))
+	variant, ok := func() (string, bool) {
+		for i := 1; i < len(parts); i++ {
+			if alt := strings.ToUpper(parts[i][:1]) + parts[i][1:]; alt != parts[i] {
+				parts[i] = alt
+				return strings.Join(parts, string(filepath.Separator)), true
+			}
+		}
+		return "", false
+	}()
+	if !ok || variant == dir {
+		t.Skip("could not derive an alternate spelling for this temp dir")
+	}
+	repo, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(variant, "sample.txt")
+	if err := os.WriteFile(f, []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Before the canonicalization Stage grew ".." hops and go-git failed the
+	// path with "invalid path ... cannot use \"..\"".
+	if err := repo.Stage(f); err != nil {
+		t.Fatalf("stage across spellings must work: %v", err)
+	}
+	files, err := repo.StatusFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Path != "sample.txt" {
+		t.Fatalf("status = %+v, want exactly one staged sample.txt", files)
+	}
+
+	// HEAD content and blame speak the same requirement.
+	if _, err := repo.Commit("add sample"); err != nil {
+		t.Fatal(err)
+	}
+	have, err := repo.HeadContent(f)
+	if err != nil {
+		t.Fatalf("head content across spellings: %v", err)
+	}
+	if want := "hello\n"; have != want {
+		t.Fatalf("head content = %q, want %q", have, want)
+	}
+	d := repo.DiffBuffer(f, "hello\nbye\n")
+	if len(d.Hunks) != 1 {
+		t.Fatalf("expected 1 hunk after edit, got %+v", d.Hunks)
 	}
 }

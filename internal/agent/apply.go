@@ -110,8 +110,18 @@ func (a *Applier) withinRoot(path string) error {
 	if err != nil {
 		return fmt.Errorf("cannot resolve path %s: %w", path, err)
 	}
+	// Resolve the existing part of both sides so they land in the same form:
+	// symlinked parents cannot be used to escape, and Windows short names
+	// (a %TEMP% at C:\Users\RUNNER~1) must not make an in-root path look
+	// outside once the root was resolved to its long form.
 	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil {
 		abs = resolved
+	} else if d := filepath.Dir(abs); d != abs {
+		// The final component is a file about to be created: evaluating the
+		// directory part still canonicalizes the path the same way.
+		if resolved, rerr := filepath.EvalSymlinks(d); rerr == nil {
+			abs = filepath.Join(resolved, filepath.Base(abs))
+		}
 	}
 	if resolvedRoot, rerr := filepath.EvalSymlinks(root); rerr == nil {
 		root = resolvedRoot

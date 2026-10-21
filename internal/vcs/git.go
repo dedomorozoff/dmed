@@ -48,6 +48,40 @@ type Repo struct {
 	r    *git.Repository
 }
 
+// cleanAbs canonicalizes an absolute path against the filesystem: symlinks
+// resolved, and what bites the GitHub Windows runners too — 8.3 short names
+// (a %TEMP% like C:\Users\RUNNER~1\AppData\Local\Temp). go-git exposes the
+// worktree root in its resolved (long) form, so a relative path computed
+// between that and a short-form caller path grows a tower of ".." hops —
+// and the worktree filesystem rejects paths containing ".." outright. The
+// final component may not exist yet (a file about to be created): only the
+// directory part is evaluated in that case.
+func cleanAbs(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	if long, err := filepath.EvalSymlinks(abs); err == nil {
+		return long
+	}
+	dir, base := filepath.Split(abs)
+	if long, err := filepath.EvalSymlinks(filepath.Clean(dir)); err == nil {
+		return filepath.Join(long, base)
+	}
+	return abs
+}
+
+// relTo computes the worktree-relative form of path: it canonicalizes the
+// caller's spelling first, so both sides of Rel are the same directory
+// spelled the same way.
+func (repo *Repo) relTo(path string) (string, error) {
+	rel, err := filepath.Rel(repo.Root, cleanAbs(path))
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
+}
+
 // Open finds and opens the Git repository containing path.
 func Open(path string) (*Repo, error) {
 	abs, err := filepath.Abs(path)
@@ -339,7 +373,7 @@ func (repo *Repo) Unstage(path string) error {
 	if err != nil {
 		return err
 	}
-	rel, err := filepath.Rel(repo.Root, path)
+	rel, err := repo.relTo(path)
 	if err != nil {
 		rel = path
 	}
@@ -394,11 +428,10 @@ func (repo *Repo) StatusSummary() string {
 
 // HeadContent returns the content of the file at HEAD.
 func (repo *Repo) HeadContent(absPath string) (string, error) {
-	rel, err := filepath.Rel(repo.Root, absPath)
+	rel, err := repo.relTo(absPath)
 	if err != nil {
 		return "", err
 	}
-	rel = filepath.ToSlash(rel)
 
 	head, err := repo.r.Head()
 	if err != nil {
@@ -583,7 +616,7 @@ func (repo *Repo) Stage(path string) error {
 	if err != nil {
 		return err
 	}
-	rel, err := filepath.Rel(repo.Root, path)
+	rel, err := repo.relTo(path)
 	if err != nil {
 		rel = path
 	}
@@ -669,11 +702,10 @@ type BlameLine struct {
 // Blame returns the authorship of every line of the file at the current HEAD.
 // Lines without a commit (new files, not yet committed) are absent.
 func (repo *Repo) Blame(absPath string) ([]BlameLine, error) {
-	rel, err := filepath.Rel(repo.Root, absPath)
+	rel, err := repo.relTo(absPath)
 	if err != nil {
-		rel = absPath
+		rel = filepath.ToSlash(absPath)
 	}
-	rel = filepath.ToSlash(rel)
 	head, err := repo.r.Head()
 	if err != nil {
 		return nil, err
