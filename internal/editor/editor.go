@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -338,9 +339,26 @@ type Model struct {
 	searchQuery        []rune
 	searchMatchIdx     int
 	searchTotalMatches int
+	// searchRegex toggles regex mode (Tab in the search prompt); the compiled
+	// pattern is memoized so rendering does not recompile it per line.
+	searchRegex   bool
+	searchRe      *regexp.Regexp
+	searchReQuery string
 	replaceOpen        bool
 	replaceWith        []rune
 	replaceFocusFind   bool
+
+	// Find in project (Ctrl+Shift+F): async full-text search across the tree.
+	projSearchOpen  bool
+	projSearchInput bool // prompt mode (true) vs results navigation
+	projSearchQ     []rune
+	projSearchRegex bool
+	projSearchHits  []projHit
+	projSearchSel   int
+	projSearchOff   int
+	projSearchGen   int
+	projSearchScan  bool // a background walk is in flight
+	projSearchCh    chan projSearchMsg
 
 	// Go to line
 	gotoOpen bool
@@ -1038,6 +1056,9 @@ func (m *Model) pasteInput(text string) {
 			m.updateSearchMatches(false)
 		}
 		return
+	case m.projSearchOpen && m.projSearchInput:
+		m.projSearchQ = append(m.projSearchQ, []rune(text)...)
+		return
 	case m.finderOpen:
 		m.finderQ = append(m.finderQ, []rune(text)...)
 		m.refind()
@@ -1422,6 +1443,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil && !strings.Contains(strings.ToLower(msg.err.Error()), "killed") {
 			m.msg = m.t("term.error", msg.err.Error())
 		}
+	case projSearchMsg:
+		m.handleProjSearchMessage(msg)
+		return m, waitForProjSearch(m.projSearchCh)
 	case ChatOutputMsg:
 		if msg.Gen != m.chatGen {
 			return m, nil // stale event from a cancelled/cleared conversation
@@ -1823,6 +1847,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+f":
 		m.startSearch()
 		return nil
+	case "ctrl+shift+f":
+		// On legacy terminals Ctrl+Shift+F arrives as Ctrl+F (both are the
+		// control byte), so this only fires where the terminal can tell them
+		// apart; the palette command covers the rest.
+		m.startProjectSearch()
+		return nil
 	case "ctrl+h":
 		m.startReplace()
 		return nil
@@ -2007,6 +2037,11 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.treeFocus {
 		return m.handleTree(msg)
+	}
+	// Find in Project owns its keys first: it is a bottom overlay like the
+	// finder, and its Enter must not jump the file-search cursor underneath.
+	if m.projSearchOpen {
+		return m.handleProjSearch(msg)
 	}
 	if m.dapOpen {
 		return m.handleDap(msg)
@@ -2435,6 +2470,11 @@ func (m *Model) handleSearch(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "ctrl+h":
 		m.startReplace()
+	case "tab":
+		// Regex mode toggle. Applies to this prompt and to Ctrl+H replace
+		// (same query); the hint row shows the (.* state.
+		m.searchRegex = !m.searchRegex
+		m.updateSearchMatches(false)
 	case "backspace":
 		if n := len(m.searchQuery); n > 0 {
 			m.searchQuery = m.searchQuery[:n-1]
@@ -2494,8 +2534,9 @@ func (m *Model) handleReplace(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 type searchMatch struct {
-	line int
-	col  int
+	line   int // 0-based buffer line; 0 for per-line matches
+	col    int
+	length int
 }
 
 // startGotoPrompt opens the "Go to Line" input (empty; type N, N:C, or +N/-N).
@@ -2620,27 +2661,6 @@ func (m *Model) toggleWordWrap() {
 	}
 }
 
-func findMatchesInRunes(line []rune, query []rune) []int {
-	if len(query) == 0 || len(line) < len(query) {
-		return nil
-	}
-	var cols []int
-	for i := 0; i <= len(line)-len(query); i++ {
-		match := true
-		for j := 0; j < len(query); j++ {
-			if line[i+j] != query[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			cols = append(cols, i)
-			i += len(query) - 1
-		}
-	}
-	return cols
-}
-
 func (m *Model) allMatches() []searchMatch {
 	if len(m.searchQuery) == 0 {
 		return nil
@@ -2648,9 +2668,8 @@ func (m *Model) allMatches() []searchMatch {
 	t := m.cur()
 	var matches []searchMatch
 	for ln := 0; ln < t.buf.LineCount(); ln++ {
-		cols := findMatchesInRunes(t.buf.LineAt(ln), m.searchQuery)
-		for _, col := range cols {
-			matches = append(matches, searchMatch{line: ln, col: col})
+		for _, hit := range m.matchRanges(t.buf.LineAt(ln)) {
+			matches = append(matches, searchMatch{line: ln, col: hit.col, length: hit.length})
 		}
 	}
 	return matches
@@ -2709,21 +2728,23 @@ func (m *Model) doReplace() {
 	}
 	curLine := t.buf.CurLine()
 	curCol := t.buf.Col()
-	qLen := len(m.searchQuery)
 
-	onMatch := false
+	onMatch := 0
 	for _, mPos := range matches {
 		if mPos.line == curLine && mPos.col == curCol {
-			onMatch = true
+			onMatch = mPos.length
 			break
 		}
 	}
-	if !onMatch {
+	if onMatch == 0 {
 		m.updateSearchMatches(false)
 		return
 	}
 
-	t.buf.ReplaceRange(curLine, curCol, qLen, m.replaceWith)
+	// Regex mode replaces the whole matched range; literal mode replaces
+	// exactly the query length (the two only differ when the pattern has run
+	// wild, and then they are the same too).
+	t.buf.ReplaceRange(curLine, curCol, onMatch, m.replaceWith)
 	m.msg = m.t("msg.replaced_one")
 	m.updateSearchMatches(false)
 }
@@ -2733,7 +2754,18 @@ func (m *Model) doReplaceAll() {
 		return
 	}
 	t := m.cur()
-	count := t.buf.ReplaceAll(string(m.searchQuery), string(m.replaceWith))
+	var count int
+	if m.searchRegex {
+		re := m.searchRegexCompiled()
+		if re == nil {
+			// Invalid pattern: never fall back to literal here — the user
+			// asked to replace by pattern, not by the pattern's raw text.
+			return
+		}
+		count = t.buf.ReplaceAllRE(re, string(m.replaceWith))
+	} else {
+		count = t.buf.ReplaceAll(string(m.searchQuery), string(m.replaceWith))
+	}
 	if count == 1 {
 		m.msg = m.t("msg.replaced_one")
 	} else {

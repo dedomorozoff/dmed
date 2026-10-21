@@ -62,6 +62,7 @@ var helpEntries = []helpEntry{
 	{"Ctrl+C / Ctrl+X / Ctrl+V", "help.clipboard"},
 	{"", ""},
 	{"Ctrl+F", "help.search"},
+	{"Ctrl+Shift+F", "help.proj_search"},
 	{"Ctrl+H", "help.replace"},
 	{"Ctrl+L", "help.goto_line"},
 	{"Alt+Z", "help.word_wrap"},
@@ -270,7 +271,7 @@ func (m Model) contextBottomExtraRows() int {
 }
 
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.contextBottomExtraRows() - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows() - m.askExtraRows()
+	h := m.height - 2 - m.contextBottomExtraRows() - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows() - m.askExtraRows() - m.projSearchExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -416,6 +417,9 @@ func (m Model) View() tea.View {
 	}
 	if m.paletteOpen {
 		rows = append(rows, m.withDivider(m.palettePanel())...)
+	}
+	if m.projSearchOpen {
+		rows = append(rows, m.withDivider(m.projSearchPanel())...)
 	}
 	if m.langChooserOpen {
 		rows = append(rows, m.withDivider(m.langChooserPanel())...)
@@ -1659,6 +1663,12 @@ func (m Model) conflictLine() string {
 
 func (m Model) searchLine() string {
 	line := statusHiStyle.Render(m.t("search.label")) + statusStyle.Render(string(m.searchQuery)) + cursorStyle.Render(" ")
+	if m.searchRegex {
+		line += hintStyle.Render(m.t("search.regex_on"))
+	}
+	if m.searchRegexBad() {
+		line += hintStyle.Render(m.t("search.bad_regex"))
+	}
 	if len(m.searchQuery) > 0 {
 		if m.searchTotalMatches > 0 {
 			line += hintStyle.Render(fmt.Sprintf(" [%d/%d]", m.searchMatchIdx+1, m.searchTotalMatches))
@@ -1920,6 +1930,73 @@ func (m Model) finderPanel() []string {
 	return rows
 }
 
+func (m Model) projSearchExtraRows() int {
+	if !m.projSearchOpen {
+		return 0
+	}
+	n := len(m.projSearchHits)
+	if n > projSearchVisible {
+		n = projSearchVisible
+	}
+	return n + 3 // divider + prompt row + hint row
+}
+
+func (m Model) projSearchPanel() []string {
+	rows := make([]string, 0, projSearchVisible+3)
+	n := len(m.projSearchHits)
+	if n > 0 {
+		end := m.projSearchOff + projSearchVisible
+		for i := m.projSearchOff; i < end && i < n; i++ {
+			rows = append(rows, m.projSearchRow(i))
+		}
+	} else if len(m.projSearchQ) > 0 {
+		rows = append(rows, statusStyle.Render(padTo(" "+m.projSearchStatus()+" ", m.width)))
+	}
+	rows = append(rows, m.projSearchPromptLine())
+	rows = append(rows, hintStyle.Render(padTo(m.projSearchHint(), m.width)))
+	return rows
+}
+
+func (m Model) projSearchPromptLine() string {
+	line := statusHiStyle.Render(m.t("psearch.prompt")) + statusStyle.Render(string(m.projSearchQ))
+	if m.projSearchInput {
+		line += cursorStyle.Render(" ")
+	} else {
+		line += statusStyle.Render(" ")
+	}
+	if m.projSearchRegex {
+		line += hintStyle.Render(m.t("search.regex_on"))
+	}
+	line += hintStyle.Render(m.projSearchStatus())
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+func (m Model) projSearchRow(i int) string {
+	h := m.projSearchHits[i]
+	prefix := fmt.Sprintf(" %s:%d: ", h.path, h.line+1)
+	avail := m.width - lipgloss.Width(prefix) - 1
+	runes := []rune(strings.TrimRight(h.text, "\r\n"))
+	if avail < 1 {
+		avail = 1
+	}
+	if lipgloss.Width(string(runes)) > avail {
+		// Rune-typed cut: the list is plain left-to-right text, and the
+		// prefix already accounts for its own double width.
+		for len(runes) > 0 && lipgloss.Width(string(runes)) > avail {
+			runes = runes[:len(runes)-1]
+		}
+	}
+	label := padTo(prefix+string(runes)+" ", m.width)
+	if i == m.projSearchSel {
+		return statusHiStyle.Render(label)
+	}
+	return statusStyle.Render(label)
+}
+
 // folderPanel renders the built-in folder picker: a path header, the
 // directory listing (row 0 is always the parent), and a hint line.
 func (m Model) folderPanel() []string {
@@ -2030,12 +2107,13 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 	}
 	var matches []matchInfo
 	if len(m.searchQuery) > 0 {
-		qLen := len(m.searchQuery)
-		matchCols := findMatchesInRunes(raw, m.searchQuery)
-		for _, col := range matchCols {
-			expStart := rawToExp[col]
-			expEnd := rawToExp[col+qLen]
-			isCur := (ln == t.buf.CurLine() && col == t.buf.Col())
+		curCol := t.buf.Col()
+		for _, sm := range m.matchRanges(raw) {
+			expStart := rawToExp[sm.col]
+			expEnd := rawToExp[sm.col+sm.length]
+			// The current match is the one the cursor sits anywhere inside,
+			// not only at its first rune.
+			isCur := ln == t.buf.CurLine() && sm.col <= curCol && curCol < sm.col+sm.length
 			matches = append(matches, matchInfo{start: expStart, end: expEnd, isCur: isCur})
 		}
 	}
@@ -2299,7 +2377,7 @@ func (m Model) statusBar() string {
 		}
 	}
 	hint := ""
-	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gotoOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
+	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gotoOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !m.projSearchOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
 		hint = m.t("status.f1_help")
 		if m.layout != splitNone {
 			hint += m.t("status.f8_pane")

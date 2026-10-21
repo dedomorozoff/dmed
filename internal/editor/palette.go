@@ -1,7 +1,7 @@
 package editor
 
 import (
-	"strings"
+	"sort"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -24,6 +24,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "new_folder", title: "cmd.new_folder_t", desc: "cmd.new_folder_d", action: func(m *Model) tea.Cmd { m.startNewFolderPrompt(); return nil }},
 		{id: "finder", title: "cmd.finder_t", desc: "cmd.finder_d", action: func(m *Model) tea.Cmd { m.startFinder(); return nil }},
 		{id: "search", title: "cmd.search_t", desc: "cmd.search_d", action: func(m *Model) tea.Cmd { m.startSearch(); return nil }},
+		{id: "proj_search", title: "cmd.proj_search_t", desc: "cmd.proj_search_d", action: func(m *Model) tea.Cmd { m.startProjectSearch(); return nil }},
 		{id: "replace", title: "cmd.replace_t", desc: "cmd.replace_d", action: func(m *Model) tea.Cmd { m.startReplace(); return nil }},
 		{id: "goto_line", title: "cmd.goto_line_t", desc: "cmd.goto_line_d", action: func(m *Model) tea.Cmd { m.startGotoPrompt(); return nil }},
 		{id: "word_wrap", title: "cmd.word_wrap_t", desc: "cmd.word_wrap_d", action: func(m *Model) tea.Cmd { m.toggleWordWrap(); return nil }},
@@ -108,17 +109,44 @@ func (m Model) cmdTitle(c commandItem) string { return m.t(c.title) }
 // cmdDesc returns the localized command description.
 func (m Model) cmdDesc(c commandItem) string { return m.t(c.desc) }
 
+// filterPalette ranks commands the fuzzy way, reusing the file finder's
+// scorer: the palette stays consistent with Ctrl+O and subsequence matches
+// ("nv f" finds "File: New File...") still work. A score of 0 from
+// strings.Contains is not comparable to subsequence priorities, so the title
+// and description are scored and the better hit wins.
 func (m *Model) filterPalette() []commandItem {
 	all := m.getPaletteCommands()
-	q := strings.ToLower(string(m.paletteQ))
-	if q == "" {
+	if len(m.paletteQ) == 0 {
 		return all
 	}
-	var res []commandItem
+	q := string(m.paletteQ)
+	type hit struct {
+		item  commandItem
+		score int
+	}
+	hits := make([]hit, 0, len(all))
 	for _, c := range all {
-		if strings.Contains(strings.ToLower(m.cmdTitle(c)), q) || strings.Contains(strings.ToLower(m.cmdDesc(c)), q) {
-			res = append(res, c)
+		best := -1
+		// The title matters most: users name the command, not its tooltip.
+		if sc := fuzzyScore(q, m.cmdTitle(c)); sc >= 0 {
+			best = sc
 		}
+		if sc := fuzzyScore(q, m.cmdDesc(c)); sc > best {
+			best = sc
+		}
+		if best >= 0 {
+			hits = append(hits, hit{c, best})
+		}
+	}
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].score != hits[j].score {
+			return hits[i].score > hits[j].score
+		}
+		return m.cmdTitle(hits[i].item) < m.cmdTitle(hits[j].item)
+	})
+	res := make([]commandItem, 0, len(hits))
+	for _, h := range hits {
+		res = append(res, h.item)
 	}
 	return res
 }

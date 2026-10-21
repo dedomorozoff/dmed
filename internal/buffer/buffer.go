@@ -1,6 +1,9 @@
 package buffer
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 const maxUndo = 1000
 
@@ -285,6 +288,37 @@ func (b *Buffer) ReplaceAll(find, replace string) int {
 		str := string(b.d.lineAt(i))
 		if strings.Contains(str, find) {
 			b.d.root = b.d.setLine(i, []rune(strings.ReplaceAll(str, find, replace)))
+		}
+	}
+	if b.line >= b.d.count() {
+		b.line = b.d.count() - 1
+	}
+	if b.col > b.lineLen(b.line) {
+		b.col = b.lineLen(b.line)
+	}
+	b.goalCol = b.col
+	b.hasSelection = false
+	return count
+}
+
+func (b *Buffer) ReplaceAllRE(re *regexp.Regexp, replace string) int {
+	if re == nil {
+		return 0
+	}
+	count := 0
+	n := b.d.count()
+	for i := 0; i < n; i++ {
+		count += len(re.FindAllStringIndex(string(b.d.lineAt(i)), -1))
+	}
+	if count == 0 {
+		return 0
+	}
+	b.beginChange()
+	b.pushUndo()
+	for i := 0; i < n; i++ {
+		str := string(b.d.lineAt(i))
+		if idx := re.FindStringIndex(str); idx != nil {
+			b.d.root = b.d.setLine(i, []rune(re.ReplaceAllString(str, replace)))
 		}
 	}
 	if b.line >= b.d.count() {

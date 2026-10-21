@@ -340,6 +340,24 @@ plan with per-item estimates, design decisions and open questions lives in
 - [x] Dead `DMED_SHELL` branch removed from config.Load (the editor reads
       the variable itself).
 
+### Post-M8 — editor UX
+- [x] **Find in Project** (`Ctrl+Shift+F`, палитра "Edit: Find in Project..."):
+      async full-text search shared with the AI tools' walk rules (`walkProject` +
+      `newProjectSkip`), results streamed in batches with a generation guard,
+      live hit list (`↑↓`/Enter opens the file at the match, panel stays open),
+      500-hit cap. Empty dir / no-file roots supported.
+- [x] **Smart case + regex search**: a query without uppercase runes matches
+      case-insensitively, in-file (Ctrl+F) and Find in Project alike; Tab in
+      the search prompt toggles regex (`.*`), the hint row shows the state;
+      invalid patterns match nothing and say so instead of degrading to a
+      literal search. Regex replace-all (`Ctrl+A` in the replace prompt)
+      expands `$1`/`$name` groups; the buffer gained `ReplaceAllRE` (a single
+      undo step, line-wise like the literal path).
+- [x] **Fuzzy command palette**: `filterPalette` now uses the file finder's
+      scorer on titles (descriptions as fallback) instead of
+      `strings.Contains` — consistent UX with `Ctrl+O`, subsequence queries
+      work.
+
 ## Infrastructure: CI and releases
 
 - [x] GitHub Actions CI (`ci.yml`): vet + unit tests + cross-build for 8 platforms
