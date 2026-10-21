@@ -179,7 +179,8 @@ func (a AIConfig) Unconfigured() bool {
 		a.Provider == d.Provider &&
 		a.OllamaURL == d.OllamaURL &&
 		a.APIPath == d.APIPath &&
-		a.ModelsPath == d.ModelsPath
+		a.ModelsPath == d.ModelsPath &&
+		a.SystemPrompt == d.SystemPrompt
 }
 
 // UIConfig holds UI-related settings.

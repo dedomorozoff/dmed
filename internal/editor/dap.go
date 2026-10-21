@@ -805,7 +805,7 @@ func (m *Model) startDebugging() tea.Cmd {
 	if m.dapBusy || (m.dapClient != nil && m.dapRunState != dapEnded) {
 		return nil // already launching/running
 	}
-	m.dapGen++
+	bumpGen(&m.dapGen)
 	m.dapRunState = dapLaunch
 	m.dapBusy = true
 	if dc, ok := m.dapLangPreset(); ok {
@@ -822,7 +822,7 @@ func (m *Model) startDebugging() tea.Cmd {
 
 // stopDebugging disconnects the session and tears the adapter down. Shift+F5.
 func (m *Model) stopDebugging() tea.Cmd {
-	m.dapGen++
+	bumpGen(&m.dapGen)
 	m.dapRunState = dapIdle
 	m.dapBusy = false
 	return m.dapRelease()

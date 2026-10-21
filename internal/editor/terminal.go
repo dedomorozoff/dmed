@@ -85,8 +85,7 @@ func (m *Model) ensureShell() {
 		m.msg = m.t("term.error", err.Error())
 		return
 	}
-	m.termGen++
-	gen := m.termGen
+	gen := bumpGen(&m.termGen)
 	m.termSession = term
 	m.termVT = vt10x.New(vt10x.WithSize(width, height))
 	m.termCh = make(chan terminalOutputMsg, 64)
@@ -158,7 +157,7 @@ func (m *Model) toggleTerminal() tea.Cmd {
 }
 
 func (m *Model) killTerminal() {
-	m.termGen++
+	bumpGen(&m.termGen)
 	if m.termSession != nil {
 		_ = m.termSession.Close()
 	}

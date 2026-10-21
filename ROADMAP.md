@@ -339,6 +339,21 @@ plan with per-item estimates, design decisions and open questions lives in
       broken URL).
 - [x] Dead `DMED_SHELL` branch removed from config.Load (the editor reads
       the variable itself).
+- [x] `AIConfig.Unconfigured` is complete: it also counts a hand-tuned
+      `ModelsPath` and a custom `SystemPrompt` as configuration. Your own
+      prompt or model list must not leak to the keyless public fallback.
+- [x] Lua plugins run under a wall-clock budget (`Manager.timeout`, 3s
+      default): `SetContext` makes the VM check the deadline between
+      instructions, so a `while true do end` handler or load fails with
+      "context deadline exceeded" in the status bar instead of freezing the
+      editor forever. Plugin call errors are no longer silently dropped.
+- [x] The plugin store's HTTP fetches go through a test seam
+      (`storeHTTPTransport`): unit tests redirect both the listing and the
+      source downloads to a local httptest server, as with
+      `aiFreeURLOverride`/`webSearchOverride`.
+- [x] One generation-stamp helper: `termGen`/`chatGen`/`dapGen` bumps all go
+      through `bumpGen`, keeping the supersede-session convention documented
+      in one place for future async subsystems.
 
 ### Post-M8 — editor UX
 - [x] **Find in Project** (`Ctrl+Shift+F`, палитра "Edit: Find in Project..."):

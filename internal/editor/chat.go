@@ -541,7 +541,7 @@ func (m *Model) chatStop() tea.Cmd {
 	if !m.chatBusy {
 		return nil
 	}
-	m.chatGen++
+	bumpGen(&m.chatGen)
 	if m.chatCancel != nil {
 		m.chatCancel()
 		m.chatCancel = nil
@@ -572,7 +572,7 @@ func (m *Model) startChatTurn() tea.Cmd {
 	if m.chatCancel != nil {
 		m.chatCancel()
 	}
-	m.chatGen++
+	bumpGen(&m.chatGen)
 	gen := m.chatGen
 	m.chatBusy = true
 	ctx, cancel := context.WithCancel(context.Background())
