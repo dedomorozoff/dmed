@@ -32,7 +32,10 @@ This release is about editor quality-of-life: project-wide search, smart typing 
 ## 🛡 Safety & housekeeping
 - The keyless public AI fallback now respects **every** user decision: a custom `SystemPrompt`, a hand-tuned model list or endpoint are counted as configuration — nothing of yours leaks to a public service.
 - **Lua plugins run under a deadline** (3 s per call, 3 s to load): a `while true do end` handler fails with a status-bar message instead of freezing the editor. Plugin errors are no longer silently dropped.
-- The plugin store's network fetches went behind a test seam; the sticky notes around generation-stamping for async sessions got one shared helper.
+- Git operations survive alternative path spellings: a workspace opened via an 8.3 short name (`C:\Users\ALEX~1\...`) or with different letter casing no longer breaks staging, blame, or diff on Windows.
+- Lua plugins run under a wall-clock budget (3 s per call, 3 s to load): a `while true do end` handler fails with a status-bar message instead of freezing the editor. Plugin errors are no longer silently dropped.
+- Git operations survive alternative path spellings: a workspace opened via an 8.3 short name (`C:\Users\ALEX~1\...`) or with different letter casing no longer breaks staging, blame, or diff on Windows.
+- The plugin store's network fetches went behind a test seam; generation-stamping for async sessions got one shared helper.
 - `.dmed_session.json` is hidden from project walks (search results and agent tools).
 
 ## 📦 Install
