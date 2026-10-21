@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -335,4 +336,286 @@ func (m *Model) restartLSP() {
 		return
 	}
 	m.msg = m.t("msg.lsp_none")
+}
+
+// ---------- rename + code actions ----------
+
+// lspActionsVisible is the top of the quick-fix list shown at once.
+const lspActionsVisible = 8
+
+// lspRenameMsg carries the async rename result: the workspace edit is nil when
+// the server said there is nothing to rename (or the request failed with
+// err).
+type lspRenameMsg struct {
+	edit *lsp.WorkspaceEdit
+	err  error
+}
+
+// lspActionsMsg carries the code actions offered at a position.
+type lspActionsMsg struct {
+	items []lsp.CodeAction
+	err   error
+}
+
+// wordRunesAt returns the [start, end) word span around col on line: the word
+// the caret sits inside, or — at its very end or on the space after it — the
+// word just left of it. Empty span when the caret is not next to any word
+// (it becomes Rename's input text).
+func wordRunesAt(line []rune, col int) (int, int) {
+	if col < 0 || col > len(line) {
+		return 0, 0
+	}
+	start := col
+	for start > 0 && isWordRune(line[start-1]) {
+		start--
+	}
+	end := col
+	for end < len(line) && isWordRune(line[end]) {
+		end++
+	}
+	return start, end
+}
+
+// startLspRename opens the rename input pre-filled with the word under the
+// cursor. It refuses to run when no language server covers the file.
+func (m *Model) startLspRename() {
+	t := m.cur()
+	if t == nil || t.path == "" {
+		return
+	}
+	cmd, _, lang := m.lspResolve(strings.ToLower(filepath.Ext(t.path)))
+	if cmd == "" {
+		m.msg = m.t("msg.no_lsp")
+		return
+	}
+	if m.lspClient == nil {
+		m.ensureLSP()
+	}
+	if m.lspClient == nil {
+		m.msg = m.t("msg.no_lsp")
+		return
+	}
+	line := t.buf.LineAt(t.buf.CurLine())
+	col := t.buf.Col()
+	s, e := wordRunesAt(line, col)
+	if e > s && !(col >= s && col <= e) {
+		// Caret next to (not inside) a word: jump into it.
+		t.buf.SetCursor(t.buf.CurLine(), s)
+	}
+	m.lspRenameIn = append([]rune(nil), line[s:e]...)
+	m.lspRenameOpen = true
+	_ = lang
+}
+
+// startLspRenameCmd sends the rename request off the UI thread: gopls may
+// take its time verifying the new name.
+func (m *Model) startLspRenameCmd() tea.Cmd {
+	name := strings.TrimSpace(string(m.lspRenameIn))
+	if name == "" {
+		return nil
+	}
+	m.lspRenameOpen = false
+	t := m.cur()
+	if t == nil || m.lspClient == nil {
+		return nil
+	}
+	c := m.lspClient
+	path := t.path
+	line, col := t.buf.CurLine(), t.buf.Col()
+	return func() tea.Msg {
+		edit, err := c.Rename(path, line, col, name)
+		return lspRenameMsg{edit: edit, err: err}
+	}
+}
+
+func (m *Model) handleLspRenameMsg(msg lspRenameMsg) {
+	if msg.err != nil {
+		m.msg = m.t("msg.rename_err", msg.err.Error())
+		return
+	}
+	n := m.applyWorkspaceEdit(msg.edit)
+	if n == 0 {
+		m.msg = m.t("msg.no_rename")
+		return
+	}
+	m.msg = m.t("msg.rename_ok", n)
+}
+
+// applyWorkspaceEdit applies the edits of a WorkspaceEdit across files: open
+// tabs are edited in-buffer (staying dirty, and the server is notified via
+// didChange), paths without a tab go straight to disk. Returns the number of
+// files touched. Edits carry LSP UTF-16 columns, converted per line here.
+func (m *Model) applyWorkspaceEdit(edit *lsp.WorkspaceEdit) int {
+	if edit == nil {
+		return 0
+	}
+	n := 0
+	for path, edits := range edit.Files {
+		sorted := lsp.SortedEdits(edits)
+		applied := false
+		for i := range m.tabs {
+			if m.tabs[i].path != path {
+				continue
+			}
+			buf := m.tabs[i].buf
+			for _, e := range sorted {
+				if e.StartLine < 0 || e.EndLine >= buf.LineCount() {
+					continue
+				}
+				sc := lsp.ColToRune(buf.LineAt(e.StartLine), e.StartCol)
+				ec := lsp.ColToRune(buf.LineAt(e.EndLine), e.EndCol)
+				buf.ReplaceSpan(e.StartLine, sc, e.EndLine, ec, e.NewText)
+			}
+			m.lspClient.DidChange(path, buf.Text(), 0)
+			applied = true
+			break
+		}
+		if applied {
+			n++
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue // unreadable: skip quietly, rename stays partial
+		}
+		text := lsp.ApplyEditsToText(string(data), sorted)
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+// startLspActionsCmd asks the server for code actions at the cursor.
+func (m *Model) startLspActionsCmd() tea.Cmd {
+	t := m.cur()
+	if t == nil || t.path == "" {
+		return nil
+	}
+	cmd, _, _ := m.lspResolve(strings.ToLower(filepath.Ext(t.path)))
+	if cmd == "" {
+		m.msg = m.t("msg.no_lsp")
+		return nil
+	}
+	if m.lspClient == nil {
+		m.ensureLSP()
+	}
+	if m.lspClient == nil {
+		m.msg = m.t("msg.no_lsp")
+		return nil
+	}
+	// Make sure the server sees the current buffer text: quick fixes are all
+	// about the diagnostics of exactly what is on screen.
+	_, _, lang := m.lspResolve(strings.ToLower(filepath.Ext(t.path)))
+	c := m.lspClient
+	path := t.path
+	line, col := t.buf.CurLine(), t.buf.Col()
+	text := t.buf.Text()
+	return func() tea.Msg {
+		_ = c.EnsureOpened(path, lang, text)
+		items, err := c.CodeActions(path, line, col)
+		return lspActionsMsg{items: items, err: err}
+	}
+}
+
+func (m *Model) handleLspActionsMsg(msg lspActionsMsg) {
+	if msg.err != nil {
+		m.msg = "code actions: " + msg.err.Error()
+		return
+	}
+	if len(msg.items) == 0 {
+		m.msg = m.t("msg.no_actions")
+		return
+	}
+	m.lspActions = msg.items
+	m.lspActionsSel = 0
+	m.lspActionsOff = 0
+	m.lspActionsOpen = true
+}
+
+// startLspActions fires the request; used by the binding and the palette.
+func (m *Model) startLspActions() tea.Cmd {
+	return m.startLspActionsCmd()
+}
+
+func (m *Model) handleLspRename(msg tea.KeyPressMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.lspRenameOpen = false
+		m.msg = ""
+	case "enter":
+		return m.startLspRenameCmd()
+	case "backspace":
+		if n := len(m.lspRenameIn); n > 0 {
+			m.lspRenameIn = m.lspRenameIn[:n-1]
+		}
+	default:
+		if len(msg.Text) > 0 {
+			m.lspRenameIn = append(m.lspRenameIn, []rune(msg.Text)...)
+		}
+	}
+	return nil
+}
+
+// handleLspActions drives the quick-fix list overlay: plain cursor keys,
+// Enter applies the edit of the selected action, Esc closes.
+func (m *Model) handleLspActions(msg tea.KeyPressMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.lspActionsOpen = false
+		m.msg = ""
+	case "up", "k", "ctrl+p":
+		if n := len(m.lspActions); n > 0 {
+			m.jumpLspActionsSel((m.lspActionsSel - 1 + n) % n)
+		}
+	case "down", "j", "ctrl+n":
+		if n := len(m.lspActions); n > 0 {
+			m.jumpLspActionsSel((m.lspActionsSel + 1) % n)
+		}
+	case "pgup":
+		m.jumpLspActionsSel(m.lspActionsSel - lspActionsVisible)
+	case "pgdown":
+		m.jumpLspActionsSel(m.lspActionsSel + lspActionsVisible)
+	case "enter":
+		if i := m.lspActionsSel; len(m.lspActions) > 0 && i < len(m.lspActions) {
+			m.lspActionsOpen = false
+			act := m.lspActions[i]
+			if act.Edit == nil {
+				m.msg = m.t("msg.action_no_edit")
+			} else if n := m.applyWorkspaceEdit(act.Edit); n == 0 {
+				m.msg = m.t("msg.applied_count", 0)
+			} else {
+				m.msg = m.t("msg.applied_count", n)
+			}
+		}
+	default:
+		// Typing closes to the editor: the list is answer-only.
+	}
+	return nil
+}
+
+// jumpLspActionsSel keeps the quick-fix list window scrolled so the selection
+// stays visible.
+func (m *Model) jumpLspActionsSel(sel int) {
+	n := len(m.lspActions)
+	if sel < 0 {
+		sel = 0
+	} else if sel >= n {
+		sel = n - 1
+	}
+	m.lspActionsSel = sel
+	if n <= lspActionsVisible {
+		m.lspActionsOff = 0
+		return
+	}
+	if m.lspActionsSel < m.lspActionsOff {
+		m.lspActionsOff = m.lspActionsSel
+	}
+	if m.lspActionsSel >= m.lspActionsOff+lspActionsVisible {
+		m.lspActionsOff = m.lspActionsSel - lspActionsVisible + 1
+	}
+	if m.lspActionsOff > n-lspActionsVisible {
+		m.lspActionsOff = n - lspActionsVisible
+	}
 }

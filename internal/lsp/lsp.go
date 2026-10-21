@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -347,6 +348,12 @@ func (c *Client) call(method string, params interface{}) (json.RawMessage, error
 }
 
 func (c *Client) notify(method string, params interface{}) error {
+	// No live transport: a stub client in tests (or a closed one). Drop the
+	// notification instead of stalling every caller on the initialize
+	// handshake of a dead session.
+	if c.stdin == nil {
+		return nil
+	}
 	// Notifications are also gated on the initialize handshake. A didOpen
 	// written before initialize makes gopls never answer the subsequent
 	// completion; DidChange may be issued by any goroutine at any time, so
@@ -383,6 +390,9 @@ func (c *Client) EnsureOpened(path, languageID, text string) error {
 	// didOpen must never reach gopls before initialize: it would hang the
 	// first completion. Wait for the handshake first, then serialize the write
 	// against didChange via writeMu.
+	if c.stdin == nil {
+		return nil
+	}
 	select {
 	case <-c.initDone:
 	case <-time.After(callTimeout):
@@ -433,6 +443,11 @@ func (c *Client) DidOpen(path, languageID, text string) {
 // monotonically per document; gopls ignores changes that do not follow the
 // last version it saw, and the editor fires these from many goroutines.
 func (c *Client) DidChange(path, text string, _ int) {
+	if c.stdin == nil {
+		// Stub or already-closed transport: nothing to notify, and bumping
+		// bookkeeping for a session that never existed would be noise.
+		return
+	}
 	abs, _ := filepath.Abs(path)
 	c.mu.Lock()
 	c.versions[abs]++
@@ -533,4 +548,225 @@ func (c *Client) Definition(path string, line, col int) (*Location, error) {
 	}
 
 	return nil, nil
+}
+
+// TextEdit is one replacement inside a document. Positions are 0-based;
+// StartCol/EndCol are LSP character offsets (UTF-16 code units, see
+// ColToRune) because the protocol says so — convert at application time when
+// the line's runes are available.
+type TextEdit struct {
+	StartLine int
+	StartCol  int
+	EndLine   int
+	EndCol    int
+	NewText   string
+}
+
+// WorkspaceEdit is the subset of LSP WorkspaceEdit the editor applies: the
+// per-file edit lists, flattened from both the "changes" and
+// "documentChanges" reply shapes.
+type WorkspaceEdit struct {
+	// Files maps an absolute path (URI already resolved) to its edits.
+	Files map[string][]TextEdit
+}
+
+// CodeAction is one quick fix / refactor the server offers for a position.
+type CodeAction struct {
+	Title string
+	Kind  string
+	// Edit is nil for command-only actions: a plain editor has no command
+	// dispatcher yet, so they are shown but refuse to run.
+	Edit *WorkspaceEdit
+}
+
+// ColToRune converts an LSP character offset (UTF-16 code units) into a rune
+// column of the given line. Beyond the BMP one rune is two UTF-16 units.
+func ColToRune(line []rune, col16 int) int {
+	if col16 <= 0 {
+		return 0
+	}
+	units := 0
+	for i, r := range line {
+		if units >= col16 {
+			return i
+		}
+		if r > 0xFFFF {
+			units += 2
+		} else {
+			units++
+		}
+	}
+	return len(line)
+}
+
+// SortedEdits returns the edits sorted right-to-left, so applying them one by
+// one never shifts a later position.
+func SortedEdits(edits []TextEdit) []TextEdit {
+	out := make([]TextEdit, len(edits))
+	copy(out, edits)
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.StartLine != b.StartLine {
+			return a.StartLine > b.StartLine
+		}
+		return a.StartCol > b.StartCol
+	})
+	return out
+}
+
+// ApplyEditsToText applies the edits onto raw document text (they are sorted
+// right-to-left inside) and returns the result. Handles multi-line ranges and
+// multi-line insertions.
+func ApplyEditsToText(text string, edits []TextEdit) string {
+	lines := strings.Split(text, "\n")
+	// \r stays part of its line: the server's positions do not count it
+	// either, so line splits on "\n" keep positions aligned.
+	for _, e := range SortedEdits(edits) {
+		if e.StartLine < 0 || e.StartLine >= len(lines) || e.EndLine < e.StartLine || e.EndLine >= len(lines) {
+			continue
+		}
+		sl, el := []rune(lines[e.StartLine]), []rune(lines[e.EndLine])
+		sc := ColToRune(sl, e.StartCol)
+		ec := ColToRune(el, e.EndCol)
+		if sc > len(sl) || ec > len(el) {
+			continue
+		}
+		ins := strings.Split(e.NewText, "\n")
+		out := make([]string, 0, len(ins))
+		for k, part := range ins {
+			// Case order matters: with a single-line replacement both the
+			// first and the last part are k == 0.
+			switch {
+			case k == 0 && k == len(ins)-1:
+				out = append(out, string(sl[:sc])+part+string(el[ec:]))
+			case k == 0:
+				out = append(out, string(sl[:sc])+part)
+			case k == len(ins)-1:
+				out = append(out, part+string(el[ec:]))
+			default:
+				out = append(out, part)
+			}
+		}
+		newLines := make([]string, 0, len(lines)-(e.EndLine-e.StartLine)+len(ins))
+		newLines = append(newLines, lines[:e.StartLine]...)
+		newLines = append(newLines, out...)
+		newLines = append(newLines, lines[e.EndLine+1:]...)
+		lines = newLines
+	}
+	return strings.Join(lines, "\n")
+}
+
+type rawEdit struct {
+	Range struct {
+		Start struct {
+			Line      int `json:"line"`
+			Character int `json:"character"`
+		} `json:"start"`
+		End struct {
+			Line      int `json:"line"`
+			Character int `json:"character"`
+		} `json:"end"`
+	} `json:"range"`
+	NewText string `json:"newText"`
+}
+
+// parseWorkspaceEdit flattens the two WorkspaceEdit reply shapes: the plain
+// "changes" map and "documentChanges" with a versioned textDocument.
+func parseWorkspaceEdit(res json.RawMessage) *WorkspaceEdit {
+	var raw struct {
+		Changes         map[string][]rawEdit `json:"changes"`
+		DocumentChanges []struct {
+			TextDocument struct {
+				URI string `json:"uri"`
+			} `json:"textDocument"`
+			Edits []rawEdit `json:"edits"`
+		} `json:"documentChanges"`
+	}
+	if err := json.Unmarshal(res, &raw); err != nil {
+		return nil
+	}
+	out := &WorkspaceEdit{Files: map[string][]TextEdit{}}
+	add := func(uri string, edits []rawEdit) {
+		if uri == "" || len(edits) == 0 {
+			return
+		}
+		p := uriToPath(uri)
+		for _, e := range edits {
+			out.Files[p] = append(out.Files[p], TextEdit{
+				StartLine: e.Range.Start.Line,
+				StartCol:  e.Range.Start.Character,
+				EndLine:   e.Range.End.Line,
+				EndCol:    e.Range.End.Character,
+				NewText:   e.NewText,
+			})
+		}
+	}
+	for uri, edits := range raw.Changes {
+		add(uri, edits)
+	}
+	for _, dc := range raw.DocumentChanges {
+		add(dc.TextDocument.URI, dc.Edits)
+	}
+	if len(out.Files) == 0 {
+		return nil
+	}
+	return out
+}
+
+// Rename asks the server for the edits that rename the symbol at (line, col).
+func (c *Client) Rename(path string, line, col int, newName string) (*WorkspaceEdit, error) {
+	abs, _ := filepath.Abs(path)
+	res, err := c.call("textDocument/rename", map[string]interface{}{
+		"textDocument": map[string]interface{}{
+			"uri": pathToURI(abs),
+		},
+		"position": map[string]interface{}{
+			"line":      line,
+			"character": col,
+		},
+		"newName": newName,
+	})
+	if err != nil || len(res) == 0 {
+		return nil, err
+	}
+	return parseWorkspaceEdit(res), nil
+}
+
+// CodeActions returns the quick fixes and refactors the server offers at
+// (line, col); a bare position works as a zero-width range there.
+func (c *Client) CodeActions(path string, line, col int) ([]CodeAction, error) {
+	abs, _ := filepath.Abs(path)
+	pos := map[string]int{"line": line, "character": col}
+	res, err := c.call("textDocument/codeAction", map[string]interface{}{
+		"textDocument": map[string]interface{}{
+			"uri": pathToURI(abs),
+		},
+		"range": map[string]interface{}{
+			"start": pos,
+			"end":   pos,
+		},
+		"context": map[string]interface{}{
+			"diagnostics": []interface{}{},
+		},
+	})
+	if err != nil || len(res) == 0 {
+		return nil, err
+	}
+	var raws []struct {
+		Title string          `json:"title"`
+		Kind  string          `json:"kind"`
+		Edit  json.RawMessage `json:"edit"`
+	}
+	if err := json.Unmarshal(res, &raws); err != nil {
+		return nil, err
+	}
+	var out []CodeAction
+	for _, r := range raws {
+		ca := CodeAction{Title: r.Title, Kind: r.Kind}
+		if len(r.Edit) > 0 && string(r.Edit) != "null" {
+			ca.Edit = parseWorkspaceEdit(r.Edit)
+		}
+		out = append(out, ca)
+	}
+	return out, nil
 }

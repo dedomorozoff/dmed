@@ -263,7 +263,7 @@ func (m Model) contextBottomExtraRows() int {
 		m.aiInlineOpen, m.aiInlineBusy, m.aiFixOpen, m.aiFixBusy,
 		m.aiFixReviewMode, m.conflictOpen, m.treeConfirm != "", m.quitConfirm,
 		m.aiCfgOpen, m.gitOpen, m.promptSave, m.promptOpen,
-		m.searchOpen, m.gotoOpen:
+		m.searchOpen, m.gotoOpen, m.lspRenameOpen:
 		return 1
 	default:
 		return 0
@@ -271,7 +271,7 @@ func (m Model) contextBottomExtraRows() int {
 }
 
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.contextBottomExtraRows() - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows() - m.askExtraRows() - m.projSearchExtraRows()
+	h := m.height - 2 - m.contextBottomExtraRows() - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows() - m.askExtraRows() - m.projSearchExtraRows() - m.lspActionsExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -402,6 +402,12 @@ func (m Model) View() tea.View {
 	}
 	if m.aiFixOpen {
 		rows = append(rows, m.aiFixInputRender()...)
+	}
+	if m.lspRenameOpen {
+		rows = append(rows, m.lspRenameInputRender())
+	}
+	if m.lspActionsOpen {
+		rows = append(rows, m.withDivider(m.lspActionsPanel())...)
 	}
 	if m.agentPrompt {
 		rows = append(rows, m.agentPromptInputRender()...)
@@ -1930,6 +1936,52 @@ func (m Model) finderPanel() []string {
 	return rows
 }
 
+func (m Model) lspActionsExtraRows() int {
+	if !m.lspActionsOpen {
+		return 0
+	}
+	n := len(m.lspActions)
+	if n > lspActionsVisible {
+		n = lspActionsVisible
+	}
+	return n + 2 // divider + title
+}
+
+// lspRenameInputRender is the rename prompt line (Enter fires, Esc cancels).
+func (m Model) lspRenameInputRender() string {
+	line := statusHiStyle.Render(m.t("rename.prompt")) +
+		statusStyle.Render(string(m.lspRenameIn)) + cursorStyle.Render(" ") +
+		hintStyle.Render(m.t("rename.hint"))
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+// lspActionsPanel renders the code actions list: a title plus the visible
+// window of actions.
+func (m Model) lspActionsPanel() []string {
+	rows := make([]string, 0, len(m.lspActions)+1)
+	title := statusHiStyle.Render(" " + m.t("actions.title"))
+	fill := m.width - lipgloss.Width(title)
+	if fill > 0 {
+		title += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	rows = append(rows, title)
+	n := len(m.lspActions)
+	end := m.lspActionsOff + lspActionsVisible
+	for i := m.lspActionsOff; i < end && i < n; i++ {
+		label := padTo(" "+m.lspActions[i].Title+" ", m.width)
+		if i == m.lspActionsSel {
+			rows = append(rows, statusHiStyle.Render(label))
+		} else {
+			rows = append(rows, statusStyle.Render(label))
+		}
+	}
+	return rows
+}
+
 func (m Model) projSearchExtraRows() int {
 	if !m.projSearchOpen {
 		return 0
@@ -2377,7 +2429,7 @@ func (m Model) statusBar() string {
 		}
 	}
 	hint := ""
-	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gotoOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !m.projSearchOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
+	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gotoOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !m.projSearchOpen && !m.lspRenameOpen && !m.lspActionsOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
 		hint = m.t("status.f1_help")
 		if m.layout != splitNone {
 			hint += m.t("status.f8_pane")

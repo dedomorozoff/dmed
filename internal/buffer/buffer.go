@@ -248,6 +248,55 @@ func (b *Buffer) SetCursor(line, col int) {
 	b.goalCol = b.col
 }
 
+// ReplaceSpan removes [startLine,startCol .. endLine,endCol] (rune columns,
+// both inclusive of the start / exclusive of the end) and inserts replacement,
+// which may span several lines. One undo step. Used by LSP workspace edits.
+func (b *Buffer) ReplaceSpan(startLine, startCol, endLine, endCol int, replacement string) bool {
+	mat := b.linesCopy()
+	if startLine < 0 || endLine < startLine || endLine >= len(mat) {
+		return false
+	}
+	if startCol < 0 || startCol > len(mat[startLine]) ||
+		endCol < 0 || endCol > len(mat[endLine]) {
+		return false
+	}
+	ins := splitTextLines(replacement)
+	if len(ins) == 0 {
+		ins = [][]rune{{}}
+	}
+	prefix := append([]rune(nil), mat[startLine][:startCol]...)
+	suffix := append([]rune(nil), mat[endLine][endCol:]...)
+	out := make([][]rune, 0, len(mat)-(endLine-startLine)+len(ins))
+	out = append(out, mat[:startLine]...)
+	first := append(append([]rune(nil), prefix...), ins[0]...)
+	if len(ins) == 1 {
+		out = append(out, append(first, suffix...))
+	} else {
+		out = append(out, first)
+		for _, mid := range ins[1 : len(ins)-1] {
+			out = append(out, append([]rune(nil), mid...))
+		}
+		out = append(out, append(append([]rune(nil), ins[len(ins)-1]...), suffix...))
+	}
+	out = append(out, mat[endLine+1:]...)
+
+	b.beginChange()
+	b.pushUndo()
+	b.setLines(out)
+	b.line = startLine + len(ins) - 1
+	if len(ins) == 1 {
+		b.col = startCol + len(ins[0])
+	} else {
+		b.col = len(ins[len(ins)-1])
+	}
+	if lim := b.lineLen(b.line); b.col > lim {
+		b.col = lim
+	}
+	b.goalCol = b.col
+	b.hasSelection = false
+	return true
+}
+
 func (b *Buffer) ReplaceRange(line, col, length int, replacement []rune) bool {
 	if line < 0 || line >= b.d.count() {
 		return false

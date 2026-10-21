@@ -375,6 +375,20 @@ plan with per-item estimates, design decisions and open questions lives in
       stacks across restarts was considered and deliberately left out: an
       undo history that survives a file being reloaded is more confusing
       than useful.
+- [x] **LSP rename + code actions** (`Ctrl+Alt+R` / `Ctrl+Alt+Q`, палитра
+      "Edit: Rename Symbol..." / "Edit: Code Actions..."): rename asks the
+      server for the symbol under the cursor (`internal/lsp.Client.Rename`),
+      shows an input pre-filled with the word, and applies the reply
+      `WorkspaceEdit` across files — open tabs edit in-buffer (one
+      `ReplaceSpan` per edit, tab stays dirty, server notified via
+      didChange), closed paths go straight to disk. Code actions list the
+      server's quick fixes in a bottom panel (↑↓/Enter/Esc); a zero-width
+      range at the cursor asks for them. Protocol plumbing in
+      `internal/lsp`: `ColToRune` (UTF-16 → rune, astral planes correct),
+      `SortedEdits` (right-to-left), `ApplyEditsToText` (multi-line insert/
+      replace), `parseWorkspaceEdit` (both `changes` and `documentChanges`
+      reply shapes); command-only actions are shown but refuse to run.
+      Legacy terminals that lose `Ctrl+Alt+*` use the palette commands.
 
 ## Infrastructure: CI and releases
 

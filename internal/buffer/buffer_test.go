@@ -634,3 +634,71 @@ func TestIndentedNewlineOverSelection(t *testing.T) {
 		t.Fatalf("Enter+indent over selection: %q", b.Text())
 	}
 }
+
+func TestReplaceSpan(t *testing.T) {
+	cases := []struct {
+		name        string
+		in          string
+		sl, sc      int
+		el, ec      int
+		replacement string
+		want        string
+		wantLine    int
+		wantCol     int
+	}{
+		{
+			"single-line replace",
+			"hello world\nsecond\n", 0, 6, 0, 11, "there",
+			"hello there\nsecond\n", 0, 11,
+		},
+		{
+			"multi-line replace",
+			"one two\nthree four\nfive\n", 0, 3, 1, 5, "A\nB\nC",
+			"oneA\nB\nC four\nfive\n", 2, 1,
+		},
+		{
+			"delete multiline range",
+			"aa\nbb\ncc\n", 0, 2, 1, 2, "",
+			"aa\ncc\n", 0, 2,
+		},
+		{
+			"whole-line replace",
+			"x\ny\nz\n", 1, 0, 1, 1, "why\n",
+			"x\nwhy\n\nz\n", 2, 0,
+		},
+	}
+	for _, tc := range cases {
+		b := Load(tc.in)
+		if !b.ReplaceSpan(tc.sl, tc.sc, tc.el, tc.ec, tc.replacement) {
+			t.Fatalf("%s: ReplaceSpan = false", tc.name)
+		}
+		if b.Text() != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, b.Text(), tc.want)
+		}
+		if b.CurLine() != tc.wantLine || b.Col() != tc.wantCol {
+			t.Errorf("%s: cursor %d:%d, want %d:%d", tc.name, b.CurLine(), b.Col(), tc.wantLine, tc.wantCol)
+		}
+		// Exactly one undo step restores the original.
+		b.Undo()
+		if b.Text() != tc.in {
+			t.Errorf("%s: after undo %q, want %q", tc.name, b.Text(), tc.in)
+		}
+	}
+}
+
+// ReplaceSpan rejects out-of-range positions.
+func TestReplaceSpanRejectsOutOfRange(t *testing.T) {
+	b := Load("one\ntwo\n")
+	if b.ReplaceSpan(-1, 0, 0, 3, "x") {
+		t.Fatal("negative start line accepted")
+	}
+	if b.ReplaceSpan(1, 0, 0, 3, "x") {
+		t.Fatal("end before start accepted")
+	}
+	if b.ReplaceSpan(0, 0, 5, 3, "x") {
+		t.Fatal("end past the document accepted")
+	}
+	if b.ReplaceSpan(0, 0, 0, 9, "x") {
+		t.Fatal("end past the line accepted")
+	}
+}

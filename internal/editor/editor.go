@@ -360,6 +360,14 @@ type Model struct {
 	projSearchScan  bool // a background walk is in flight
 	projSearchCh    chan projSearchMsg
 
+	// LSP rename (Ctrl+Alt+R) and code actions (Ctrl+Alt+Q).
+	lspRenameOpen  bool
+	lspRenameIn    []rune
+	lspActionsOpen bool
+	lspActionsSel  int
+	lspActionsOff  int
+	lspActions     []lsp.CodeAction
+
 	// Go to line
 	gotoOpen bool
 	gotoIn   []rune
@@ -1060,6 +1068,9 @@ func (m *Model) pasteInput(text string) {
 	case m.projSearchOpen && m.projSearchInput:
 		m.projSearchQ = append(m.projSearchQ, []rune(text)...)
 		return
+	case m.lspRenameOpen:
+		m.lspRenameIn = append(m.lspRenameIn, []rune(text)...)
+		return
 	case m.finderOpen:
 		m.finderQ = append(m.finderQ, []rune(text)...)
 		m.refind()
@@ -1614,6 +1625,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.clampScroll()
 		}
+	case lspRenameMsg:
+		m.handleLspRenameMsg(msg)
+	case lspActionsMsg:
+		m.handleLspActionsMsg(msg)
 	case pluginStoreMsg:
 		m.storeLoading = false
 		if msg.err != nil {
@@ -1854,6 +1869,11 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		// apart; the palette command covers the rest.
 		m.startProjectSearch()
 		return nil
+	case "ctrl+alt+r":
+		m.startLspRename()
+		return nil
+	case "ctrl+alt+q":
+		return m.startLspActions()
 	case "ctrl+h":
 		m.startReplace()
 		return nil
@@ -2038,6 +2058,14 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.treeFocus {
 		return m.handleTree(msg)
+	}
+	// The LSP rename input and the quick-fix list own their keys (bottom
+	// overlays like the search prompt).
+	if m.lspRenameOpen {
+		return m.handleLspRename(msg)
+	}
+	if m.lspActionsOpen {
+		return m.handleLspActions(msg)
 	}
 	// Find in Project owns its keys first: it is a bottom overlay like the
 	// finder, and its Enter must not jump the file-search cursor underneath.

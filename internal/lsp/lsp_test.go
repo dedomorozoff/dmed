@@ -224,3 +224,143 @@ func TestDiagnosticsStoreAndGet(t *testing.T) {
 		t.Fatalf("unexpected diagnostics: %+v", got)
 	}
 }
+
+func TestColToRune(t *testing.T) {
+	ascii := []rune("abc")
+	astral := []rune("😀ab") // 😀 is 2 UTF-16 units
+	cases := []struct {
+		name string
+		line []rune
+		col  int
+		want int
+	}{
+		{"negative", ascii, -3, 0},
+		{"zero", ascii, 0, 0},
+		{"mid", ascii, 1, 1},
+		{"at len", ascii, 3, 3},
+		{"past end clamps", ascii, 99, 3},
+		{"after astral", astral, 2, 1},
+		{"inside astral follower", astral, 3, 2},
+		{"past astral word", astral, 4, 3},
+		{"past astral line clamps", astral, 99, 3},
+		{"astral alone len", []rune("😀"), 2, 1},
+	}
+	for _, tc := range cases {
+		if got := ColToRune(tc.line, tc.col); got != tc.want {
+			t.Errorf("ColToRune(%q, %d) [%s] = %d, want %d", string(tc.line), tc.col, tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestSortedEdits(t *testing.T) {
+	in := []TextEdit{
+		{StartLine: 0, StartCol: 0},
+		{StartLine: 2, StartCol: 5},
+		{StartLine: 0, StartCol: 9},
+		{StartLine: 1, StartCol: 0},
+	}
+	out := SortedEdits(in)
+	want := []TextEdit{
+		{StartLine: 2, StartCol: 5},
+		{StartLine: 1, StartCol: 0},
+		{StartLine: 0, StartCol: 9},
+		{StartLine: 0, StartCol: 0},
+	}
+	if len(out) != len(want) {
+		t.Fatalf("len = %d, want %d", len(out), len(want))
+	}
+	for i := range want {
+		if out[i] != want[i] {
+			t.Errorf("out[%d] = %+v, want %+v", i, out[i], want[i])
+		}
+	}
+	// The input must stay untouched.
+	if in[0].StartLine != 0 || in[1].StartLine != 2 {
+		t.Fatalf("SortedEdits mutated its input: %+v", in)
+	}
+}
+
+func TestApplyEditsToText(t *testing.T) {
+	cases := []struct {
+		name  string
+		text  string
+		edits []TextEdit
+		want  string
+	}{
+		{
+			"single-line replace",
+			"hello world\nsecond\n",
+			[]TextEdit{{StartLine: 0, StartCol: 6, EndLine: 0, EndCol: 11, NewText: "there"}},
+			"hello there\nsecond\n",
+		},
+		{
+			"whole-line delete via empty replacement",
+			"keep\ndrop\nkeep2\n",
+			[]TextEdit{{StartLine: 1, StartCol: 0, EndLine: 1, EndCol: 4, NewText: ""}},
+			"keep\n\nkeep2\n",
+		},
+		{
+			"range spanning two lines",
+			"abc def\nnext line\n",
+			[]TextEdit{{StartLine: 0, StartCol: 4, EndLine: 1, EndCol: 4, NewText: "gone"}},
+			"abc gone line\n",
+		},
+		{
+			"multi-line insertion",
+			"abcd\nefgh\n",
+			[]TextEdit{{StartLine: 0, StartCol: 4, EndLine: 0, EndCol: 4, NewText: "X\nY"}},
+			"abcdX\nY\nefgh\n",
+		},
+		{
+			"two edits right-to-left",
+			"a b c\n",
+			[]TextEdit{
+				{StartLine: 0, StartCol: 4, EndLine: 0, EndCol: 5, NewText: "Z"},
+				{StartLine: 0, StartCol: 0, EndLine: 0, EndCol: 1, NewText: "W"},
+			},
+			"W b Z\n",
+		},
+		{
+			"out-of-range skipped",
+			"one\n",
+			[]TextEdit{{StartLine: 5, StartCol: 0, EndLine: 5, EndCol: 3, NewText: "x"}},
+			"one\n",
+		},
+	}
+	for _, tc := range cases {
+		if got := ApplyEditsToText(tc.text, tc.edits); got != tc.want {
+			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestParseWorkspaceEdit(t *testing.T) {
+	p := uriToPath("file:///proj/f.go")
+	res := json.RawMessage(`{"changes": {"file:///proj/f.go": [
+		{"range": {"start": {"line": 1, "character": 2}, "end": {"line": 1, "character": 5}}, "newText": "x"}
+	]}}`)
+	we := parseWorkspaceEdit(res)
+	if we == nil || len(we.Files[p]) != 1 {
+		t.Fatalf("changes shape: %+v", we)
+	}
+	e := we.Files[p][0]
+	if e.StartLine != 1 || e.StartCol != 2 || e.EndLine != 1 || e.EndCol != 5 || e.NewText != "x" {
+		t.Fatalf("changes edit: %+v", e)
+	}
+
+	res = json.RawMessage(`{"documentChanges": [{"textDocument": {"uri": "file:///proj/f.go"}, "edits": [
+		{"range": {"start": {"line": 0, "character": 1}, "end": {"line": 0, "character": 1}}, "newText": "y"}
+	]}]}`)
+	we = parseWorkspaceEdit(res)
+	if we == nil || len(we.Files[p]) != 1 || we.Files[p][0].NewText != "y" {
+		t.Fatalf("documentChanges shape: %+v", we)
+	}
+
+	// Nothing found → nil, not an empty edit set.
+	if parseWorkspaceEdit(json.RawMessage(`{}`)) != nil {
+		t.Fatal("empty reply must parse to nil")
+	}
+	if parseWorkspaceEdit(json.RawMessage(`null`)) != nil {
+		t.Fatal("null reply must parse to nil")
+	}
+}

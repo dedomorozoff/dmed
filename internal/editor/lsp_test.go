@@ -2,6 +2,7 @@ package editor
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -172,4 +173,204 @@ func TestF12BindingReturnsGotoCommand(t *testing.T) {
 		return // expected when gopls is absent; just must not panic
 	}
 	t.Fatalf("unexpected non-nil command from F12 without LSP")
+}
+
+// TestWordRunesAt covers the prefill span of rename: the word under the
+// caret, and the word just left of it when the caret sits at its end.
+func TestWordRunesAt(t *testing.T) {
+	line := []rune("func omega() {}")
+	cases := []struct {
+		col      int
+		s, e     int
+		wantWord string
+	}{
+		{col: 0, s: 0, e: 4, wantWord: "func"},    // first rune of the word
+		{col: 4, s: 0, e: 4, wantWord: "func"},    // space right after a word
+		{col: 5, s: 5, e: 10, wantWord: "omega"},  // first rune
+		{col: 7, s: 5, e: 10, wantWord: "omega"},  // middle
+		{col: 10, s: 5, e: 10, wantWord: "omega"}, // exactly past the end
+		{col: 11, s: 11, e: 11, wantWord: ""},     // on '('
+		{col: 12, s: 12, e: 12, wantWord: ""},     // space before {}
+	}
+	for _, tc := range cases {
+		s, e := wordRunesAt(line, tc.col)
+		if s != tc.s || e != tc.e {
+			t.Errorf("col %d: span %d:%d, want %d:%d", tc.col, s, e, tc.s, tc.e)
+		}
+		if got := string(line[s:e]); got != tc.wantWord {
+			t.Errorf("col %d: word %q, want %q", tc.col, got, tc.wantWord)
+		}
+	}
+}
+
+// TestStartLspRenamePrefill opens the overlay with the symbol under the
+// cursor; Escape and empty input behave.
+func TestStartLspRenamePrefill(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "sym.go", "func omega() {}\n")
+	m := New(f)
+	m.lspClient = &lsp.Client{} // stub: never spawn gopls in tests
+
+	m.cur().buf.SetCursor(0, 7)
+	m.startLspRename()
+	if !m.lspRenameOpen {
+		t.Fatal("rename overlay did not open")
+	}
+	if got := string(m.lspRenameIn); got != "omega" {
+		t.Fatalf("prefill = %q, want %q", got, "omega")
+	}
+
+	// Enter closes the overlay and fires the request (as a tea.Cmd).
+	closed := m
+	closed.lspRenameIn = []rune("newname")
+	if cmd := closed.startLspRenameCmd(); cmd == nil {
+		t.Fatal("Enter with a name produced no request")
+	}
+	if closed.lspRenameOpen {
+		t.Fatal("overlay stayed open after Enter")
+	}
+
+	// Esc closes without firing.
+	m.handleLspRename(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.lspRenameOpen {
+		t.Fatal("Escape did not close the overlay")
+	}
+
+	// Empty input on Enter does not fire a rename.
+	m.startLspRename()
+	m.lspRenameIn = nil
+	if m.startLspRenameCmd() != nil {
+		t.Fatal("empty name produced a rename request")
+	}
+}
+
+// TestStartLspRenameNoLSP refuses to open for files without a language server.
+func TestStartLspRenameNoLSP(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "notes.txt", "some word\n")
+	m := New(f)
+	m.startLspRename()
+	if m.lspRenameOpen {
+		t.Fatal("rename opened without an LSP server")
+	}
+	if m.msg == "" {
+		t.Fatal("the user should be told why rename did not open")
+	}
+}
+
+// TestHandleLspRenameTyping drives the input: letters append, Backspace
+// erases, Ctrl+C closes.
+func TestHandleLspRenameTyping(t *testing.T) {
+	m := Model{}
+	m.lspRenameOpen = true
+	m.lspRenameIn = []rune("ab")
+
+	m.handleLspRename(tea.KeyPressMsg{Text: "c"})
+	if got := string(m.lspRenameIn); got != "abc" {
+		t.Fatalf("after typing: %q", got)
+	}
+	m.handleLspRename(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if got := string(m.lspRenameIn); got != "ab" {
+		t.Fatalf("after backspace: %q", got)
+	}
+	m.handleLspRename(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.lspRenameOpen {
+		t.Fatal("Esc did not close the overlay")
+	}
+}
+
+// TestHandleLspActionsSelectAndApply drives the quick-fix list: cursor keys,
+// command-only actions announce themselves, edits apply.
+func TestHandleLspActionsSelectAndApply(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "sym.go", "func omega() {}\n")
+	m := New(f)
+	m.lspClient = &lsp.Client{}
+	fp, _ := filepath.Abs(f)
+	m.lspActionsOpen = true
+	m.lspActions = []lsp.CodeAction{
+		{Title: "ask me something else"}, // command-only: no Edit
+		{Title: "fix it", Edit: &lsp.WorkspaceEdit{Files: map[string][]lsp.TextEdit{
+			fp: {{StartLine: 0, StartCol: 5, EndLine: 0, EndCol: 10, NewText: "beta"}},
+		}}},
+	}
+
+	// First action is command-only: Enter reports and closes.
+	m.handleLspActions(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.lspActionsOpen {
+		t.Fatal("overlay stayed open after applying")
+	}
+	if !strings.Contains(m.msg, "command-only") {
+		t.Fatalf("msg = %q, want a command-only complaint", m.msg)
+	}
+
+	// Move down to the editable action and apply it: the buffer changes.
+	m.lspActionsOpen = true
+	m.handleLspActions(tea.KeyPressMsg{Code: tea.KeyDown}) // sel → 1
+	m.handleLspActions(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := m.cur().buf.Text(); got != "func beta() {}\n" {
+		t.Fatalf("edit not applied: %q", got)
+	}
+	if !strings.Contains(m.msg, "1 file") {
+		t.Fatalf("msg = %q, want an applied-file count", m.msg)
+	}
+
+	// Escape closes the list without applying anything.
+	m.lspActionsOpen = true
+	m.lspActionsSel = 1
+	m.handleLspActions(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.lspActionsOpen {
+		t.Fatal("Escape did not close the list")
+	}
+}
+
+// TestApplyWorkspaceEditOpenAndDisk edits an open tab in-buffer and a closed
+// file on disk; unreadable paths are skipped rather than aborting the series.
+func TestApplyWorkspaceEditOpenAndDisk(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "open.go", "alpha omega\n")
+	f2 := writeTemp(t, dir, "closed.txt", "beta omega\n")
+	m := New(f1)
+	m.lspClient = &lsp.Client{}
+
+	absF1, _ := filepath.Abs(f1)
+	absF2, _ := filepath.Abs(f2)
+	absF3, _ := filepath.Abs(filepath.Join(dir, "missing.txt"))
+
+	n := m.applyWorkspaceEdit(&lsp.WorkspaceEdit{Files: map[string][]lsp.TextEdit{
+		absF1: {{StartLine: 0, StartCol: 6, EndLine: 0, EndCol: 11, NewText: "beta"}},
+		absF2: {{StartLine: 0, StartCol: 5, EndLine: 0, EndCol: 10, NewText: "alpha"}},
+		absF3: {{StartLine: 0, StartCol: 0, EndLine: 0, EndCol: 5, NewText: "x"}},
+	}})
+	if n != 2 {
+		t.Fatalf("touched %d files, want 2", n)
+	}
+	if got := m.cur().buf.Text(); got != "alpha beta\n" {
+		t.Fatalf("open buffer = %q, want %q", got, "alpha beta\n")
+	}
+	if !m.cur().buf.Dirty() {
+		t.Fatal("an applied workspace edit must leave the tab dirty")
+	}
+	data, _ := os.ReadFile(f2)
+	if string(data) != "beta alpha\n" {
+		t.Fatalf("closed file on disk = %q", string(data))
+	}
+
+	// A nil edit set touches nothing.
+	if n := m.applyWorkspaceEdit(nil); n != 0 {
+		t.Fatalf("nil edit touched %d files", n)
+	}
+}
+
+// TestHandleLspActionsMsgEmpty records the "no actions" case so the next
+// request does not open an empty list.
+func TestHandleLspActionsMsgEmpty(t *testing.T) {
+	m := Model{}
+	m.handleLspActionsMsg(lspActionsMsg{})
+	if m.lspActionsOpen {
+		t.Fatal("an empty action list must not open the overlay")
+	}
+	if m.msg == "" {
+		t.Fatal("the user should be told there were no actions")
+	}
 }
