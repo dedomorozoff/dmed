@@ -367,6 +367,14 @@ plan with per-item estimates, design decisions and open questions lives in
       pair-consuming Backspace. Fixed a real bug on the way: typing over a
       selection swallowed the first keystroke (`buffer.Insert`/`InsertNewline`
       deleted the selection and returned without inserting).
+- [x] **Bookmarks survive a restart**: the session file gained a `bookmarks`
+      section (abs path → sorted 1-based lines); `New(dir)` restores them next
+      to files/cursors, and bookmark jumps work right away on the restored
+      set. The session file itself (`.dmed_session.json`) is hidden from
+      project walks (SEARCH/LIST_DIR/GLOB/agent tools). Persisting undo
+      stacks across restarts was considered and deliberately left out: an
+      undo history that survives a file being reloaded is more confusing
+      than useful.
 
 ## Infrastructure: CI and releases
 

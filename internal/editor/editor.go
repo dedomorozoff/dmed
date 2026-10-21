@@ -766,6 +766,7 @@ func New(paths ...string) Model {
 				m.openPath(f)
 			}
 			m.restoreCursors(sess.Cursors)
+			m.restoreBookmarks(sess.Bookmarks)
 			restoreActiveTab = sess.ActiveTab
 		}
 	} else {
@@ -2911,6 +2912,7 @@ func (m *Model) saveSession() {
 		Layout:     int(m.layout),
 		ActivePane: m.activePane,
 		Cursors:    cursors,
+		Bookmarks:  m.bookmarksForSession(),
 	}
 	_ = session.Save(session.DefaultPath(m.root), sess)
 }

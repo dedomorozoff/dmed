@@ -83,3 +83,35 @@ func (m *Model) jumpBookmark(dir int) {
 	m.clampScroll()
 	m.msg = m.t("msg.bookmark_jump", next)
 }
+
+// bookmarksForSession flattens the bookmark map into the session shape
+// (abs path → sorted 1-based lines). A nil result means "nothing to save".
+func (m *Model) bookmarksForSession() map[string][]int {
+	if len(m.bookmarks) == 0 {
+		return nil
+	}
+	out := make(map[string][]int, len(m.bookmarks))
+	for path, set := range m.bookmarks {
+		out[path] = sortedBoolLines(set)
+	}
+	return out
+}
+
+// restoreBookmarks installs a session's bookmarks. Lines past a file's end
+// stay inert: the gutter never renders them and the next toggle refreshes the
+// set on that line.
+func (m *Model) restoreBookmarks(in map[string][]int) {
+	if len(in) == 0 {
+		return
+	}
+	for path, lines := range in {
+		if len(lines) == 0 {
+			continue
+		}
+		set := make(map[int]bool, len(lines))
+		for _, l := range lines {
+			set[l] = true
+		}
+		m.bookmarks[path] = set
+	}
+}
