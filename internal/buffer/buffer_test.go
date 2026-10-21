@@ -534,3 +534,103 @@ func TestToggleCommentColumns(t *testing.T) {
 		t.Fatalf("col on line 2 after uncomment: got %d want 2", b.Col())
 	}
 }
+
+func TestInsertOverSelectionKeepsTypedChar(t *testing.T) {
+	b := Load("hello beautiful world\n")
+	b.SetCursor(0, 6)
+	for i := 0; i < 9; i++ {
+		b.MoveRightWithSelect()
+	}
+	b.Insert('x')
+	if b.Text() != "hello x world\n" {
+		t.Fatalf("typed over selection: %q", b.Text())
+	}
+	if b.HasSelection() {
+		t.Fatal("selection must be gone")
+	}
+	b.Undo()
+	if b.Text() != "hello beautiful world\n" {
+		t.Fatalf("after undo: %q", b.Text())
+	}
+}
+
+func TestInsertNewlineOverSelection(t *testing.T) {
+	b := Load("hello beautiful world\n")
+	b.SetCursor(0, 6)
+	for i := 0; i < 9; i++ {
+		b.MoveRightWithSelect()
+	}
+	b.InsertNewline()
+	if b.Text() != "hello \n world\n" {
+		t.Fatalf("Enter over selection: %q", b.Text())
+	}
+}
+
+func TestIndentLinesSelection(t *testing.T) {
+	b := Load("a\nbb\nccc\n")
+	b.SetCursor(0, 1)
+	b.MoveDownWithSelect()
+	b.IndentLines("\t")
+	if b.Text() != "\ta\n\tbb\nccc\n" {
+		t.Fatalf("indent block: %q", b.Text())
+	}
+	// The caret rides at the end of the range and the block stays selected.
+	if b.CurLine() != 1 || b.Col() != 2 {
+		t.Fatalf("caret after indent: line=%d col=%d", b.CurLine(), b.Col())
+	}
+	if !b.HasSelection() {
+		t.Fatal("block Tab keeps the selection")
+	}
+	b.Undo()
+	if b.Text() != "a\nbb\nccc\n" {
+		t.Fatalf("after undo: %q", b.Text())
+	}
+}
+
+func TestIndentLinesNoSelection(t *testing.T) {
+	b := Load("a\nbb\n")
+	b.SetCursor(1, 2)
+	b.IndentLines("\t")
+	if b.Text() != "a\n\tbb\n" {
+		t.Fatalf("indent current line: %q", b.Text())
+	}
+	if b.CurLine() != 1 || b.Col() != 3 || b.HasSelection() {
+		t.Fatalf("caret after indent: line=%d col=%d sel=%v", b.CurLine(), b.Col(), b.HasSelection())
+	}
+}
+
+func TestUnindentLinesRemovesOneLevel(t *testing.T) {
+	b := Load("\ta\n b\n    c\n")
+	b.SetCursor(0, 2)
+	b.MoveDownWithSelect()
+	b.MoveDownWithSelect()
+	b.UnindentLines("\t")
+	if b.Text() != "a\nb\n   c\n" {
+		t.Fatalf("unindent: %q", b.Text())
+	}
+}
+
+func TestIndentedNewlineSingleUndo(t *testing.T) {
+	b := Load("\tbody\n")
+	b.SetCursor(0, 6) // end of "\tbody"
+	b.IndentedNewline("\t\t")
+	if b.Text() != "\tbody\n\t\t\n" || b.CurLine() != 1 || b.Col() != 2 {
+		t.Fatalf("indented newline: %q line=%d col=%d", b.Text(), b.CurLine(), b.Col())
+	}
+	b.Undo()
+	if b.Text() != "\tbody\n" {
+		t.Fatalf("after undo: %q", b.Text())
+	}
+}
+
+func TestIndentedNewlineOverSelection(t *testing.T) {
+	b := Load("hello beautiful world\n")
+	b.SetCursor(0, 6)
+	for i := 0; i < 9; i++ {
+		b.MoveRightWithSelect()
+	}
+	b.IndentedNewline("\t")
+	if b.Text() != "hello \n\t world\n" {
+		t.Fatalf("Enter+indent over selection: %q", b.Text())
+	}
+}

@@ -222,11 +222,11 @@ var enCatalog = map[string]string{
 	"git.diff_stats": "  +%d ~%d -%d",
 
 	// Conflict / search / replace / AI / finder lines
-	"psearch.prompt":       " find in project: ",
-	"psearch.hint_input":   "  (Enter: search, Tab: regex, Esc: close)",
-	"psearch.hint_results": "  (↑↓ move, Enter: open, Esc: close)",
-	"psearch.scanning":     "searching...",
-	"psearch.no_matches":   "[no matches]",
+	"psearch.prompt":        " find in project: ",
+	"psearch.hint_input":    "  (Enter: search, Tab: regex, Esc: close)",
+	"psearch.hint_results":  "  (↑↓ move, Enter: open, Esc: close)",
+	"psearch.scanning":      "searching...",
+	"psearch.no_matches":    "[no matches]",
 	"conflict.label":        " CONFLICT ",
 	"conflict.msg":          " File modified on disk: [R]eload / [I]gnore? (%s)",
 	"conflict.scroll":       "  (\u2191\u2193 scroll)",
@@ -579,11 +579,11 @@ var ruCatalog = map[string]string{
 	"git.diff_stats": "  +%d ~%d -%d",
 
 	// Conflict / search / replace / AI / finder lines
-	"psearch.prompt":       " поиск по проекту: ",
-	"psearch.hint_input":   "  (Enter: искать, Tab: regex, Esc: закрыть)",
-	"psearch.hint_results": "  (↑↓ движение, Enter: открыть, Esc: закрыть)",
-	"psearch.scanning":     "идёт поиск...",
-	"psearch.no_matches":   "[нет совпадений]",
+	"psearch.prompt":        " поиск по проекту: ",
+	"psearch.hint_input":    "  (Enter: искать, Tab: regex, Esc: закрыть)",
+	"psearch.hint_results":  "  (↑↓ движение, Enter: открыть, Esc: закрыть)",
+	"psearch.scanning":      "идёт поиск...",
+	"psearch.no_matches":    "[нет совпадений]",
 	"conflict.label":        " КОНФЛИКТ ",
 	"conflict.msg":          " Файл изменён на диске: [R]перезагрузить / [I]проигнорировать? (%s)",
 	"conflict.scroll":       "  (\u2191\u2193 скролл)",

@@ -357,6 +357,16 @@ plan with per-item estimates, design decisions and open questions lives in
       scorer on titles (descriptions as fallback) instead of
       `strings.Contains` — consistent UX with `Ctrl+O`, subsequence queries
       work.
+- [x] **Smart indent + typing niceties** (`internal/editor/smartedit.go`):
+      block indent — Tab with a selection indents the selected lines
+      (selection kept for Shift+Tab), Shift+Tab unindents one level without
+      eating content (`buffer.IndentLines`/`UnindentLines`, single undo step);
+      Enter continues the line's leading whitespace and goes one tab deeper
+      after an open bracket before the caret (`buffer.IndentedNewline`); auto-
+      close for `(`/`[`/`{`/`"` with type-over of the closing character and a
+      pair-consuming Backspace. Fixed a real bug on the way: typing over a
+      selection swallowed the first keystroke (`buffer.Insert`/`InsertNewline`
+      deleted the selection and returned without inserting).
 
 ## Infrastructure: CI and releases
 

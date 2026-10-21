@@ -341,12 +341,12 @@ type Model struct {
 	searchTotalMatches int
 	// searchRegex toggles regex mode (Tab in the search prompt); the compiled
 	// pattern is memoized so rendering does not recompile it per line.
-	searchRegex   bool
-	searchRe      *regexp.Regexp
-	searchReQuery string
-	replaceOpen        bool
-	replaceWith        []rune
-	replaceFocusFind   bool
+	searchRegex      bool
+	searchRe         *regexp.Regexp
+	searchReQuery    string
+	replaceOpen      bool
+	replaceWith      []rune
+	replaceFocusFind bool
 
 	// Find in project (Ctrl+Shift+F): async full-text search across the tree.
 	projSearchOpen  bool
@@ -2248,7 +2248,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MultiNewline()
 		} else {
-			m.cur().buf.InsertNewline()
+			m.cur().buf.IndentedNewline(m.smartIndent())
 		}
 		m.msg = ""
 		if m.ai != nil {
@@ -2257,7 +2257,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "backspace":
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MultiBackspace()
-		} else {
+		} else if !deletePair(m.cur().buf) {
 			m.cur().buf.Backspace()
 		}
 		m.msg = ""
@@ -2272,8 +2272,16 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "tab":
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MultiInsertRune('\t')
+		} else if m.cur().buf.HasSelection() {
+			// Indent the selected lines as a block, like every editor.
+			m.cur().buf.IndentLines("\t")
 		} else {
 			m.cur().buf.Insert('\t')
+		}
+		m.msg = ""
+	case "shift+tab":
+		if !m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.UnindentLines("\t")
 		}
 		m.msg = ""
 	default:
@@ -2281,8 +2289,15 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			if m.cur().buf.HasMultipleCursors() {
 				m.cur().buf.MultiInsertText(msg.Text)
 			} else {
+				b := m.cur().buf
 				for _, r := range msg.Text {
-					m.cur().buf.Insert(r)
+					if b.HasSelection() {
+						// Typing over a selection replaces it; auto-close
+						// resumes on the first keystroke after the replace.
+						b.Insert(r)
+					} else {
+						insertTyped(b, r)
+					}
 				}
 			}
 			m.msg = ""

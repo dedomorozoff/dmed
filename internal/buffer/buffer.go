@@ -334,8 +334,16 @@ func (b *Buffer) ReplaceAllRE(re *regexp.Regexp, replace string) int {
 
 func (b *Buffer) Insert(r rune) {
 	if b.HasSelection() {
-		b.DeleteSelection()
-		return
+		// Typing over a selection replaces it. The delete and the insert
+		// share ONE undo step: the pre-selection snapshot is pushed here and
+		// the typing-run state below is primed so Insert does not push a
+		// second snapshot for the typed rune.
+		b.beginChange()
+		b.pushUndo()
+		b.deleteSelectionWithoutUndo()
+		b.lastWasInsert = true
+		b.lastLine = b.line
+		b.lastCol = b.col
 	}
 	grouped := b.lastWasInsert && b.line == b.lastLine && b.col == b.lastCol
 	b.breakGroup()
@@ -358,11 +366,13 @@ func (b *Buffer) Insert(r rune) {
 
 func (b *Buffer) InsertNewline() {
 	if b.HasSelection() {
-		b.DeleteSelection()
-		return
+		b.beginChange()
+		b.pushUndo()
+		b.deleteSelectionWithoutUndo()
+	} else {
+		b.beginChange()
+		b.pushUndo()
 	}
-	b.beginChange()
-	b.pushUndo()
 	l := b.d.lineAt(b.line)
 	rest := append([]rune(nil), l[b.col:]...)
 	b.d.root = b.d.setLine(b.line, l[:b.col:b.col])
@@ -370,6 +380,31 @@ func (b *Buffer) InsertNewline() {
 	b.line++
 	b.col = 0
 	b.goalCol = 0
+	b.hasSelection = false
+}
+
+// IndentedNewline splits the line at the caret like InsertNewline but gives
+// the new line a whitespace prefix (the smart-indent continuation computed by
+// the editor: current line's leading whitespace, possibly one level deeper for
+// an open bracket before the caret). One undo step.
+func (b *Buffer) IndentedNewline(indent string) {
+	if b.HasSelection() {
+		b.beginChange()
+		b.pushUndo()
+		b.deleteSelectionWithoutUndo()
+	} else {
+		b.beginChange()
+		b.pushUndo()
+	}
+	l := b.d.lineAt(b.line)
+	rest := append([]rune(nil), l[b.col:]...)
+	ind := []rune(indent)
+	nl := append(append([]rune(nil), ind...), rest...)
+	b.d.root = b.d.setLine(b.line, l[:b.col:b.col])
+	b.d.root = b.d.insertLines(b.line+1, [][]rune{nl})
+	b.line++
+	b.col = len(ind)
+	b.goalCol = b.col
 	b.hasSelection = false
 }
 
@@ -479,6 +514,74 @@ func (b *Buffer) DuplicateLineUp() {
 	b.line = el + 1
 	b.goalCol = b.col
 	b.hasSelection = false
+}
+
+// IndentLines adds one indentation unit (width, usually "\t") to the start of
+// every line touched by the selection, or just the current line without a
+// selection. UnindentLines removes at most one such unit of leading
+// whitespace. Both are single undo steps (Tab/Shift+Tab in the editor).
+func (b *Buffer) IndentLines(width string)   { b.indentLines(width, true) }
+func (b *Buffer) UnindentLines(width string) { b.indentLines(width, false) }
+
+func (b *Buffer) indentLines(width string, add bool) {
+	if width == "" {
+		return
+	}
+	b.beginChange()
+	b.pushUndo()
+	mat := b.linesCopy()
+	sl, sc, el, ec := b.SelectionRange()
+	hadSel := b.HasSelection()
+	if !hadSel {
+		sl = b.line
+		el = b.line
+	}
+	w := []rune(width)
+	// Per-line delta of the change, to shift the caret and columns.
+	deltas := make([]int, el-sl+1)
+	for i := sl; i <= el; i++ {
+		line := mat[i]
+		if add {
+			nl := make([]rune, 0, len(line)+len(w))
+			nl = append(nl, w...)
+			nl = append(nl, line...)
+			mat[i] = nl
+			deltas[i-sl] = len(w)
+		} else {
+			// Strip at most one unit of leading whitespace; a line with less
+			// indentation still loses what it has. Content after the cut is
+			// never touched.
+			cut := 0
+			for cut < len(w) && cut < len(line) && (line[cut] == ' ' || line[cut] == '\t') {
+				cut++
+			}
+			if cut > 0 {
+				mat[i] = append([]rune(nil), line[cut:]...)
+				deltas[i-sl] = -cut
+			}
+		}
+	}
+	// A block tab keeps its selection (Shift+Tab follows Tab on the same
+	// lines); the caret rides at the end of the range.
+	b.line = el
+	b.col = clampCol(ec+deltas[el-sl], mat[el])
+	if hadSel {
+		b.selLine = sl
+		b.selCol = clampCol(sc+deltas[0], mat[sl])
+		b.hasSelection = true
+	}
+	b.goalCol = b.col
+	b.setLines(mat)
+}
+
+func clampCol(col int, line []rune) int {
+	if col < 0 {
+		return 0
+	}
+	if col > len(line) {
+		return len(line)
+	}
+	return col
 }
 
 // ToggleComment comments or uncomments the current line (or the selected
