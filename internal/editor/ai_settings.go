@@ -665,7 +665,7 @@ func (m Model) aiSettingsPanel(h int) []string {
 func (m Model) aiSelectRows() []string {
 	const window = 8
 	selStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
-	end := minInt(m.aiCfgSelOff+window, len(m.aiCfgSelItems))
+	end := min(m.aiCfgSelOff+window, len(m.aiCfgSelItems))
 	out := make([]string, 0, end-m.aiCfgSelOff+2)
 	if m.aiCfgSelOff > 0 {
 		out = append(out, hintStyle.Render("  ↑ "+strconv.Itoa(m.aiCfgSelOff)+" more"))

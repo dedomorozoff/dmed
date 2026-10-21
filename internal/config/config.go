@@ -312,10 +312,6 @@ func Load(projectRoot string) Config {
 	if v := os.Getenv("DMED_API_KEY"); v != "" {
 		cfg.AI.APIKey = v
 	}
-	if v := os.Getenv("DMED_SHELL"); v != "" {
-		// Shell is not in Config struct but stored separately in the editor.
-		// This override is handled by the editor.
-	}
 	if v := os.Getenv("DMED_LANG"); v != "" {
 		cfg.UI.Lang = v
 	}
@@ -354,55 +350,8 @@ func Load(projectRoot string) Config {
 // WriteLang sets the `[ui] lang` value in the INI file at path, preserving all
 // other content. If the file or the [ui] section is missing it is appended.
 func WriteLang(path, lang string) error {
-	data, err := os.ReadFile(path)
-	var lines []string
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err == nil {
-		lines = strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
-	}
-
-	var out []string
-	inUI := false
-	uiPresent := false
-	wrote := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
-			name := strings.TrimSpace(trimmed[1 : len(trimmed)-1])
-			inUI = strings.EqualFold(name, "ui")
-			if inUI {
-				uiPresent = true
-			}
-		}
-		if inUI {
-			if idx := strings.IndexByte(line, '='); idx > 0 {
-				if strings.ToLower(strings.TrimSpace(line[:idx])) == "lang" {
-					out = append(out, "lang = "+lang)
-					wrote = true
-					continue
-				}
-			}
-		}
-		out = append(out, line)
-	}
-
-	if !wrote {
-		if !uiPresent {
-			if len(out) > 0 && out[len(out)-1] != "" {
-				out = append(out, "")
-			}
-			out = append(out, "[ui]")
-		}
-		out = append(out, "lang = "+lang)
-	}
-
-	content := strings.Join(out, "\n") + "\n"
-	if len(content) == 1 {
-		content = ""
-	}
-	return os.WriteFile(path, []byte(content), 0o644)
+	_, err := writeSection(path, "ui", [][2]string{{"lang", lang}})
+	return err
 }
 
 // ConfigPath returns the path to the global config file.
@@ -713,7 +662,7 @@ func parseList(v string) []string {
 // If the file or the [ai] section is missing it is appended. Returns the
 // number of keys written.
 func WriteAI(path string, ai AIConfig) (int, error) {
-	known := []struct{ key, val string }{
+	known := [][2]string{
 		{"provider", ai.Provider},
 		{"model", ai.Model},
 		{"ollama_url", ai.OllamaURL},
@@ -730,81 +679,7 @@ func WriteAI(path string, ai AIConfig) (int, error) {
 	// tools_enabled / tools_disabled are deliberately absent: they are a
 	// curated, hand-edited whitelist, and the wizard must not clobber it when
 	// it rewrites the [ai] section.
-
-	data, err := os.ReadFile(path)
-	var lines []string
-	if err != nil && !os.IsNotExist(err) {
-		return 0, err
-	}
-	if err == nil {
-		lines = strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
-	}
-
-	var out []string
-	inAI := false
-	aiPresent := false
-	replaced := make(map[string]bool, len(known))
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
-			name := strings.TrimSpace(trimmed[1 : len(trimmed)-1])
-			inAI = strings.EqualFold(name, "ai")
-			if inAI {
-				aiPresent = true
-			}
-		}
-		if inAI {
-			if idx := strings.IndexByte(line, '='); idx > 0 {
-				key := strings.ToLower(strings.TrimSpace(line[:idx]))
-				matched := false
-				for _, k := range known {
-					if k.key == key {
-						out = append(out, key+" = "+k.val)
-						replaced[key] = true
-						matched = true
-						break
-					}
-				}
-				if matched {
-					continue
-				}
-			}
-		}
-		out = append(out, line)
-	}
-
-	var missing []string
-	for _, k := range known {
-		if !replaced[k.key] {
-			missing = append(missing, k.key+" = "+k.val)
-		}
-	}
-	if !aiPresent {
-		if len(out) > 0 && out[len(out)-1] != "" {
-			out = append(out, "")
-		}
-		out = append(out, "[ai]")
-		out = append(out, missing...)
-	} else if len(missing) > 0 {
-		for i := len(out) - 1; i >= 0; i-- {
-			t := strings.TrimSpace(out[i])
-			if strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]") &&
-				strings.EqualFold(strings.TrimSpace(t[1:len(t)-1]), "ai") {
-				tail := append([]string{}, out[i+1:]...)
-				out = append(append(out[:i+1], missing...), tail...)
-				break
-			}
-		}
-	}
-
-	content := strings.Join(out, "\n") + "\n"
-	if len(content) == 1 {
-		content = ""
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return 0, err
-	}
-	return len(replaced) + len(missing), nil
+	return writeSection(path, "ai", known)
 }
 
 // writeSection merges the given key/value pairs into the INI section at path,

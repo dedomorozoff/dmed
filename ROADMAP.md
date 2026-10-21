@@ -322,6 +322,24 @@ plan with per-item estimates, design decisions and open questions lives in
       goes through the same queue and the same diff review, and the chat parks
       instead of blocking the UI while it runs.
 
+### Post-M8 — housekeeping
+- [x] `config.WriteAI`/`WriteLang` converted onto the shared `writeSection`
+      engine (they were byte-for-byte near-duplicates of it; a new `[ai]` key
+      no longer needs two edits).
+- [x] The file finder and agent panel index the project through the same
+      checker target `walkProject` + `newProjectSkipFor` as the AI tools,
+      so the finder list cannot drift out of the AI's skip rules.
+- [x] `maxInt`/`minInt` replaced with the Go builtins `max`/`min`.
+- [x] Stray hardcoded English strings routed through i18n (m.t): terminal
+      exit/error messages, "provider offline", "no models available",
+      "replaced N occurrence(s)" — new keys `term.*`, `chat.provider_offline`,
+      `chat.no_models`, `msg.replaced_many` in both catalogs.
+- [x] `fetchRemoteSource` escapes each URL path component like the listing
+      fetch already did (a branch/file name with a space or "?" produced a
+      broken URL).
+- [x] Dead `DMED_SHELL` branch removed from config.Load (the editor reads
+      the variable itself).
+
 ## Infrastructure: CI and releases
 
 - [x] GitHub Actions CI (`ci.yml`): vet + unit tests + cross-build for 8 platforms

@@ -176,9 +176,9 @@ func (m *Model) pickChatModel() {
 			m.rebuildChatRows()
 			return
 		}
-		m.msg = "provider offline (" + err.Error() + ")"
+		m.msg = m.t("chat.provider_offline", err.Error())
 	case len(models) == 0:
-		m.msg = "no models available"
+		m.msg = m.t("chat.no_models")
 	default:
 		m.chatModel = models[0]
 		// Rebuild for the freshly picked model.
@@ -399,7 +399,7 @@ func (m Model) chatButtonsString() string {
 		b.WriteString(st.Render(" " + m.chatButtonGlyph(c.act) + " "))
 		pos += c.w
 	}
-	b.WriteString(strings.Repeat(" ", maxInt(0, w-pos)))
+	b.WriteString(strings.Repeat(" ", max(0, w-pos)))
 	return b.String()
 }
 
@@ -1170,7 +1170,7 @@ func (m *Model) clampChatScroll() {
 		bodyH = 1
 	}
 	if maxBack := len(m.chatRows) - bodyH; m.chatScroll > maxBack {
-		m.chatScroll = maxInt(0, maxBack)
+		m.chatScroll = max(0, maxBack)
 	}
 	if m.chatScroll < 0 {
 		m.chatScroll = 0

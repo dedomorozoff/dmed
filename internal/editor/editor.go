@@ -1411,7 +1411,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.termVT.Unlock()
 		}
 		if msg.exited {
-			m.msg = "terminal: process exited"
+			m.msg = m.t("term.exited")
 		}
 		return m, waitForTermOutput(m.termCh)
 	case terminalExitMsg:
@@ -1420,7 +1420,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.termSession = nil
 		if msg.err != nil && !strings.Contains(strings.ToLower(msg.err.Error()), "killed") {
-			m.msg = "terminal: " + msg.err.Error()
+			m.msg = m.t("term.error", msg.err.Error())
 		}
 	case ChatOutputMsg:
 		if msg.Gen != m.chatGen {
@@ -2734,7 +2734,11 @@ func (m *Model) doReplaceAll() {
 	}
 	t := m.cur()
 	count := t.buf.ReplaceAll(string(m.searchQuery), string(m.replaceWith))
-	m.msg = fmt.Sprintf("replaced %d occurrence(s)", count)
+	if count == 1 {
+		m.msg = m.t("msg.replaced_one")
+	} else {
+		m.msg = m.t("msg.replaced_many", count)
+	}
 	m.searchOpen = false
 	m.replaceOpen = false
 }

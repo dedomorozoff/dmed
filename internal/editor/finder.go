@@ -2,6 +2,7 @@ package editor
 
 import (
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,22 +13,15 @@ const (
 	finderMaxShown = 8
 )
 
+// collectFiles lists every project file the finder should index. It shares
+// the walker and skip rules with the AI filesystem tools (walkProject +
+// newProjectSkipFor), so the list a file was found in cannot disagree with
+// what READ/SEARCH may later read: skipping .git and node_modules is one
+// decision, not two that drift apart.
 func collectFiles(base string, skipDirs []string) []string {
-	skip := make(map[string]bool, len(skipDirs))
-	for _, d := range skipDirs {
-		skip[d] = true
-	}
 	var out []string
-	filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			if skip[d.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
+	skip := newProjectSkipFor(skipDirs)
+	_ = walkProject(base, skip, func(p string, info os.FileInfo) error {
 		rel, rerr := filepath.Rel(base, p)
 		if rerr != nil {
 			return nil

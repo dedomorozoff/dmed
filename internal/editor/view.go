@@ -911,7 +911,7 @@ func (m Model) treePanel(h int) []string {
 			if pad < 0 {
 				// Truncate to the available width.
 				runes := []rune(plainS)
-				plainS = string(runes[:maxInt(0, len(runes)+pad)])
+				plainS = string(runes[:max(0, len(runes)+pad)])
 				line = plainS
 				pad = 0
 			}
@@ -929,21 +929,6 @@ func (m Model) treePanel(h int) []string {
 		rows = append(rows, cell+" ")
 	}
 	return rows
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-// minInt is maxInt's counterpart, for the few places that need a lower bound.
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func padTo(s string, w int) string {
@@ -1242,13 +1227,13 @@ func (m Model) gitPanel(h int) []string {
 			cell = statusHiStyle.Render(line)
 		case fs.IsStaged():
 			styled := " " + gitAddStyle.Render(marker) + " " + path
-			cell = styled + strings.Repeat(" ", maxInt(0, gitPanelWidth-1-lipgloss.Width(styled)))
+			cell = styled + strings.Repeat(" ", max(0, gitPanelWidth-1-lipgloss.Width(styled)))
 		case fs.Worktree == vcs.StatusUntracked:
 			styled := " " + hintStyle.Render(marker) + " " + path
-			cell = styled + strings.Repeat(" ", maxInt(0, gitPanelWidth-1-lipgloss.Width(styled)))
+			cell = styled + strings.Repeat(" ", max(0, gitPanelWidth-1-lipgloss.Width(styled)))
 		default:
 			styled := " " + gitModStyle.Render(marker) + " " + path
-			cell = styled + strings.Repeat(" ", maxInt(0, gitPanelWidth-1-lipgloss.Width(styled)))
+			cell = styled + strings.Repeat(" ", max(0, gitPanelWidth-1-lipgloss.Width(styled)))
 		}
 		rows = append(rows, cell+" ")
 	}
@@ -1311,7 +1296,7 @@ func (m Model) diffViewRows(h int) []string {
 func (m Model) renderSideBySide(leftLines, rightLines []string, diffRows []vcs.DiffRow, offsetY, offsetX, w, h int, leftSyntax, rightSyntax []syntax.HighlightedLine) []string {
 	half := (w - 1) / 2
 
-	numW := len(strconv.Itoa(maxInt(len(leftLines), len(rightLines)))) + 1
+	numW := len(strconv.Itoa(max(len(leftLines), len(rightLines)))) + 1
 	if numW < 3 {
 		numW = 3
 	}
@@ -1604,10 +1589,10 @@ func (m Model) chatPanel(h int) []string {
 							chatUserBubbleStyle.Render(string(bubbleRunes[c1:]))
 					}
 				}
-				body = strings.Repeat(" ", maxInt(0, w-1-len(bubbleRunes))) + bubble
+				body = strings.Repeat(" ", max(0, w-1-len(bubbleRunes))) + bubble
 			} else {
 				body = strings.Repeat(" ", chatBodyPad) + line +
-					strings.Repeat(" ", maxInt(0, w-1-chatBodyPad-lipgloss.Width(line)))
+					strings.Repeat(" ", max(0, w-1-chatBodyPad-lipgloss.Width(line)))
 			}
 		}
 		rows = append(rows, body+sbCell(i-start))

@@ -605,7 +605,7 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 				m.chatReviewOffY = 0
 			}
 			if maxOff := len(m.chatReviewRows) - 1; m.chatReviewOffY > maxOff {
-				m.chatReviewOffY = maxInt(0, maxOff)
+				m.chatReviewOffY = max(0, maxOff)
 			}
 			return nil
 		}
@@ -653,7 +653,7 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 				m.chatReviewOffY = 0
 			}
 			if maxOff := len(m.chatReviewRows) - 1; m.chatReviewOffY > maxOff {
-				m.chatReviewOffY = maxInt(0, maxOff)
+				m.chatReviewOffY = max(0, maxOff)
 			}
 			return nil
 		}
@@ -690,7 +690,7 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 			m.aiReviewOffY = 0
 		}
 		if maxOff := len(m.aiReviewRows) - 1; m.aiReviewOffY > maxOff {
-			m.aiReviewOffY = maxInt(0, maxOff)
+			m.aiReviewOffY = max(0, maxOff)
 		}
 		return nil
 	case m.agentReviewMode:
@@ -699,7 +699,7 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 			m.agentReviewOffY = 0
 		}
 		if maxOff := len(m.agentReviewRows) - 1; m.agentReviewOffY > maxOff {
-			m.agentReviewOffY = maxInt(0, maxOff)
+			m.agentReviewOffY = max(0, maxOff)
 		}
 		return nil
 	case m.conflictOpen && len(m.conflictRows) > 0:
@@ -708,7 +708,7 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 			m.conflictOffY = 0
 		}
 		if maxOff := len(m.conflictRows) - 1; m.conflictOffY > maxOff {
-			m.conflictOffY = maxInt(0, maxOff)
+			m.conflictOffY = max(0, maxOff)
 		}
 		return nil
 	case m.helpOpen:

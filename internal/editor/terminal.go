@@ -82,7 +82,7 @@ func (m *Model) ensureShell() {
 		Width: width, Height: height,
 	})
 	if err != nil {
-		m.msg = "terminal: " + err.Error()
+		m.msg = m.t("term.error", err.Error())
 		return
 	}
 	m.termGen++
@@ -272,7 +272,7 @@ func (m *Model) forwardTerminalMouseEvent(button, x, y int, final byte) {
 func (m *Model) handleTerm(msg tea.KeyPressMsg) tea.Cmd {
 	if data := terminalKeyBytes(msg); len(data) > 0 && m.termSession != nil {
 		if _, err := m.termSession.Write(data); err != nil {
-			m.msg = "terminal: " + err.Error()
+			m.msg = m.t("term.error", err.Error())
 		}
 	}
 	return nil

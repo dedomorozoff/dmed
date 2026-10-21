@@ -1020,7 +1020,7 @@ func (m *Model) dapSetSel(i int) {
 	if total == 0 {
 		i = 0
 	} else {
-		i = maxInt(i, 0)
+		i = max(i, 0)
 		if i > total-1 {
 			i = total - 1
 		}
@@ -1039,7 +1039,7 @@ func (m *Model) dapSetSel(i int) {
 // the ends.
 func (m *Model) dapMoveSelCmd(d int) tea.Cmd {
 	idx, total := m.dapSelList()
-	return m.dapSetSelCmd((idx + d + total) % maxInt(total, 1))
+	return m.dapSetSelCmd((idx + d + total) % max(total, 1))
 }
 
 // dapMoveSelPageCmd jumps one screenful of the focused list. Unlike a one-step

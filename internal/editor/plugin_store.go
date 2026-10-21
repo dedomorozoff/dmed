@@ -103,9 +103,14 @@ func fetchRemotePluginList(repo, dir, branch string) ([]storeItem, error) {
 	return parseRemotePluginList(body)
 }
 
-// fetchRemoteSource downloads a single plugin's .lua from a GitHub repo.
+// fetchRemoteSource downloads a single plugin's .lua from a GitHub repo. Like
+// fetchRemotePluginList it escapes every path component: a branch name or file
+// name containing a space or "?" must not smuggle an extra path segment or
+// query into the URL.
 func fetchRemoteSource(repo, dir, branch, file string) (string, error) {
-	u := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", repo, branch, dir+"/"+file)
+	u := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s",
+		url.PathEscape(repo), url.PathEscape(branch),
+		url.PathEscape(strings.Join([]string{dir, file}, "/")))
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(u)
 	if err != nil {
