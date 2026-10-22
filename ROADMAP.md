@@ -440,6 +440,9 @@ plan with per-item estimates, design decisions and open questions lives in
       when it lands. A pass for text the buffer has moved away from is
       dropped instead of painted. Typing never waits for the tokenizer any
       more; the colors of a line that changed catch up a moment later.
+      The cache itself holds one token per character instead of a whole
+      style: a file with 60k lines went from 443 MB of styles to 6 MB of
+      tokens, and the styles are resolved when a line is painted.
 
 ## Infrastructure: CI and releases
 

@@ -1354,8 +1354,8 @@ func (m Model) renderSideBySide(leftLines, rightLines []string, diffRows []vcs.D
 			if rightSyntax != nil && idx < len(rightSyntax) {
 				rs = rightSyntax[idx]
 			}
-			left = renderDiffCell(leftLines, dr.Left, dr.Type, false, numW, contentW, offsetX, ls)
-			right = renderDiffCell(rightLines, dr.Right, dr.Type, true, numW, contentW, offsetX, rs)
+			left = renderDiffCell(leftLines, dr.Left, dr.Type, false, numW, contentW, offsetX, ls, m.syn)
+			right = renderDiffCell(rightLines, dr.Right, dr.Type, true, numW, contentW, offsetX, rs, m.syn)
 		} else {
 			left = strings.Repeat(" ", half)
 			right = strings.Repeat(" ", half)
@@ -1365,7 +1365,7 @@ func (m Model) renderSideBySide(leftLines, rightLines []string, diffRows []vcs.D
 	return rows
 }
 
-func renderDiffCell(lines []string, lineIdx int, dt vcs.DiffType, rightSide bool, numW, contentW, offsetX int, syntaxLine syntax.HighlightedLine) string {
+func renderDiffCell(lines []string, lineIdx int, dt vcs.DiffType, rightSide bool, numW, contentW, offsetX int, syntaxLine syntax.HighlightedLine, syn *syntax.Highlighter) string {
 	half := numW + 2 + contentW
 	if lineIdx < 0 {
 		return strings.Repeat(" ", half)
@@ -1413,10 +1413,20 @@ func renderDiffCell(lines []string, lineIdx int, dt vcs.DiffType, rightSide bool
 	if syntaxLine != nil || bg != nil {
 		var out strings.Builder
 		out.WriteString(prefix)
+		// The tokens of a line come in runs: one style lookup per run.
+		var lastToken syntax.Token
+		var lastStyle lipgloss.Style
+		haveLast := false
 		for i := 0; i < len(runes) && i < needed; i++ {
 			var st lipgloss.Style
 			if syntaxLine != nil && i+offsetX < len(syntaxLine) {
-				st = syntaxLine[i+offsetX]
+				tok := syntaxLine[i+offsetX]
+				if !haveLast || tok != lastToken {
+					lastToken = tok
+					lastStyle = syn.StyleFor(tok)
+					haveLast = true
+				}
+				st = lastStyle
 			}
 			if bg != nil {
 				st = st.Background(bg.GetBackground())
@@ -2133,9 +2143,9 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 		return ""
 	}
 	raw := t.buf.LineAt(ln)
-	var rawStyles syntax.HighlightedLine
+	var rawTokens syntax.HighlightedLine
 	if ln < len(syntaxLines) {
-		rawStyles = syntaxLines[ln]
+		rawTokens = syntaxLines[ln]
 	}
 
 	// Highlight the line the debuggee is stopped on, so the execution point is
@@ -2148,11 +2158,23 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 	expStyles := make([]lipgloss.Style, 0, len(raw))
 	rawToExp := make([]int, len(raw)+1)
 
+	// The tokens of a line come in runs, so the style of a run is looked up
+	// once instead of once per character.
+	var lastToken syntax.Token
+	var lastStyle lipgloss.Style
+	haveLast := false
+
 	for i, r := range raw {
 		rawToExp[i] = len(exp)
 		var st lipgloss.Style
-		if i < len(rawStyles) {
-			st = rawStyles[i]
+		if i < len(rawTokens) {
+			tok := rawTokens[i]
+			if !haveLast || tok != lastToken {
+				lastToken = tok
+				lastStyle = m.syn.StyleFor(tok)
+				haveLast = true
+			}
+			st = lastStyle
 		}
 		if r == '\t' {
 			for k := 0; k < m.cfg.Editor.TabWidth; k++ {

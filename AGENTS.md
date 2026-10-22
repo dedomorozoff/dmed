@@ -193,6 +193,10 @@ Conventions:
   `Init` and re-arms itself). A pass for text the buffer moved away from is
   dropped; at most one pass per tab is in flight. Keep it that way — chroma
   re-tokenizes the whole buffer and blocks for seconds on a large file.
+- The cached highlight stores one syntax *token* per character, not a style:
+  a lipgloss.Style per character cost ~800 bytes, a token 8. The styles are
+  resolved through `Highlighter.StyleFor` when a line is painted (the tokens
+  of a line come in runs, so the lookup happens once per run).
 - The AI wizard loads the provider's model list when it opens and after every
   provider change (`testAIConnection` serves both the Test row and the list).
   `AITestResultMsg.Gen` stamps the request so a late reply from the previous

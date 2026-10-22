@@ -11,8 +11,14 @@ import (
 	"github.com/alecthomas/chroma/v2/styles"
 )
 
-// HighlightedLine contains a lipgloss style for each rune of the line.
-type HighlightedLine []lipgloss.Style
+// Token identifies the kind of a syntax token. The editor keeps one token
+// per character and asks for the style when it paints a line: a
+// lipgloss.Style per character costs hundreds of bytes and a token a couple,
+// which matters a lot for a large file.
+type Token = chroma.TokenType
+
+// HighlightedLine holds the token of every rune of the line.
+type HighlightedLine []Token
 
 // Highlighter provides syntax highlighting using chroma lexers and styles.
 type Highlighter struct {
@@ -42,6 +48,12 @@ func New(styleName string) *Highlighter {
 		styleCache: make(map[chroma.TokenType]lipgloss.Style),
 	}
 	return h
+}
+
+// StyleFor returns the style of a token kind. The styles are built once and
+// cached, so this is a lookup.
+func (h *Highlighter) StyleFor(t Token) lipgloss.Style {
+	return h.getStyle(t)
 }
 
 func (h *Highlighter) getStyle(tt chroma.TokenType) lipgloss.Style {
@@ -193,7 +205,7 @@ func (h *Highlighter) HighlightBuffer(filename, text string) []HighlightedLine {
 	var curLine HighlightedLine
 
 	for _, token := range iterator.Tokens() {
-		st := h.getStyle(token.Type)
+		tok := token.Type
 		val := token.Value
 
 		lines := strings.Split(val, "\n")
@@ -204,7 +216,7 @@ func (h *Highlighter) HighlightBuffer(filename, text string) []HighlightedLine {
 			}
 			runes := []rune(segment)
 			for range runes {
-				curLine = append(curLine, st)
+				curLine = append(curLine, tok)
 			}
 		}
 	}

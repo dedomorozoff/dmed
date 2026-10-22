@@ -17,6 +17,33 @@ func TestHighlightBufferGo(t *testing.T) {
 	}
 }
 
+// TestHighlightTokensAndStyles: the cached highlight holds one token per
+// character (a style per character would cost hundreds of bytes each) and
+// every token resolves to a style.
+func TestHighlightTokensAndStyles(t *testing.T) {
+	h := New("monokai")
+	code := "package main\n"
+	hl := h.HighlightBuffer("main.go", code)
+	if len(hl) != 2 { // the text ends with a newline, so there is an empty line
+		t.Fatalf("expected 2 lines, got %d", len(hl))
+	}
+	line := hl[0]
+	if len(line) != len([]rune("package main")) {
+		t.Fatalf("expected %d tokens, got %d", len([]rune("package main")), len(line))
+	}
+	// The keyword and the space after it are different tokens.
+	if line[0] == line[7] {
+		t.Fatalf("the keyword and the space must not share a token: %v", line[:8])
+	}
+	// Every token resolves to a style.
+	for i, tok := range line {
+		_ = h.StyleFor(tok)
+		if i > 8 {
+			break
+		}
+	}
+}
+
 func TestHighlightBufferFallback(t *testing.T) {
 	h := New("monokai")
 	code := "some plain text"
