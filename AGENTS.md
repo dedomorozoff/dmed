@@ -200,6 +200,12 @@ Conventions:
   a lipgloss.Style per character cost ~800 bytes, a token 8. The styles are
   resolved through `Highlighter.StyleFor` when a line is painted (the tokens
   of a line come in runs, so the lookup happens once per run).
+- The git diff of the buffer (the gutter markers) is a whole-file job too and
+  runs in the background as well — see `internal/editor/gdiff.go`. It follows
+  the same shape as the highlighting: a wait for the typing to settle, a
+  pass that is dropped when the text moved on.
+- Lines are painted in runs of equal style, not character by character: a
+  lipgloss render per character was thousands of calls per frame.
 - The AI wizard loads the provider's model list when it opens and after every
   provider change (`testAIConnection` serves both the Test row and the list).
   `AITestResultMsg.Gen` stamps the request so a late reply from the previous

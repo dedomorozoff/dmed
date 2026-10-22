@@ -585,7 +585,7 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	rows := make([]string, h)
 
 	syntaxLines := t.getSyntaxLines()
-	diff := t.getDiff(m.repo)
+	diff := t.getDiff()
 	diagPath, _ := filepath.Abs(t.path)
 	tabDiags := m.diags[diagPath]
 	bpSet := m.dapBreak[diagPath]
@@ -1413,12 +1413,21 @@ func renderDiffCell(lines []string, lineIdx int, dt vcs.DiffType, rightSide bool
 	if syntaxLine != nil || bg != nil {
 		var out strings.Builder
 		out.WriteString(prefix)
-		// The tokens of a line come in runs: one style lookup per run.
+		// The tokens of a line come in runs: one style lookup and one lipgloss
+		// render per run instead of per character.
 		var lastToken syntax.Token
 		var lastStyle lipgloss.Style
 		haveLast := false
-		for i := 0; i < len(runes) && i < needed; i++ {
+		runStart := 0
+		runStyle := lipgloss.Style{}
+		runKey := 0
+		end := len(runes)
+		if needed < end {
+			end = needed
+		}
+		for i := 0; i < end; i++ {
 			var st lipgloss.Style
+			key := 1000
 			if syntaxLine != nil && i+offsetX < len(syntaxLine) {
 				tok := syntaxLine[i+offsetX]
 				if !haveLast || tok != lastToken {
@@ -1427,11 +1436,26 @@ func renderDiffCell(lines []string, lineIdx int, dt vcs.DiffType, rightSide bool
 					haveLast = true
 				}
 				st = lastStyle
+				key = int(tok) + 1000
 			}
 			if bg != nil {
 				st = st.Background(bg.GetBackground())
+				key = -4
 			}
-			out.WriteString(st.Render(string(runes[i])))
+			if i == 0 {
+				runStyle = st
+				runKey = key
+				continue
+			}
+			if key != runKey {
+				out.WriteString(runStyle.Render(string(runes[runStart:i])))
+				runStart = i
+				runStyle = st
+				runKey = key
+			}
+		}
+		if end > 0 {
+			out.WriteString(runStyle.Render(string(runes[runStart:end])))
 		}
 		// Pad remaining space
 		visW := lipgloss.Width(out.String())
@@ -2138,6 +2162,23 @@ func (m Model) folderPanel() []string {
 	return rows
 }
 
+// Run keys for the line painting. The syntax tokens are non-negative, the
+// overrides use negative keys, so a run of equal key always has one style.
+const (
+	matchStyleKey     = -1
+	selectionStyleKey = -2
+	cursorStyleKey    = -3
+)
+
+// styleKey returns the run key of an expanded position: the syntax token of
+// the character, shifted so it cannot collide with the override keys.
+func styleKey(tokens []syntax.Token, i int) int {
+	if i < len(tokens) {
+		return int(tokens[i]) + 1000
+	}
+	return 1000
+}
+
 func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLines []syntax.HighlightedLine) string {
 	if w <= 0 || ln >= t.buf.LineCount() {
 		return ""
@@ -2156,6 +2197,7 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 	// Expand tabs
 	exp := make([]rune, 0, len(raw))
 	expStyles := make([]lipgloss.Style, 0, len(raw))
+	expTokens := make([]syntax.Token, 0, len(raw))
 	rawToExp := make([]int, len(raw)+1)
 
 	// The tokens of a line come in runs, so the style of a run is looked up
@@ -2167,8 +2209,9 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 	for i, r := range raw {
 		rawToExp[i] = len(exp)
 		var st lipgloss.Style
+		var tok syntax.Token
 		if i < len(rawTokens) {
-			tok := rawTokens[i]
+			tok = rawTokens[i]
 			if !haveLast || tok != lastToken {
 				lastToken = tok
 				lastStyle = m.syn.StyleFor(tok)
@@ -2180,10 +2223,12 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 			for k := 0; k < m.cfg.Editor.TabWidth; k++ {
 				exp = append(exp, ' ')
 				expStyles = append(expStyles, st)
+				expTokens = append(expTokens, tok)
 			}
 		} else {
 			exp = append(exp, r)
 			expStyles = append(expStyles, st)
+			expTokens = append(expTokens, tok)
 		}
 	}
 	rawToExp[len(raw)] = len(exp)
@@ -2277,10 +2322,15 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 		}
 	}
 
+	// Paint the line in runs of equal style: a lipgloss render per character
+	// costs thousands of calls per frame, a render per run a handful.
 	var out strings.Builder
+	runStart := start
+	runStyle := lipgloss.Style{}
+	runKey := 0
 	for i := start; i < end; i++ {
-		r := exp[i]
 		st := expStyles[i]
+		key := styleKey(expTokens, i)
 
 		for _, mi := range matches {
 			if i >= mi.start && i < mi.end {
@@ -2289,16 +2339,19 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 				} else {
 					st = matchStyle
 				}
+				key = matchStyleKey
 				break
 			}
 		}
 
 		if selStart >= 0 && i >= selStart && i < selEnd {
 			st = selectionStyle
+			key = selectionStyleKey
 		} else {
 			for _, rng := range selRanges {
 				if i >= rng[0] && i < rng[1] {
 					st = selectionStyle
+					key = selectionStyleKey
 					break
 				}
 			}
@@ -2307,11 +2360,25 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 		for _, cc := range carets {
 			if i == cc {
 				st = cursorStyle
+				key = cursorStyleKey
 				break
 			}
 		}
 
-		out.WriteString(st.Render(string(r)))
+		if i == start {
+			runStyle = st
+			runKey = key
+			continue
+		}
+		if key != runKey {
+			out.WriteString(runStyle.Render(string(exp[runStart:i])))
+			runStart = i
+			runStyle = st
+			runKey = key
+		}
+	}
+	if end > start {
+		out.WriteString(runStyle.Render(string(exp[runStart:end])))
 	}
 
 	// Cursor(s) at end of line

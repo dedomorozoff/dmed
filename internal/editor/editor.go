@@ -47,6 +47,8 @@ type tab struct {
 	repoTried     bool
 	diffCached    vcs.FileDiff
 	diffText      string
+	diffWant      string          // text the pending diff was started for
+	diffPending   bool            // a diff pass is scheduled or running
 	blame         []vcs.BlameLine // git blame of HEAD lines; nil = not computed
 	lineEnding    string          // "lf" or "crlf"
 	encoding      string          // "utf-8", "utf-16le", "utf-16be", "latin-1"
@@ -267,20 +269,14 @@ func (t *tab) repoFor(repo *vcs.Repo) *vcs.Repo {
 	return t.repo
 }
 
-func (t *tab) getDiff(repo *vcs.Repo) vcs.FileDiff {
-	if t.path == "" {
+// getDiff returns the diff of the buffer against HEAD. The diff itself is
+// computed in the background (see gdiff.go) — it is a whole-file job and
+// would cost tens of milliseconds per keystroke on the UI thread — so this
+// only hands out the result of the last pass.
+func (t *tab) getDiff() vcs.FileDiff {
+	if t.path == "" || t.diffCached.Lines == nil {
 		return vcs.FileDiff{}
 	}
-	r := t.repoFor(repo)
-	if r == nil {
-		return vcs.FileDiff{}
-	}
-	text := t.buf.Text()
-	if t.diffCached.Lines != nil && t.diffText == text {
-		return t.diffCached
-	}
-	t.diffText = text
-	t.diffCached = r.DiffBuffer(t.path, text)
 	return t.diffCached
 }
 
@@ -479,6 +475,7 @@ type Model struct {
 	dapBPVerif            map[string]map[int]bool // adapter-verified breakpoints
 	bookmarks             map[string]map[int]bool // abs path → line (1-based) → true
 	syntaxCh              chan tea.Msg            // messages of the highlighting pipeline
+	diffCh                chan tea.Msg            // messages of the git diff pipeline
 	dapCurPath            string
 	dapCurLine            int
 	dapBusy               bool
@@ -767,6 +764,7 @@ func New(paths ...string) Model {
 		dapBPVerif:            map[string]map[int]bool{},
 		bookmarks:             map[string]map[int]bool{},
 		syntaxCh:              make(chan tea.Msg, 8),
+		diffCh:                make(chan tea.Msg, 8),
 		chatThreadPos:         -1,
 		chatPromptIdx:         -1,
 		todo:                  todo.New(),
@@ -1379,7 +1377,7 @@ func waitForFileEvent(ch <-chan string) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh), waitForDAPEvent(m.dapCh), waitForSyntax(m.syntaxCh))
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh), waitForDAPEvent(m.dapCh), waitForSyntax(m.syntaxCh), waitForDiff(m.diffCh))
 }
 
 // Update handles a message and keeps the background highlighting in step
@@ -1392,11 +1390,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return mdl, cmd
 	}
 	mm.requestSyntax()
+	mm.requestDiff()
 	return mm, cmd
 }
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case diffPassMsg:
+		// The buffer had time to settle: start the diff pass if the text is
+		// still the one the wait was started for.
+		m.runDiff(msg.tabIdx, m.tabs[msg.tabIdx].repoFor(m.repo))
+		return m, waitForDiff(m.diffCh)
+	case diffReadyMsg:
+		// A background diff landed: keep it if it still matches the buffer
+		// and arm the waiter for the next one.
+		m.applyDiff(msg)
+		return m, waitForDiff(m.diffCh)
 	case syntaxPassMsg:
 		// The buffer had time to settle: start the pass if the text is still
 		// the one the wait was started for, otherwise wait again.
@@ -2895,7 +2904,7 @@ func (m *Model) jumpHunk(dir int) {
 	if t.path == "" {
 		return
 	}
-	diff := t.getDiff(m.repo)
+	diff := t.getDiff()
 	if len(diff.Hunks) == 0 {
 		m.msg = m.t("msg.no_git_changes")
 		return

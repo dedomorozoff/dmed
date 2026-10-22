@@ -50,6 +50,28 @@ func initTestGitRepo(t *testing.T) (string, string) {
 	return dir, f
 }
 
+// waitForGitDiff drives the background diff pipeline like the editor does
+// and waits until the diff of the current buffer text has landed.
+func waitForGitDiff(t *testing.T, m Model) Model {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case msg := <-m.diffCh:
+			switch mm := msg.(type) {
+			case diffPassMsg:
+				m.runDiff(mm.tabIdx, m.tabs[mm.tabIdx].repoFor(m.repo))
+			case diffReadyMsg:
+				m.applyDiff(mm)
+			}
+			continue
+		default:
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return m
+}
+
 func TestEditorGitGutterAndHunkJump(t *testing.T) {
 	_, f := initTestGitRepo(t)
 
@@ -67,6 +89,9 @@ func TestEditorGitGutterAndHunkJump(t *testing.T) {
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnd})
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = typeStr(m, "// added comment")
+
+	// The diff against HEAD is computed in the background.
+	m = waitForGitDiff(t, m)
 
 	// View should render gutter diff marker '+'
 	v = m.View()
@@ -1007,7 +1032,9 @@ func TestEditorGitBlameToggle(t *testing.T) {
 		t.Fatal("expected blamed lines")
 	}
 
-	// The annotation renders into the view.
+	// The annotation renders into the view (the blame is only drawn on the
+	// lines the diff marks as changed, so the diff has to be there).
+	m = waitForGitDiff(t, m)
 	v := m.View()
 	plain := strings.Join(plainRows(v.Content), "\n")
 	if !strings.Contains(plain, "tester") {

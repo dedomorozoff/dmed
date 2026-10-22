@@ -454,6 +454,13 @@ plan with per-item estimates, design decisions and open questions lives in
       buffer, which allocated once per line of the file on every edit.
       Typing and rendering a 20k-line file now costs about 7 ms per
       keystroke (was 457 ms) and 4 MB of garbage (was 493 MB).
+- [x] **Git diff in the background**: the gutter shows which lines differ
+      from HEAD, and that diff is a whole-file job — the text is diffed line
+      by line against the committed version, which cost 42 ms per keystroke
+      on a file of 3000 lines. It runs in the background now, like the
+      highlighting, and waits for the typing to settle before it starts.
+      The line painting groups the characters of equal style into runs: a
+      lipgloss render per character was thousands of calls per frame.
 
 ## Infrastructure: CI and releases
 
