@@ -133,6 +133,30 @@ func TestSearchEverywhereRendersKinds(t *testing.T) {
 	}
 }
 
+// TestCtrlShiftPOpensSearchEverywhere: most terminals never report a bare
+// modifier press, so the double Shift cannot be the only way in.
+func TestCtrlShiftPOpensSearchEverywhere(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "alpha.txt", "hi\n")
+
+	m := New(f)
+	m.width, m.height = 80, 24
+	m.root = dir
+
+	m = press(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl | tea.ModShift})
+	if !m.paletteOpen {
+		t.Fatal("ctrl+shift+p must open the palette")
+	}
+	if !m.paletteAll {
+		t.Fatal("ctrl+shift+p must open the search-everywhere palette")
+	}
+	m = typeStr(m, "alpha.txt")
+	hits := m.filterPalette()
+	if len(hits) == 0 || hits[0].kind != paletteKindFile {
+		t.Fatalf("expected the file as top match, got: %+v", hits)
+	}
+}
+
 // TestCommandPaletteStaysCommandsOnly: Ctrl+P keeps searching commands only,
 // the way JetBrains keeps "find action" apart from "search everywhere".
 func TestCommandPaletteStaysCommandsOnly(t *testing.T) {

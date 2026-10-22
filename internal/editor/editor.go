@@ -1898,8 +1898,14 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		return m.closeActiveTab()
-	case "ctrl+p", "ctrl+shift+p", "f2":
+	case "ctrl+p", "f2":
 		m.startPalette()
+		return nil
+	case "ctrl+shift+p":
+		// Search everywhere: commands, files and settings. The double Shift
+		// does the same, but most terminals never report a bare modifier
+		// press, so this is the binding that always works.
+		m.startSearchEverywhere()
 		return nil
 	case "ctrl+t":
 		m.startPrompt()

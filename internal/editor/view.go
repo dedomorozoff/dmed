@@ -59,7 +59,7 @@ var helpEntries = []helpEntry{
 	{"Ctrl+S", "help.save"},
 	{"", ""},
 	{"Ctrl+P / F2", "help.palette"},
-	{"Shift+Shift", "help.everywhere"},
+	{"Ctrl+Shift+P / Shift+Shift", "help.everywhere"},
 	{"Shift+Arrows", "help.select"},
 	{"Ctrl+C / Ctrl+X / Ctrl+V", "help.clipboard"},
 	{"", ""},
