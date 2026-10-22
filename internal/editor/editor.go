@@ -48,7 +48,7 @@ type tab struct {
 	wrapW        int
 	wrapTabW     int
 	wrapText     string
-	foldCached   []foldRange   // indentation fold blocks, cached like wrapSegs
+	foldCached   []foldRange // indentation fold blocks, cached like wrapSegs
 	foldText     string
 	foldTabW     int
 	folds        map[int]bool // folded block start lines; nil = nothing folded
