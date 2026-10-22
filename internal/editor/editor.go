@@ -500,6 +500,8 @@ type Model struct {
 	paletteQ      []rune
 	paletteSel    int
 	paletteOffset int
+	paletteAll    bool     // "search everywhere": commands, files and settings
+	paletteFiles  []string // the project files the palette can offer
 	clipboard     string
 
 	// Language chooser
@@ -1851,14 +1853,15 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	}
 
-	// JetBrains-style double Shift opens the palette ("search everywhere").
+	// JetBrains-style double Shift opens "search everywhere": commands,
+	// project files and settings in one list.
 	// Bare modifier presses are only reported by terminals with the Kitty
 	// keyboard protocol / Windows Console API; elsewhere this is a no-op.
 	if !msg.IsRepeat && (msg.Code == tea.KeyLeftShift || msg.Code == tea.KeyRightShift) {
 		now := time.Now()
 		if now.Sub(m.lastShiftTime) <= doubleShiftInterval && !m.lastShiftTime.IsZero() {
 			m.lastShiftTime = time.Time{}
-			m.startPalette()
+			m.startSearchEverywhere()
 			return nil
 		}
 		m.lastShiftTime = now
@@ -2944,10 +2947,26 @@ func (m *Model) jumpHunk(dir int) {
 }
 
 func (m *Model) startPalette() {
+	m.openPalette(false)
+}
+
+// startSearchEverywhere opens the palette in the JetBrains "search
+// everywhere" mode: commands, project files and settings in one list.
+func (m *Model) startSearchEverywhere() {
+	m.openPalette(true)
+}
+
+func (m *Model) openPalette(all bool) {
 	m.paletteOpen = true
 	m.paletteQ = nil
 	m.paletteSel = 0
 	m.paletteOffset = 0
+	m.paletteAll = all
+	if all {
+		// The file list is collected once, like the file finder does: the
+		// query only filters it.
+		m.paletteFiles = collectFiles(m.baseDir(), m.cfg.Editor.SkippedDirs)
+	}
 	// Unfocus all panels so the palette receives keystrokes (the palette
 	// is lower priority than chat/agent/git in the mode-guard chain).
 	m.chatFocus = false

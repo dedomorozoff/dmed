@@ -58,7 +58,8 @@ type helpEntry struct {
 var helpEntries = []helpEntry{
 	{"Ctrl+S", "help.save"},
 	{"", ""},
-	{"Ctrl+P / F2 / Shift+Shift", "help.palette"},
+	{"Ctrl+P / F2", "help.palette"},
+	{"Shift+Shift", "help.everywhere"},
 	{"Shift+Arrows", "help.select"},
 	{"Ctrl+C / Ctrl+X / Ctrl+V", "help.clipboard"},
 	{"", ""},
@@ -2493,14 +2494,29 @@ func (m Model) palettePanel() []string {
 	}
 	rows := make([]string, 0, len(displayHits)+1)
 	for i, hit := range displayHits {
-		label := fmt.Sprintf(" %s — %s ", m.cmdTitle(hit), m.cmdDesc(hit))
+		title := m.cmdTitle(hit)
+		desc := m.cmdDesc(hit)
+		label := " " + title + " "
+		if desc != "" {
+			label = " " + title + " — " + desc + " "
+		}
+		switch hit.kind {
+		case paletteKindFile:
+			label = "[" + m.t("palette.file") + "] " + label
+		case paletteKindSetting:
+			label = "[" + m.t("palette.setting") + "] " + label
+		}
 		if m.paletteOffset+i == m.paletteSel {
 			rows = append(rows, statusHiStyle.Render(label))
 		} else {
 			rows = append(rows, statusStyle.Render(label))
 		}
 	}
-	line := statusHiStyle.Render(" > ") + statusStyle.Render(string(m.paletteQ)) + cursorStyle.Render(" ")
+	prompt := " > "
+	if m.paletteAll {
+		prompt = " " + m.t("palette.everywhere") + " > "
+	}
+	line := statusHiStyle.Render(prompt) + statusStyle.Render(string(m.paletteQ)) + cursorStyle.Render(" ")
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))

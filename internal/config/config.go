@@ -202,6 +202,58 @@ type PluginsConfig struct {
 	Branch string // branch to read from
 }
 
+// Setting describes one configuration key: the section it lives in, the key
+// itself and its current value.
+type Setting struct {
+	Section string
+	Key     string
+	Value   string
+}
+
+// Settings lists the configuration keys the editor knows about, with their
+// current values. The palette offers them so a setting can be found by name
+// instead of by remembering the INI file.
+func Settings(cfg Config) []Setting {
+	key := cfg.AI.APIKey
+	if key != "" {
+		key = "***"
+	}
+	return []Setting{
+		{"editor", "tab_width", strconv.Itoa(cfg.Editor.TabWidth)},
+		{"editor", "syntax_theme", cfg.Editor.SyntaxTheme},
+		{"editor", "line_numbers", strconv.FormatBool(cfg.Editor.LineNumbers)},
+		{"editor", "word_wrap", strconv.FormatBool(cfg.Editor.WordWrap)},
+		{"editor", "skipped_dirs", strings.Join(cfg.Editor.SkippedDirs, ",")},
+		{"ui", "lang", cfg.UI.Lang},
+		{"ui", "tree_width", strconv.Itoa(cfg.UI.TreeWidth)},
+		{"ui", "chat_width_pct", strconv.Itoa(cfg.UI.ChatWidthPct)},
+		{"ui", "ascii", cfg.UI.Ascii},
+		{"ai", "provider", cfg.AI.Provider},
+		{"ai", "model", cfg.AI.Model},
+		{"ai", "ollama_url", cfg.AI.OllamaURL},
+		{"ai", "api_key", key},
+		{"ai", "context_max", strconv.Itoa(cfg.AI.ContextMax)},
+		{"ai", "temperature", strconv.Itoa(cfg.AI.Temperature)},
+		{"ai", "num_ctx", strconv.Itoa(cfg.AI.NumCtx)},
+		{"ai", "num_predict", strconv.Itoa(cfg.AI.NumPredict)},
+		{"ai", "tool_rounds", strconv.Itoa(cfg.AI.ToolRounds)},
+		{"ai", "allow_run", cfg.AI.AllowRun},
+		{"ai", "api_path", cfg.AI.APIPath},
+		{"ai", "models_path", cfg.AI.ModelsPath},
+		{"agent", "context_max", strconv.Itoa(cfg.Agent.ContextMax)},
+		{"agent", "subagent_rounds", strconv.Itoa(cfg.Agent.SubagentRounds)},
+		{"plugins", "repo", cfg.Plugins.Repo},
+		{"plugins", "dir", cfg.Plugins.Dir},
+		{"plugins", "branch", cfg.Plugins.Branch},
+		{"debug", "mode", cfg.Debug.Mode},
+		{"debug", "program", cfg.Debug.Program},
+		{"debug", "adapter_cmd", cfg.Debug.AdapterCmd},
+		{"debug", "adapter_mode", cfg.Debug.AdapterMode},
+		{"debug", "auto_detect", strconv.FormatBool(cfg.Debug.AutoDetect)},
+		{"lsp", "enabled", strconv.FormatBool(cfg.LSP.Enabled)},
+	}
+}
+
 // Defaults returns the default configuration.
 func Defaults() Config {
 	// Pollinations is the out-of-the-box provider: no account, no key, so a

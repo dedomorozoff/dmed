@@ -1,13 +1,25 @@
 package editor
 
 import (
+	"path/filepath"
 	"sort"
 
 	tea "charm.land/bubbletea/v2"
+
+	"dmed/internal/config"
+)
+
+// The kinds of things the palette can offer. The commands are the default;
+// the "search everywhere" mode adds the project files and the settings.
+const (
+	paletteKindCommand = ""
+	paletteKindFile    = "file"
+	paletteKindSetting = "setting"
 )
 
 type commandItem struct {
 	id     string
+	kind   string
 	title  string
 	desc   string
 	action func(m *Model) tea.Cmd
@@ -95,6 +107,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "agent_tasks", title: "cmd.agent_tasks_t", desc: "cmd.agent_tasks_d", action: func(m *Model) tea.Cmd { return m.openAgentPanel() }},
 		{id: "agent_new", title: "cmd.agent_new_t", desc: "cmd.agent_new_d", action: func(m *Model) tea.Cmd { return m.startAgentTaskPrompt() }},
 		{id: "settings", title: "cmd.settings_t", desc: "cmd.settings_d", action: func(m *Model) tea.Cmd { m.openConfigFile(); return nil }},
+		{id: "search_everywhere", title: "cmd.search_everywhere_t", desc: "cmd.search_everywhere_d", action: func(m *Model) tea.Cmd { m.startSearchEverywhere(); return nil }},
 		{id: "help", title: "cmd.help_t", desc: "cmd.help_d", action: func(m *Model) tea.Cmd { m.helpOpen = true; m.helpScroll = 0; return nil }},
 		{id: "quit", title: "cmd.quit_t", desc: "cmd.quit_d", action: func(m *Model) tea.Cmd { return m.requestQuit() }},
 		{id: "lang_select", title: "cmd.lang_select_t", desc: "cmd.lang_select_d", action: func(m *Model) tea.Cmd { m.openLangChooser(); return nil }},
@@ -107,11 +120,74 @@ func (m *Model) getPaletteCommands() []commandItem {
 	return cmds
 }
 
-// cmdTitle returns the localized command title.
-func (m Model) cmdTitle(c commandItem) string { return m.t(c.title) }
+// cmdTitle returns the localized command title. Files and settings carry
+// their own text, so only the commands go through the translator.
+func (m Model) cmdTitle(c commandItem) string {
+	if c.kind == paletteKindCommand {
+		return m.t(c.title)
+	}
+	return c.title
+}
 
 // cmdDesc returns the localized command description.
-func (m Model) cmdDesc(c commandItem) string { return m.t(c.desc) }
+func (m Model) cmdDesc(c commandItem) string {
+	if c.kind == paletteKindCommand {
+		return m.t(c.desc)
+	}
+	return c.desc
+}
+
+// paletteItems returns everything the palette can offer: the commands, and in
+// the "search everywhere" mode the project files and the settings too.
+func (m *Model) paletteItems() []commandItem {
+	items := m.getPaletteCommands()
+	if !m.paletteAll {
+		return items
+	}
+	items = append(items, m.paletteFileItems()...)
+	items = append(items, m.paletteSettingItems()...)
+	return items
+}
+
+// paletteFileItems offers the project files, ready to be opened.
+func (m *Model) paletteFileItems() []commandItem {
+	base := m.baseDir()
+	out := make([]commandItem, 0, len(m.paletteFiles))
+	for _, rel := range m.paletteFiles {
+		rel := rel
+		out = append(out, commandItem{
+			id:    "file:" + rel,
+			kind:  paletteKindFile,
+			title: rel,
+			action: func(m *Model) tea.Cmd {
+				m.openPath(filepath.Join(base, filepath.FromSlash(rel)))
+				return nil
+			},
+		})
+	}
+	return out
+}
+
+// paletteSettingItems offers the configuration keys with their current
+// values; picking one opens the configuration file.
+func (m *Model) paletteSettingItems() []commandItem {
+	settings := config.Settings(m.cfg)
+	out := make([]commandItem, 0, len(settings))
+	for _, s := range settings {
+		s := s
+		out = append(out, commandItem{
+			id:    "setting:" + s.Section + "." + s.Key,
+			kind:  paletteKindSetting,
+			title: s.Section + "." + s.Key,
+			desc:  s.Value,
+			action: func(m *Model) tea.Cmd {
+				m.openConfigFile()
+				return nil
+			},
+		})
+	}
+	return out
+}
 
 // filterPalette ranks commands the fuzzy way, reusing the file finder's
 // scorer: the palette stays consistent with Ctrl+O and subsequence matches
@@ -119,7 +195,7 @@ func (m Model) cmdDesc(c commandItem) string { return m.t(c.desc) }
 // strings.Contains is not comparable to subsequence priorities, so the title
 // and description are scored and the better hit wins.
 func (m *Model) filterPalette() []commandItem {
-	all := m.getPaletteCommands()
+	all := m.paletteItems()
 	if len(m.paletteQ) == 0 {
 		return all
 	}

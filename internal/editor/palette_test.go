@@ -44,6 +44,115 @@ func TestCommandPaletteOpenFilterExecute(t *testing.T) {
 	}
 }
 
+// TestSearchEverywhereFindsFilesAndSettings: the JetBrains-style double
+// Shift searches commands, project files and settings in one list.
+func TestSearchEverywhereFindsFilesAndSettings(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "alpha.txt", "hi\n")
+	writeTemp(t, dir, "beta.go", "package main\n")
+
+	m := New(f)
+	m.width, m.height = 80, 24
+	m.root = dir
+
+	// A single Shift tap must not open it; the second one must.
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyLeftShift})
+	if m.paletteOpen {
+		t.Fatal("single shift must not open the palette")
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyRightShift})
+	if !m.paletteOpen {
+		t.Fatal("double shift must open the palette")
+	}
+	if !m.paletteAll {
+		t.Fatal("double shift must open the search-everywhere palette")
+	}
+
+	// Files are in the list.
+	m = typeStr(m, "beta.go")
+	hits := m.filterPalette()
+	if len(hits) == 0 || hits[0].kind != paletteKindFile {
+		t.Fatalf("expected the file as top match, got: %+v", hits)
+	}
+	if hits[0].title != "beta.go" {
+		t.Fatalf("file title = %q", hits[0].title)
+	}
+
+	// Enter opens the file in a tab.
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.paletteOpen {
+		t.Fatal("the palette must close after picking a file")
+	}
+	found := false
+	for _, tab := range m.tabs {
+		if strings.HasSuffix(tab.path, "beta.go") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the picked file must be open in a tab")
+	}
+
+	// Settings are in the list too, with their current value.
+	m.startSearchEverywhere()
+	m = typeStr(m, "tab_width")
+	hits = m.filterPalette()
+	if len(hits) == 0 || hits[0].kind != paletteKindSetting {
+		t.Fatalf("expected the setting as top match, got: %+v", hits)
+	}
+	if hits[0].title != "editor.tab_width" {
+		t.Fatalf("setting title = %q", hits[0].title)
+	}
+}
+
+// TestSearchEverywhereRendersKinds: the results say what they are — a file
+// and a setting look different from a command.
+func TestSearchEverywhereRendersKinds(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "alpha.txt", "hi\n")
+
+	m := New(f)
+	m.width, m.height = 80, 24
+	m.root = dir
+
+	m.startSearchEverywhere()
+	m = typeStr(m, "alpha.txt")
+	v := m.View()
+	if !strings.Contains(v.Content, "[file]") {
+		t.Fatalf("the file result must be marked:\n%s", v.Content)
+	}
+	if !strings.Contains(v.Content, "search everywhere") {
+		t.Fatalf("the prompt must say that everything is searched:\n%s", v.Content)
+	}
+
+	m.paletteQ = nil
+	m = typeStr(m, "tab_width")
+	v = m.View()
+	if !strings.Contains(v.Content, "[setting]") {
+		t.Fatalf("the setting result must be marked:\n%s", v.Content)
+	}
+}
+
+// TestCommandPaletteStaysCommandsOnly: Ctrl+P keeps searching commands only,
+// the way JetBrains keeps "find action" apart from "search everywhere".
+func TestCommandPaletteStaysCommandsOnly(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "alpha.txt", "hi\n")
+
+	m := New(f)
+	m.width, m.height = 80, 24
+	m.root = dir
+
+	m = press(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	if !m.paletteOpen || m.paletteAll {
+		t.Fatal("ctrl+p must open the command palette")
+	}
+	m = typeStr(m, "alpha.txt")
+	if hits := m.filterPalette(); len(hits) != 0 {
+		t.Fatalf("the command palette must not offer files, got: %+v", hits)
+	}
+}
+
 func TestPaletteNewFileCommand(t *testing.T) {
 	dir := t.TempDir()
 	f := writeTemp(t, dir, "existing.txt", "hello\n")

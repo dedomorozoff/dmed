@@ -461,6 +461,12 @@ plan with per-item estimates, design decisions and open questions lives in
       highlighting, and waits for the typing to settle before it starts.
       The line painting groups the characters of equal style into runs: a
       lipgloss render per character was thousands of calls per frame.
+- [x] **Search everywhere**: a double `Shift` opens the JetBrains-style
+      search: commands, project files and settings in one list, each result
+      marked with what it is. Picking a file opens it, picking a setting
+      opens the configuration file. `Ctrl+P` / `F2` keep searching commands
+      only, and the "Search Everywhere" command reaches the same list on
+      terminals that do not report a bare `Shift`.
 - [x] **Ctrl+C never quits**: Ctrl+C copies the selection (as before) and
       otherwise says how to leave the editor — an editor that dies on the key
       a terminal uses to interrupt a program is a trap. `Ctrl+Q` is the way
