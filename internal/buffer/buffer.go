@@ -65,7 +65,7 @@ func (b *Buffer) linesCopy() [][]rune { return b.d.lines() }
 // setLines replaces the whole document from a flat slice of lines.
 func (b *Buffer) setLines(m [][]rune) { b.d = newDoc(m) }
 
-func (b *Buffer) lineLen(i int) int { return len(b.d.lineAt(i)) }
+func (b *Buffer) lineLen(i int) int { return b.d.lineLen(i) }
 
 func (b *Buffer) pushUndo() {
 	b.undoStack = append(b.undoStack, snapshot{b.d.root, b.line, b.col})

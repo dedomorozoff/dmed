@@ -186,6 +186,13 @@ func lCollectLines(n *lnode, out *[]string) {
 // doc is a persistent line store used by Buffer.
 type doc struct {
 	root *lnode
+	// Text cache keyed on the root node: every edit returns a new root from
+	// the tree operations, so root identity is the cheapest possible
+	// invalidation. View-layer caches (syntax, wrap segments, folds) compare
+	// full-text strings several times per keystroke; without this each of
+	// those comparisons rebuilt the whole document string.
+	textKey   *lnode
+	textCache string
 }
 
 func newDoc(lines [][]rune) *doc { return &doc{root: lBuild(lines)} }
@@ -202,6 +209,13 @@ func (d *doc) count() int {
 func (d *doc) lineAt(i int) []rune {
 	l := lLineAt(d.root, i)
 	return append([]rune(nil), l...)
+}
+
+// lineLen returns the rune length of the line at index i. It reads the leaf
+// in place instead of copying the line out, so callers that only need the
+// length (rendering every visible row, for instance) stay allocation free.
+func (d *doc) lineLen(i int) int {
+	return len(lLineAt(d.root, i))
 }
 
 // setLine replaces the line at index i, returning the new root.
@@ -230,7 +244,16 @@ func (d *doc) deleteLines(from, n int) *lnode {
 	return lConcat(a, c)
 }
 
-func (d *doc) text() string { return lText(d.root) }
+func (d *doc) text() string {
+	if d.root == nil {
+		return "\n"
+	}
+	if d.root != d.textKey {
+		d.textCache = lText(d.root)
+		d.textKey = d.root
+	}
+	return d.textCache
+}
 
 // lines returns the full contents as a slice of lines.
 func (d *doc) lines() [][]rune {

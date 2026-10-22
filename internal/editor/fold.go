@@ -1,5 +1,7 @@
 package editor
 
+import "sort"
+
 // Indentation-based code folding. A foldable block starts at any non-blank
 // line whose next non-blank line is indented deeper, and ends at the last
 // non-blank line before the indentation drops back to the start level —
@@ -51,32 +53,46 @@ func (t *tab) foldRanges(tabW int) []foldRange {
 			ind[i] = w
 		}
 	}
+	// One pass with a stack of open blocks: a block starts at a line whose
+	// next non-blank line is indented deeper and ends at the last non-blank
+	// line before the indentation falls back to its own level. Pushing and
+	// popping keeps the scan linear even in deeply nested files.
+	type open struct {
+		start, indent int
+	}
+	var stack []open
 	var rs []foldRange
+	lastNonBlank := -1
 	for i := 0; i < n; i++ {
 		if ind[i] < 0 {
-			continue
+			continue // blank line: it belongs to the block around it
 		}
-		// The first non-blank line below decides whether a block starts here.
-		k := i + 1
-		for k < n && ind[k] < 0 {
-			k++
-		}
-		if k >= n || ind[k] <= ind[i] {
-			continue
-		}
-		// The block ends at the last non-blank line before the indentation
-		// falls back to the start level (blank lines inside belong to it).
-		end := -1
-		for m := i + 1; m < n; m++ {
-			if ind[m] >= 0 && ind[m] <= ind[i] {
-				break
-			}
-			if ind[m] >= 0 {
-				end = m
+		for len(stack) > 0 && stack[len(stack)-1].indent >= ind[i] {
+			top := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if lastNonBlank > top.start {
+				rs = append(rs, foldRange{start: top.start, end: lastNonBlank})
 			}
 		}
-		if end > i {
-			rs = append(rs, foldRange{start: i, end: end})
+		stack = append(stack, open{start: i, indent: ind[i]})
+		lastNonBlank = i
+	}
+	for len(stack) > 0 {
+		top := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if lastNonBlank > top.start {
+			rs = append(rs, foldRange{start: top.start, end: lastNonBlank})
+		}
+	}
+	// The stack pops blocks innermost first; sort them back into line order.
+	sort.Slice(rs, func(i, j int) bool { return rs[i].start < rs[j].start })
+	// Drop folded markers whose block no longer exists: the buffer was edited
+	// under the folded set, and such a mark would hide nothing while making
+	// the folded count lie about the file.
+	for s := range t.folds {
+		i := sort.Search(len(rs), func(i int) bool { return rs[i].start >= s })
+		if i >= len(rs) || rs[i].start != s {
+			delete(t.folds, s)
 		}
 	}
 	t.foldCached = rs
@@ -89,15 +105,15 @@ func (t *tab) foldRanges(tabW int) []foldRange {
 // gutter only grows a chevron column when it does.
 func (t *tab) hasFolds(tabW int) bool { return len(t.foldRanges(tabW)) > 0 }
 
-// foldAt start returns the fold range starting exactly at ln.
+// foldAtStart returns the fold range starting exactly at ln. The ranges are
+// sorted by start line, so the lookup is a binary search: the gutter paints a
+// chevron on every visible row, and a linear scan there would make rendering
+// quadratic in the number of foldable blocks.
 func (t *tab) foldAtStart(ln, tabW int) (foldRange, bool) {
-	for _, r := range t.foldRanges(tabW) {
-		if r.start == ln {
-			return r, true
-		}
-		if r.start > ln {
-			break // sorted
-		}
+	rs := t.foldRanges(tabW)
+	i := sort.Search(len(rs), func(i int) bool { return rs[i].start >= ln })
+	if i < len(rs) && rs[i].start == ln {
+		return rs[i], true
 	}
 	return foldRange{}, false
 }
@@ -153,11 +169,12 @@ func (t *tab) toggleFoldAt(ln, tabW int) bool {
 }
 
 // unfoldThrough removes every folded block that hides ln, so the cursor line
-// is guaranteed visible afterwards.
+// is guaranteed visible afterwards. One pass over the sorted ranges instead
+// of a lookup per folded block.
 func (t *tab) unfoldThrough(ln, tabW int) {
-	for s := range t.folds {
-		if r, ok := t.foldAtStart(s, tabW); ok && s < ln && ln <= r.end {
-			delete(t.folds, s)
+	for _, r := range t.foldRanges(tabW) {
+		if r.start < ln && ln <= r.end && t.folds[r.start] {
+			delete(t.folds, r.start)
 		}
 	}
 }
@@ -300,23 +317,75 @@ type dispRow struct {
 	expEnd   int
 }
 
+// foldScanner walks the folded blocks in ascending start order and answers
+// two questions per line: is the line hidden inside a folded block, and does
+// it start one. Both pointers only move forward, so a full pass over the
+// document stays linear.
+type foldScanner struct {
+	iv  []foldRange
+	hi  int // interval that may cover the current line
+	fsi int // next interval whose start is not before the current line
+}
+
+// at reports the visibility of line for the scanner's current position.
+func (s *foldScanner) at(line int) (hidden, foldedStart bool) {
+	for s.hi < len(s.iv) && s.iv[s.hi].end < line {
+		s.hi++
+	}
+	for s.fsi < len(s.iv) && s.iv[s.fsi].start < line {
+		s.fsi++
+	}
+	if s.hi < len(s.iv) && s.iv[s.hi].start < line && line <= s.iv[s.hi].end {
+		return true, false
+	}
+	return false, s.fsi < len(s.iv) && s.iv[s.fsi].start == line
+}
+
 // dispRows builds the pane's display row list under the current folded set.
-// contentW is the pane content width; a stale folded marker whose line no
-// longer starts a foldable block (buffer edited underneath) is dropped here,
-// keeping the state honest without a separate invalidation hook.
+// contentW is the pane content width. The scan is linear in the number of
+// lines and fold blocks — rendering, hit-testing and cursor clamping call
+// this several times per keystroke, so a quadratic scan here is felt
+// immediately as input lag.
 func (m Model) dispRows(paneIdx, contentW int) []dispRow {
 	p := &m.panes[paneIdx]
 	t := &m.tabs[p.tabIdx]
 	tabW := m.cfg.Editor.TabWidth
+	rs := t.foldRanges(tabW)
+
+	// The currently folded blocks, ascending by start line. Markers whose
+	// block no longer exists are pruned by foldRanges when it rescans.
+	iv := make([]foldRange, 0, len(t.folds))
+	for _, r := range rs {
+		if t.folds[r.start] {
+			iv = append(iv, r)
+		}
+	}
 
 	if !p.wordWrap {
-		var rows []dispRow
 		n := t.buf.LineCount()
+		// Count the rows first so the slice is allocated once and exactly:
+		// a heavily folded file has far fewer rows than it has lines.
+		hidden, summaries := 0, 0
+		openEnd := -1
+		for _, r := range iv {
+			if r.start > openEnd { // outermost folded block
+				summaries++
+				hidden += r.end - r.start
+				openEnd = r.end
+			}
+		}
+		rows := make([]dispRow, 0, n-hidden+summaries)
+		sc := foldScanner{iv: iv}
 		for ln := 0; ln < n; {
+			hid, foldedStart := sc.at(ln)
+			if hid {
+				ln++ // inside a folded block: not shown, and no summary
+				continue
+			}
 			rows = append(rows, dispRow{ln: ln, expEnd: t.buf.LineLen(ln)})
-			if r, ok := t.foldStateAt(ln, tabW); ok {
-				rows = append(rows, dispRow{ln: ln, summary: true, hidden: r.end - ln})
-				ln = r.end + 1
+			if foldedStart {
+				rows = append(rows, dispRow{ln: ln, summary: true, hidden: iv[sc.fsi].end - ln})
+				ln = iv[sc.fsi].end + 1
 				continue
 			}
 			ln++
@@ -325,18 +394,32 @@ func (m Model) dispRows(paneIdx, contentW int) []dispRow {
 	}
 
 	segs := t.tabWrap(contentW, tabW)
-	rows := make([]dispRow, 0, len(segs)+len(t.folds))
+	// Same two passes as above: count the visible segments and the summary
+	// rows, then fill a slice of exactly that size.
+	visSegs, summaries := 0, 0
+	count := foldScanner{iv: iv}
+	for i := 0; i < len(segs); i++ {
+		line := segs[i].line
+		hid, foldedStart := count.at(line)
+		if hid {
+			continue
+		}
+		visSegs++
+		if foldedStart && (i+1 >= len(segs) || segs[i+1].line != line) {
+			summaries++
+		}
+	}
+	rows := make([]dispRow, 0, visSegs+summaries)
+	sc := foldScanner{iv: iv}
 	for i := 0; i < len(segs); i++ {
 		sg := segs[i]
-		if _, _, hid := t.foldHidden(sg.line, tabW); hid {
+		hid, foldedStart := sc.at(sg.line)
+		if hid {
 			continue
 		}
 		rows = append(rows, dispRow{ln: sg.line, expStart: sg.expStart, expEnd: sg.expEnd})
-		last := i+1 >= len(segs) || segs[i+1].line != sg.line
-		if last {
-			if r, ok := t.foldStateAt(sg.line, tabW); ok && r.end < t.buf.LineCount() && r.end > sg.line {
-				rows = append(rows, dispRow{ln: sg.line, summary: true, hidden: r.end - sg.line})
-			}
+		if foldedStart && (i+1 >= len(segs) || segs[i+1].line != sg.line) {
+			rows = append(rows, dispRow{ln: sg.line, summary: true, hidden: iv[sc.fsi].end - sg.line})
 		}
 	}
 	return rows

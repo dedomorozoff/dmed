@@ -57,6 +57,79 @@ func TestFoldRanges(t *testing.T) {
 	}
 }
 
+// TestFoldRangesBlocks pins the block scan: siblings, blank lines inside a
+// block and nested blocks all have to come out with the same ranges.
+func TestFoldRangesBlocks(t *testing.T) {
+	cases := []struct {
+		name  string
+		lines []string
+		want  []foldRange
+	}{
+		{
+			name:  "siblings",
+			lines: []string{"a", "  b", "  c", "d"},
+			want:  []foldRange{{start: 0, end: 2}},
+		},
+		{
+			name:  "blank lines inside the block",
+			lines: []string{"a", "  b", "", "  c", "d"},
+			want:  []foldRange{{start: 0, end: 3}},
+		},
+		{
+			name:  "nested blocks",
+			lines: []string{"if x {", "\tif y {", "\t\tz", "\t}", "}"},
+			want:  []foldRange{{start: 0, end: 3}, {start: 1, end: 2}},
+		},
+		{
+			name:  "a block without a body is not foldable",
+			lines: []string{"a", "b", "  c"},
+			want:  []foldRange{{start: 1, end: 2}},
+		},
+		{
+			name:  "no block at all",
+			lines: []string{"a", "b", "c"},
+			want:  nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New()
+			m.tabs = []tab{{buf: buffer.Load(strings.Join(tc.lines, "\n") + "\n")}}
+			got := m.tabs[0].foldRanges(4)
+			if len(got) != len(tc.want) {
+				t.Fatalf("foldRanges = %+v, want %+v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("foldRanges = %+v, want %+v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestFoldMarkerHealsItself: when the buffer is edited so that a folded
+// block stops being a block, the folded marker must not survive it — it would
+// hide nothing while making the folded count lie.
+func TestFoldMarkerHealsItself(t *testing.T) {
+	m := New()
+	m.width, m.height = 60, 20
+	m.tabs = []tab{{buf: buffer.Load("func main() {\n\tdo()\n}\n")}}
+	b := &m.tabs[0]
+	b.folds = map[int]bool{0: true}
+	if _, _, hid := b.foldHidden(1, 4); !hid {
+		t.Fatal("the block must be folded to start with")
+	}
+	// Pull the body line back to the outer level: the block is gone.
+	b.buf.ReplaceRange(1, 0, 1, []rune(""))
+	if rs := b.foldRanges(4); len(rs) != 0 {
+		t.Fatalf("the block must be gone, ranges=%+v", rs)
+	}
+	if len(b.folds) != 0 {
+		t.Fatalf("the stale folded marker must be dropped, folds=%v", b.folds)
+	}
+}
+
 func TestFoldRenderToggleAndChevron(t *testing.T) {
 	m := foldModel(t)
 	plain := foldPlain(m)

@@ -418,6 +418,16 @@ plan with per-item estimates, design decisions and open questions lives in
       edit, a jump) forces the block open in `clampScroll`. Fold ranges are
       cached like wrap segments and stale folded marks heal themselves on the
       next render.
+- [x] **Folding performance**: the display-row list, the fold scan and the
+      gutter chevrons are linear in the size of the buffer. `dispRows` walks
+      the folded blocks with a moving pointer instead of rescanning them per
+      line, `foldAtStart` is a binary search over the sorted ranges (the
+      gutter asks for it on every visible row) and the block scan itself is a
+      single stack pass. The document text is cached in the buffer and
+      invalidated by the tree root, so the view-layer caches (syntax, wrap,
+      folds) stop rebuilding the whole file string several times per
+      keystroke. On a 20k-line file with everything folded this took the
+      frame from 11 s to 17 ms.
 
 ## Infrastructure: CI and releases
 
