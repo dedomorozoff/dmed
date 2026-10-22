@@ -41,6 +41,10 @@ type tab struct {
 	syntaxText    string
 	syntaxWant    string // text the pending pass was started for
 	syntaxPending bool   // a highlighting pass is scheduled or running
+	langTag       string // cached syntax language of the file
+	langKnown     bool
+	repo          *vcs.Repo // cached repository of the file's directory
+	repoTried     bool
 	diffCached    vcs.FileDiff
 	diffText      string
 	blame         []vcs.BlameLine // git blame of HEAD lines; nil = not computed
@@ -235,16 +239,39 @@ func segRowForCol(segs []wrapSeg, line, expCol int) (row, expStart int) {
 	return 0, 0
 }
 
+// lang returns the syntax language of the tab. The name of the file does not
+// change, so the lookup (which asks chroma and touches the filesystem) must
+// not run on every frame.
+func (t *tab) lang() string {
+	if !t.langKnown {
+		t.langTag = syntax.Lang(t.path)
+		t.langKnown = true
+	}
+	return t.langTag
+}
+
+// repoFor returns the git repository the tab belongs to: the one of the
+// editor when it covers the file, otherwise the repository of the file's
+// directory. The lookup is cached — opening a repository means touching the
+// filesystem, and the gutter asks for it on every frame.
+func (t *tab) repoFor(repo *vcs.Repo) *vcs.Repo {
+	if repo != nil && strings.HasPrefix(t.path, repo.Root) {
+		return repo
+	}
+	if !t.repoTried {
+		t.repoTried = true
+		if found, err := vcs.Open(filepath.Dir(t.path)); err == nil {
+			t.repo = found
+		}
+	}
+	return t.repo
+}
+
 func (t *tab) getDiff(repo *vcs.Repo) vcs.FileDiff {
 	if t.path == "" {
 		return vcs.FileDiff{}
 	}
-	r := repo
-	if r == nil || !strings.HasPrefix(t.path, r.Root) {
-		if found, err := vcs.Open(filepath.Dir(t.path)); err == nil {
-			r = found
-		}
-	}
+	r := t.repoFor(repo)
 	if r == nil {
 		return vcs.FileDiff{}
 	}

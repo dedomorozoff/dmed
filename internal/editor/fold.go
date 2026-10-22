@@ -31,27 +31,12 @@ func (t *tab) foldRanges(tabW int) []foldRange {
 		return t.foldCached
 	}
 	n := t.buf.LineCount()
-	// Expanded indent of each line, or -1 when the line is blank.
+	// Expanded indent of each line, or -1 when the line is blank. The width
+	// is read in place: copying every line out of the buffer would allocate
+	// once per line of the file on every edit.
 	ind := make([]int, n)
 	for i := 0; i < n; i++ {
-		line := t.buf.LineAt(i)
-		w, blank := 0, true
-		for _, r := range line {
-			if r == ' ' || r == '\t' {
-				w++
-				if r == '\t' {
-					w += tabW - 1
-				}
-				continue
-			}
-			blank = false
-			break
-		}
-		if blank {
-			ind[i] = -1
-		} else {
-			ind[i] = w
-		}
+		ind[i] = t.buf.IndentWidth(i, tabW)
 	}
 	// One pass with a stack of open blocks: a block starts at a line whose
 	// next non-blank line is indented deeper and ends at the last non-blank

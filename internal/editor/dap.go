@@ -14,7 +14,6 @@ import (
 	"dmed/internal/config"
 	"dmed/internal/dap"
 	"dmed/internal/dbgp"
-	"dmed/internal/syntax"
 )
 
 // debugBackend is the transport surface the debug panel needs: DAP adapters
@@ -215,7 +214,7 @@ func (m Model) dapLangPreset() (config.DebugConfig, bool) {
 	if t == nil || t.path == "" {
 		return config.DebugConfig{}, false
 	}
-	preset, ok := dapLangPresets[syntax.Lang(t.path)]
+	preset, ok := dapLangPresets[t.lang()]
 	if !ok {
 		return config.DebugConfig{}, false
 	}
@@ -530,7 +529,7 @@ func (m Model) dapProgram() string {
 		if filepath.Ext(t.path) == ".php" {
 			return t.path
 		}
-		switch syntax.Lang(t.path) {
+		switch t.lang() {
 		case "js", "jsx", "ts":
 			// Node runs an entry file, not a package directory; only
 			// fall back to the directory when the tab is a folder.

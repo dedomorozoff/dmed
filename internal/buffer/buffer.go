@@ -130,6 +130,11 @@ func (b *Buffer) DragSelect(line, col int) {
 // LineLen returns the number of runes in the given line.
 func (b *Buffer) LineLen(i int) int { return b.lineLen(i) }
 
+// IndentWidth returns the width of the leading whitespace of the given line
+// (a tab counts as tabW columns), or -1 when the line is blank. The line is
+// read in place, so scanning a whole document stays allocation free.
+func (b *Buffer) IndentWidth(i, tabW int) int { return b.d.indentWidth(i, tabW) }
+
 func (b *Buffer) SelectionRange() (startLine, startCol, endLine, endCol int) {
 	if !b.hasSelection {
 		return b.line, b.col, b.line, b.col

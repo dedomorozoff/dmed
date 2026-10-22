@@ -2469,7 +2469,7 @@ func (m Model) statusBar() string {
 		endings := map[string]string{"lf": "LF", "crlf": "CRLF"}
 		enc := strings.ToUpper(t.encoding)
 		fileInfo = endings[t.lineEnding] + " " + enc + " "
-		if lang := syntax.Lang(t.path); lang != "" {
+		if lang := t.lang(); lang != "" {
 			langTag = lang + " "
 		}
 	}

@@ -218,6 +218,26 @@ func (d *doc) lineLen(i int) int {
 	return len(lLineAt(d.root, i))
 }
 
+// indentWidth returns the width of the leading whitespace of the line at
+// index i (a tab counts as tabW columns), or -1 when the line is blank. Like
+// lineLen it reads the line in place: scanning a whole document (the fold
+// ranges do that on every edit) must not copy every line out.
+func (d *doc) indentWidth(i, tabW int) int {
+	w := 0
+	for _, r := range lLineAt(d.root, i) {
+		switch r {
+		case ' ':
+			w++
+			continue
+		case '\t':
+			w += tabW
+			continue
+		}
+		return w // the first other character ends the indentation
+	}
+	return -1 // blank line
+}
+
 // setLine replaces the line at index i, returning the new root.
 func (d *doc) setLine(i int, line []rune) *lnode {
 	a, bc := lSplit(d.root, i)

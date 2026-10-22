@@ -6,8 +6,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-
-	"dmed/internal/syntax"
 )
 
 // Clickable status-bar icons. The bottom-left of the status bar carries a
@@ -300,7 +298,7 @@ func (m Model) paneStatusBar(paneIdx int) string {
 	if t.path != "" {
 		endings := map[string]string{"lf": "LF", "crlf": "CRLF"}
 		fileInfo = " " + endings[t.lineEnding] + "/" + strings.ToUpper(t.encoding)
-		if lang := syntax.Lang(t.path); lang != "" {
+		if lang := t.lang(); lang != "" {
 			langTag = " " + lang
 		}
 	}

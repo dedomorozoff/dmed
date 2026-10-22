@@ -446,6 +446,14 @@ plan with per-item estimates, design decisions and open questions lives in
       A pass also waits for the typing to settle: while the buffer keeps
       changing, the wait is restarted and no tokenizing happens at all, so a
       typing burst in a huge file costs nothing.
+- [x] **Cheaper frames**: the per-frame lookups that do not change with the
+      buffer are cached on the tab — the syntax language of the file (chroma
+      asks the filesystem for it) and the repository of the file's directory
+      (opening a repository touches the filesystem). The fold scan reads the
+      indentation of a line in place instead of copying the line out of the
+      buffer, which allocated once per line of the file on every edit.
+      Typing and rendering a 20k-line file now costs about 7 ms per
+      keystroke (was 457 ms) and 4 MB of garbage (was 493 MB).
 
 ## Infrastructure: CI and releases
 
