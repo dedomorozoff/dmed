@@ -193,6 +193,9 @@ Conventions:
   `Init` and re-arms itself). A pass for text the buffer moved away from is
   dropped; at most one pass per tab is in flight. Keep it that way — chroma
   re-tokenizes the whole buffer and blocks for seconds on a large file.
+  The pass waits for the typing to settle first (`syntaxPassDelay`): the UI
+  thread compares the text the wait was started for with the current one and
+  restarts the wait while the user keeps typing.
 - The cached highlight stores one syntax *token* per character, not a style:
   a lipgloss.Style per character cost ~800 bytes, a token 8. The styles are
   resolved through `Highlighter.StyleFor` when a line is painted (the tokens

@@ -39,7 +39,8 @@ type tab struct {
 	path          string
 	syntaxCached  []syntax.HighlightedLine
 	syntaxText    string
-	syntaxPending bool // a highlighting pass is scheduled or running
+	syntaxWant    string // text the pending pass was started for
+	syntaxPending bool   // a highlighting pass is scheduled or running
 	diffCached    vcs.FileDiff
 	diffText      string
 	blame         []vcs.BlameLine // git blame of HEAD lines; nil = not computed
@@ -450,7 +451,7 @@ type Model struct {
 	dapBreak              map[string]map[int]bool // abs path → line → true
 	dapBPVerif            map[string]map[int]bool // adapter-verified breakpoints
 	bookmarks             map[string]map[int]bool // abs path → line (1-based) → true
-	syntaxCh              chan syntaxReadyMsg     // finished background highlighting passes
+	syntaxCh              chan tea.Msg            // messages of the highlighting pipeline
 	dapCurPath            string
 	dapCurLine            int
 	dapBusy               bool
@@ -738,7 +739,7 @@ func New(paths ...string) Model {
 		dapBreak:              map[string]map[int]bool{},
 		dapBPVerif:            map[string]map[int]bool{},
 		bookmarks:             map[string]map[int]bool{},
-		syntaxCh:              make(chan syntaxReadyMsg, 8),
+		syntaxCh:              make(chan tea.Msg, 8),
 		chatThreadPos:         -1,
 		chatPromptIdx:         -1,
 		todo:                  todo.New(),
@@ -1369,6 +1370,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case syntaxPassMsg:
+		// The buffer had time to settle: start the pass if the text is still
+		// the one the wait was started for, otherwise wait again.
+		m.runSyntax(msg.tabIdx)
+		return m, waitForSyntax(m.syntaxCh)
 	case syntaxReadyMsg:
 		// A background pass landed: keep it if it still matches the buffer
 		// and arm the waiter for the next one.

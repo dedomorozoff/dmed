@@ -443,6 +443,9 @@ plan with per-item estimates, design decisions and open questions lives in
       The cache itself holds one token per character instead of a whole
       style: a file with 60k lines went from 443 MB of styles to 6 MB of
       tokens, and the styles are resolved when a line is painted.
+      A pass also waits for the typing to settle: while the buffer keeps
+      changing, the wait is restarted and no tokenizing happens at all, so a
+      typing burst in a huge file costs nothing.
 
 ## Infrastructure: CI and releases
 

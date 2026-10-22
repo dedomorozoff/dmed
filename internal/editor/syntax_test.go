@@ -21,6 +21,28 @@ func syntaxTestModel(t *testing.T) Model {
 	return m
 }
 
+// drainSyntax runs the highlighting pipeline like the editor does: a pass
+// request wakes the UI thread, which starts the pass when the text has
+// settled, and the finished pass arrives as a message.
+func drainSyntax(m *Model, wait time.Duration) (syntaxReadyMsg, bool) {
+	deadline := time.Now().Add(wait)
+	for time.Now().Before(deadline) {
+		select {
+		case msg := <-m.syntaxCh:
+			switch mm := msg.(type) {
+			case syntaxPassMsg:
+				m.runSyntax(mm.tabIdx)
+			case syntaxReadyMsg:
+				return mm, true
+			}
+			continue
+		default:
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return syntaxReadyMsg{}, false
+}
+
 // TestSyntaxHighlightIsAsynchronous: the editor must not tokenize the file
 // on the UI thread. After an update the highlight is still missing, and it
 // arrives later through the syntax channel.
@@ -36,19 +58,8 @@ func TestSyntaxHighlightIsAsynchronous(t *testing.T) {
 		t.Fatal("a background pass must have been requested")
 	}
 
-	// The pass lands as a message; the waiter delivers it.
-	deadline := time.Now().Add(5 * time.Second)
-	var msg syntaxReadyMsg
-	for time.Now().Before(deadline) {
-		select {
-		case msg = <-m.syntaxCh:
-		default:
-			time.Sleep(10 * time.Millisecond)
-			continue
-		}
-		break
-	}
-	if msg.text == "" {
+	msg, ok := drainSyntax(&m, 5*time.Second)
+	if !ok {
 		t.Fatal("no highlighting pass arrived")
 	}
 	next, _ = m.Update(msg)
@@ -91,5 +102,37 @@ func TestSyntaxHighlightFollowsEdits(t *testing.T) {
 	m = next.(Model)
 	if m.tabs[0].syntaxCached != nil {
 		t.Fatal("a pass for outdated text must be dropped")
+	}
+}
+
+// TestSyntaxHighlightWaitsForQuiet: while the buffer keeps changing the
+// pass must not run — a pass would only produce a result that is outdated
+// by the time it lands.
+func TestSyntaxHighlightWaitsForQuiet(t *testing.T) {
+	m := syntaxTestModel(t)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = next.(Model)
+
+	// Type while the wait is running: every keystroke moves the text.
+	deadline := time.Now().Add(syntaxPassDelay * 3)
+	for time.Now().Before(deadline) {
+		m.tabs[0].buf.InsertText("x")
+		if _, ok := drainSyntax(&m, 10*time.Millisecond); ok {
+			t.Fatal("a pass must not run while the buffer keeps changing")
+		}
+	}
+	if m.tabs[0].syntaxCached != nil {
+		t.Fatal("no highlight must have been computed while typing")
+	}
+
+	// Once the typing stops, the pass runs and lands.
+	msg, ok := drainSyntax(&m, 5*time.Second)
+	if !ok {
+		t.Fatal("no highlighting pass arrived after the typing stopped")
+	}
+	next, _ = m.Update(msg)
+	m = next.(Model)
+	if m.tabs[0].syntaxCached == nil {
+		t.Fatal("the finished pass must be stored")
 	}
 }
