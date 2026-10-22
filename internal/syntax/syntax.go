@@ -89,20 +89,57 @@ func (h *Highlighter) getStyle(tt chroma.TokenType) lipgloss.Style {
 	return res
 }
 
-// Lang returns the short language tag for a filename (chroma's first alias,
-// e.g. "go", "php", "python"), or "" when the file type is unknown/plain
-// text. Used for the status-bar language indicator and DAP auto-detection.
+// langByExt maps a file extension to the language tag the editor shows.
+// The tags are chroma's first alias, but they are listed here on purpose:
+// asking chroma for them initializes its lexer registry, which parses every
+// embedded grammar and takes seconds — far too long for the status bar of
+// a frame.
+var langByExt = map[string]string{
+	".go": "go", ".py": "python", ".ts": "ts", ".tsx": "ts", ".mts": "ts",
+	".cts": "ts", ".js": "js", ".jsx": "jsx", ".mjs": "js", ".cjs": "js",
+	".php": "php", ".rb": "rb",
+	".rs": "rust", ".java": "java", ".kt": "kotlin", ".swift": "swift",
+	".c": "c", ".h": "c", ".cpp": "cpp", ".cc": "cpp", ".hpp": "cpp",
+	".cs": "csharp", ".m": "mathematica", ".dart": "dart", ".zig": "zig",
+	".lua": "lua", ".pl": "perl", ".pm": "perl", ".r": "splus", ".scala": "scala",
+	".groovy": "groovy", ".ex": "elixir", ".exs": "elixir", ".erl": "erlang",
+	".hs": "haskell", ".ml": "ocaml", ".fs": "forth", ".clj": "clojure",
+	".jl": "julia", ".nim": "nim", ".pas": "objectpascal", ".f90": "fortran",
+	".sh": "bash", ".bash": "bash", ".zsh": "bash", ".fish": "fish",
+	".ps1": "powershell", ".bat": "bat", ".sql": "mysql", ".html": "html",
+	".htm": "html", ".css": "css", ".scss": "scss", ".json": "json",
+	".yaml": "yaml", ".yml": "yaml", ".toml": "toml", ".xml": "xml",
+	".svg": "xml", ".md": "md", ".markdown": "md", ".rst": "rst", ".vue": "vue",
+	".svelte": "svelte", ".proto": "protobuf", ".cmake": "cmake", ".vim": "vim",
+	".asm": "nasm", ".txt": "text", ".gd": "gdscript3", ".sol": "sol",
+	".tf": "terraform", ".hcl": "hcl", ".graphql": "graphql",
+}
+
+// langByName maps the file names that carry their type in the name.
+var langByName = map[string]string{
+	"makefile": "make", "gnumakefile": "make", "dockerfile": "docker",
+	"cmakelists.txt": "cmake", "rakefile": "rb", "gemfile": "rb",
+}
+
+// Lang returns the short language tag for a filename (e.g. "go", "php",
+// "python"), or "" when the file type is unknown/plain text. Used for the
+// status-bar language indicator and DAP auto-detection.
 func Lang(filename string) string {
-	lexer := lexers.Match(filename)
-	if lexer == nil {
-		return ""
+	name := strings.ToLower(filepath.Base(filename))
+	if tag, ok := langByName[name]; ok {
+		return tag
 	}
-	lexer = chroma.Coalesce(lexer)
-	cfg := lexer.Config()
-	if len(cfg.Aliases) > 0 {
-		return cfg.Aliases[0]
+	if tag, ok := langByExt[strings.ToLower(filepath.Ext(name))]; ok {
+		return tag
 	}
-	return cfg.Name
+	return ""
+}
+
+// Warmup initializes chroma's lexer registry. The first lookup parses every
+// embedded grammar, which takes seconds; doing it in the background at
+// startup keeps the first frame from waiting for it.
+func Warmup() {
+	lexers.Match("warmup.go")
 }
 
 // HighlightBuffer tokenizes full buffer text and returns a slice of styles per rune for each line.
@@ -182,8 +219,9 @@ var commentTable = map[string][2]string{
 	"Scheme":       {";", ""},
 }
 
-// HighlightBuffer tokenizes full buffer text and returns a slice of styles per rune for each line.
-func (h *Highlighter) HighlightBuffer(filename, text string) []HighlightedLine {
+// lexerFor picks the lexer for a file name (and, as a fallback, for the
+// content itself).
+func (h *Highlighter) lexerFor(filename, text string) chroma.Lexer {
 	lexer := lexers.Match(filename)
 	if lexer == nil {
 		lexer = lexers.Match(filepath.Base(filename))
@@ -194,32 +232,48 @@ func (h *Highlighter) HighlightBuffer(filename, text string) []HighlightedLine {
 	if lexer == nil {
 		lexer = lexers.Fallback
 	}
-	lexer = chroma.Coalesce(lexer)
+	return chroma.Coalesce(lexer)
+}
 
-	iterator, err := lexer.Tokenise(nil, text)
+// HighlightLines tokenizes the text and hands every finished line to fn, in
+// order. The tokenizer is consumed as it goes — the whole token list is
+// never materialized — so the caller can paint the beginning of a large file
+// while the rest is still being tokenized. The callback may return false to
+// stop the tokenizing.
+func (h *Highlighter) HighlightLines(filename, text string, fn func(line HighlightedLine) bool) {
+	iterator, err := h.lexerFor(filename, text).Tokenise(nil, text)
 	if err != nil {
-		return nil
+		return
 	}
-
-	var result []HighlightedLine
 	var curLine HighlightedLine
-
-	for _, token := range iterator.Tokens() {
+	for {
+		token := iterator()
+		if token == chroma.EOF {
+			break
+		}
 		tok := token.Type
-		val := token.Value
-
-		lines := strings.Split(val, "\n")
+		lines := strings.Split(token.Value, "\n")
 		for i, segment := range lines {
 			if i > 0 {
-				result = append(result, curLine)
+				if !fn(curLine) {
+					return
+				}
 				curLine = HighlightedLine{}
 			}
-			runes := []rune(segment)
-			for range runes {
+			for range []rune(segment) {
 				curLine = append(curLine, tok)
 			}
 		}
 	}
-	result = append(result, curLine)
+	fn(curLine)
+}
+
+// HighlightBuffer tokenizes full buffer text and returns a slice of styles per rune for each line.
+func (h *Highlighter) HighlightBuffer(filename, text string) []HighlightedLine {
+	var result []HighlightedLine
+	h.HighlightLines(filename, text, func(line HighlightedLine) bool {
+		result = append(result, line)
+		return true
+	})
 	return result
 }

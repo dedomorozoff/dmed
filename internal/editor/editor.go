@@ -21,6 +21,7 @@ import (
 	"dmed/internal/buffer"
 	"dmed/internal/config"
 	"dmed/internal/dap"
+	"dmed/internal/debug"
 	"dmed/internal/events"
 	"dmed/internal/i18n"
 	"dmed/internal/lsp"
@@ -35,31 +36,32 @@ import (
 )
 
 type tab struct {
-	buf           *buffer.Buffer
-	path          string
-	syntaxCached  []syntax.HighlightedLine
-	syntaxText    string
-	syntaxWant    string // text the pending pass was started for
-	syntaxPending bool   // a highlighting pass is scheduled or running
-	langTag       string // cached syntax language of the file
-	langKnown     bool
-	repo          *vcs.Repo // cached repository of the file's directory
-	repoTried     bool
-	diffCached    vcs.FileDiff
-	diffText      string
-	diffWant      string          // text the pending diff was started for
-	diffPending   bool            // a diff pass is scheduled or running
-	blame         []vcs.BlameLine // git blame of HEAD lines; nil = not computed
-	lineEnding    string          // "lf" or "crlf"
-	encoding      string          // "utf-8", "utf-16le", "utf-16be", "latin-1"
-	wrapSegs      []wrapSeg
-	wrapW         int
-	wrapTabW      int
-	wrapText      string
-	foldCached    []foldRange // indentation fold blocks, cached like wrapSegs
-	foldText      string
-	foldTabW      int
-	folds         map[int]bool // folded block start lines; nil = nothing folded
+	buf            *buffer.Buffer
+	path           string
+	syntaxCached   []syntax.HighlightedLine
+	syntaxText     string
+	syntaxWant     string // text the pending pass was started for
+	syntaxPending  bool   // a highlighting pass is scheduled or running
+	syntaxComplete bool   // the cached highlight covers the whole text
+	langTag        string // cached syntax language of the file
+	langKnown      bool
+	repo           *vcs.Repo // cached repository of the file's directory
+	repoTried      bool
+	diffCached     vcs.FileDiff
+	diffText       string
+	diffWant       string          // text the pending diff was started for
+	diffPending    bool            // a diff pass is scheduled or running
+	blame          []vcs.BlameLine // git blame of HEAD lines; nil = not computed
+	lineEnding     string          // "lf" or "crlf"
+	encoding       string          // "utf-8", "utf-16le", "utf-16be", "latin-1"
+	wrapSegs       []wrapSeg
+	wrapW          int
+	wrapTabW       int
+	wrapText       string
+	foldCached     []foldRange // indentation fold blocks, cached like wrapSegs
+	foldText       string
+	foldTabW       int
+	folds          map[int]bool // folded block start lines; nil = nothing folded
 }
 
 // wrapSeg describes one screen row of a wrapped (or plain) buffer line: the
@@ -778,6 +780,9 @@ func New(paths ...string) Model {
 	}); err == nil {
 		m.watcher = w
 	}
+	// Chroma parses every embedded grammar on its first lookup. Doing that
+	// in the background keeps the first frame from waiting for it.
+	go debug.CapturePanicReport(func() { syntax.Warmup() })
 
 	var files []string
 	for _, p := range paths {

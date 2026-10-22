@@ -461,6 +461,14 @@ plan with per-item estimates, design decisions and open questions lives in
       highlighting, and waits for the typing to settle before it starts.
       The line painting groups the characters of equal style into runs: a
       lipgloss render per character was thousands of calls per frame.
+- [x] **Partial highlighting**: chroma hands out the tokens of a file in one
+      go, so the colors of a large file only appeared when the whole file
+      was tokenized. The tokenizer is now consumed as it goes and the pass
+      publishes the lines it has done — the visible part of a file is
+      painted in a fraction of a second and the rest catches up.
+      The language tag of a file comes from a table instead of chroma:
+      asking chroma for it initializes its lexer registry, which parses every
+      embedded grammar and takes seconds.
 
 ## Infrastructure: CI and releases
 

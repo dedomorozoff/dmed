@@ -1,6 +1,8 @@
 package editor
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,6 +41,26 @@ func drainSyntax(m *Model, wait time.Duration) (syntaxReadyMsg, bool) {
 		default:
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+	return syntaxReadyMsg{}, false
+}
+
+// drainSyntaxPart returns the next part of a highlighting pass.
+func drainSyntaxPart(m *Model, wait time.Duration) (syntaxReadyMsg, bool) {
+	deadline := time.Now().Add(wait)
+	for time.Now().Before(deadline) {
+		select {
+		case msg := <-m.syntaxCh:
+			switch mm := msg.(type) {
+			case syntaxPassMsg:
+				m.runSyntax(mm.tabIdx)
+			case syntaxReadyMsg:
+				return mm, true
+			}
+			continue
+		default:
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 	return syntaxReadyMsg{}, false
 }
@@ -105,9 +127,64 @@ func TestSyntaxHighlightFollowsEdits(t *testing.T) {
 	}
 }
 
-// TestSyntaxHighlightWaitsForQuiet: while the buffer keeps changing the
-// pass must not run — a pass would only produce a result that is outdated
-// by the time it lands.
+// TestSyntaxHighlightArrivesInParts: a pass publishes the lines it has
+// tokenized while it runs, so the visible part of a big file gets its colors
+// without waiting for the whole file.
+func TestSyntaxHighlightArrivesInParts(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 2000; i++ {
+		sb.WriteString(fmt.Sprintf("line %d\n", i))
+	}
+	m := New()
+	m.width, m.height = 80, 24
+	m.tabs = []tab{{buf: buffer.Load(sb.String()), path: "parts.go"}}
+	m.initPanes()
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = next.(Model)
+
+	// The first part of the pass: the cache holds part of the lines and is
+	// not complete yet.
+	part, ok := drainSyntaxPart(&m, 5*time.Second)
+	if !ok {
+		t.Fatal("no part of the pass arrived")
+	}
+	if part.complete {
+		t.Fatal("the first part must not be complete")
+	}
+	if len(part.lines) == 0 {
+		t.Fatal("the part must carry lines")
+	}
+	next, _ = m.Update(part)
+	m = next.(Model)
+	if len(m.tabs[0].syntaxCached) == 0 {
+		t.Fatal("the lines of the part must be stored")
+	}
+	if m.tabs[0].syntaxComplete {
+		t.Fatal("the cache must not be complete yet")
+	}
+
+	// The rest of the pass completes the cache.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		msg, ok := drainSyntaxPart(&m, 100*time.Millisecond)
+		if !ok {
+			continue
+		}
+		next, _ = m.Update(msg)
+		m = next.(Model)
+		if msg.complete {
+			if !m.tabs[0].syntaxComplete {
+				t.Fatal("the cache must be complete after the last part")
+			}
+			if len(m.tabs[0].syntaxCached) < 2000 {
+				t.Fatalf("the cache must cover the whole file, got %d lines", len(m.tabs[0].syntaxCached))
+			}
+			return
+		}
+	}
+	t.Fatal("the pass never completed")
+}
 func TestSyntaxHighlightWaitsForQuiet(t *testing.T) {
 	m := syntaxTestModel(t)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

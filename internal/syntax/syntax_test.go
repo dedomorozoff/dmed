@@ -2,6 +2,9 @@ package syntax
 
 import (
 	"testing"
+
+	"github.com/alecthomas/chroma/v2"
+	"github.com/alecthomas/chroma/v2/lexers"
 )
 
 func TestHighlightBufferGo(t *testing.T) {
@@ -93,6 +96,28 @@ func TestLang(t *testing.T) {
 	for _, c := range cases {
 		if got := Lang(c.file); got != c.want {
 			t.Errorf("Lang(%q) = %q, want %q", c.file, got, c.want)
+		}
+	}
+}
+
+// TestLangMatchesChroma: the language tags the editor shows are listed in a
+// map (asking chroma for them would initialize its lexer registry, which
+// takes seconds). The map must agree with chroma, otherwise the status bar
+// and the debug adapter pick the wrong language.
+func TestLangMatchesChroma(t *testing.T) {
+	for file := range langByExt {
+		name := "a" + file
+		lexer := lexers.Match(name)
+		if lexer == nil {
+			continue // chroma does not know this extension
+		}
+		cfg := chroma.Coalesce(lexer).Config()
+		want := cfg.Name
+		if len(cfg.Aliases) > 0 {
+			want = cfg.Aliases[0]
+		}
+		if got := Lang(name); got != want {
+			t.Errorf("Lang(%q) = %q, want %q (chroma)", name, got, want)
 		}
 	}
 }

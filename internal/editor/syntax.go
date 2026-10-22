@@ -27,6 +27,11 @@ import (
 // before it starts a pass.
 const syntaxPassDelay = 150 * time.Millisecond
 
+// syntaxChunkLines is how many lines a pass publishes at once. The first
+// chunk covers the visible part of the file, the rest follows in bigger
+// steps — every chunk costs a frame.
+const syntaxChunkLines = 200
+
 // syntaxReq asks for a highlighting pass of one tab's text.
 type syntaxReq struct {
 	tabIdx int
@@ -42,11 +47,13 @@ type syntaxPassMsg struct {
 	tabIdx int
 }
 
-// syntaxReadyMsg carries a finished highlighting pass.
+// syntaxReadyMsg carries a part of a highlighting pass: the lines that were
+// tokenized so far. The last part of a pass is marked complete.
 type syntaxReadyMsg struct {
-	tabIdx int
-	text   string
-	lines  []syntax.HighlightedLine
+	tabIdx   int
+	text     string
+	lines    []syntax.HighlightedLine
+	complete bool
 }
 
 // waitForSyntax waits for the next message of the highlighting pipeline.
@@ -78,15 +85,17 @@ func (m *Model) requestSyntax() {
 			continue
 		}
 		text := t.buf.Text()
-		if t.syntaxCached != nil && t.syntaxText == text {
+		if t.syntaxCached != nil && t.syntaxComplete && t.syntaxText == text {
 			continue
 		}
 		// Styles of a different line count would end up on the wrong lines:
 		// drop them now and let the editor paint plain text until the new
-		// pass lands.
+		// pass lands. A pass that is running is not touched: its lines are
+		// the ones of the current text.
 		if len(t.syntaxCached) != t.buf.LineCount() {
 			t.syntaxCached = nil
 			t.syntaxText = ""
+			t.syntaxComplete = false
 		}
 		t.syntaxPending = true
 		t.syntaxWant = text
@@ -106,13 +115,26 @@ func (m *Model) scheduleSyntax(tabIdx int, text string) {
 }
 
 // startSyntax runs a highlighting pass in the background and hands the
-// result to the editor through the syntax channel.
+// result to the editor through the syntax channel. The pass publishes the
+// lines it has tokenized while it runs, so the visible part of a large file
+// gets its colors without waiting for the whole file.
 func (m *Model) startSyntax(req syntaxReq) {
 	ch := m.syntaxCh
 	go func() {
 		defer debug.CapturePanicReport(func() {})
-		lines := req.syn.HighlightBuffer(req.path, req.text)
-		ch <- syntaxReadyMsg{tabIdx: req.tabIdx, text: req.text, lines: lines}
+		var chunk []syntax.HighlightedLine
+		count := 0
+		req.syn.HighlightLines(req.path, req.text, func(line syntax.HighlightedLine) bool {
+			chunk = append(chunk, line)
+			count++
+			if count >= syntaxChunkLines {
+				count = 0
+				ch <- syntaxReadyMsg{tabIdx: req.tabIdx, text: req.text, lines: chunk}
+				chunk = nil
+			}
+			return true
+		})
+		ch <- syntaxReadyMsg{tabIdx: req.tabIdx, text: req.text, lines: chunk, complete: true}
 	}()
 }
 
@@ -140,17 +162,27 @@ func (m *Model) runSyntax(tabIdx int) tea.Cmd {
 	return nil
 }
 
-// applySyntax stores a finished pass. A pass for text the buffer has moved
-// away from is dropped; the next update asks for a fresh one.
+// applySyntax stores a part of a pass. A part for text the buffer has moved
+// away from is dropped; the next update asks for a fresh pass.
 func (m *Model) applySyntax(msg syntaxReadyMsg) {
 	if msg.tabIdx < 0 || msg.tabIdx >= len(m.tabs) {
 		return
 	}
 	t := &m.tabs[msg.tabIdx]
-	t.syntaxPending = false
+	if msg.complete {
+		t.syntaxPending = false
+	}
 	if msg.text != t.buf.Text() {
 		return
 	}
-	t.syntaxCached = msg.lines
-	t.syntaxText = msg.text
+	if t.syntaxText != msg.text {
+		// A new pass: the lines of the old one do not fit the text any more.
+		t.syntaxCached = nil
+		t.syntaxText = msg.text
+		t.syntaxComplete = false
+	}
+	t.syntaxCached = append(t.syntaxCached, msg.lines...)
+	if msg.complete {
+		t.syntaxComplete = true
+	}
 }

@@ -206,6 +206,12 @@ Conventions:
   pass that is dropped when the text moved on.
 - Lines are painted in runs of equal style, not character by character: a
   lipgloss render per character was thousands of calls per frame.
+- The highlighting is streamed: `syntax.HighlightLines` hands the finished
+  lines to a callback while the tokenizer is still running, and the editor
+  publishes them in chunks (`syntaxChunkLines`). The whole token list is
+  never materialized. The language tag of a file comes from the table in
+  `internal/syntax` — asking chroma for it initializes its lexer registry
+  (seconds), so `syntax.Warmup` does that in the background at startup.
 - The AI wizard loads the provider's model list when it opens and after every
   provider change (`testAIConnection` serves both the Test row and the list).
   `AITestResultMsg.Gen` stamps the request so a late reply from the previous
