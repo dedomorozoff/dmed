@@ -133,27 +133,38 @@ func TestSearchEverywhereRendersKinds(t *testing.T) {
 	}
 }
 
-// TestCtrlShiftPOpensSearchEverywhere: most terminals never report a bare
-// modifier press, so the double Shift cannot be the only way in.
-func TestCtrlShiftPOpensSearchEverywhere(t *testing.T) {
+// TestSearchEverywhereBindings: most terminals never report a bare modifier
+// press, so the double Shift cannot be the only way in. Alt+P survives even
+// legacy input (ESC+p), Ctrl+Shift+P needs a terminal that tells Shift apart.
+func TestSearchEverywhereBindings(t *testing.T) {
 	dir := t.TempDir()
 	f := writeTemp(t, dir, "alpha.txt", "hi\n")
 
-	m := New(f)
-	m.width, m.height = 80, 24
-	m.root = dir
+	for _, tc := range []struct {
+		name string
+		msg  tea.KeyPressMsg
+	}{
+		{"alt+p", tea.KeyPressMsg{Code: 'p', Mod: tea.ModAlt}},
+		{"ctrl+shift+p", tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl | tea.ModShift}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(f)
+			m.width, m.height = 80, 24
+			m.root = dir
 
-	m = press(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl | tea.ModShift})
-	if !m.paletteOpen {
-		t.Fatal("ctrl+shift+p must open the palette")
-	}
-	if !m.paletteAll {
-		t.Fatal("ctrl+shift+p must open the search-everywhere palette")
-	}
-	m = typeStr(m, "alpha.txt")
-	hits := m.filterPalette()
-	if len(hits) == 0 || hits[0].kind != paletteKindFile {
-		t.Fatalf("expected the file as top match, got: %+v", hits)
+			m = press(m, tc.msg)
+			if !m.paletteOpen {
+				t.Fatalf("%s must open the palette", tc.name)
+			}
+			if !m.paletteAll {
+				t.Fatalf("%s must open the search-everywhere palette", tc.name)
+			}
+			m = typeStr(m, "alpha.txt")
+			hits := m.filterPalette()
+			if len(hits) == 0 || hits[0].kind != paletteKindFile {
+				t.Fatalf("expected the file as top match, got: %+v", hits)
+			}
+		})
 	}
 }
 

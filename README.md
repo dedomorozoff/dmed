@@ -93,7 +93,7 @@ DMED_PROVIDER=DeepSeek DMED_API_KEY=sk-... DMED_MODEL=deepseek-chat dmed
 - **Lua plugins** — keybindings, palette commands and events; hot-reload on edit, plus a built-in store (`Plugins: Install...`) with embedded and GitHub-hosted plugins
 - **Localization** — English/Russian UI, switchable from the palette
 - **Sessions** — auto-save/restore open files across restarts
-- **Command palette** (`Ctrl+P` / `F2`) — fuzzy search all commands; `Ctrl+Shift+P` (or a double `Shift`, where the terminal reports bare modifier presses) opens the JetBrains-style *search everywhere*: commands, project files and settings in one list
+- **Command palette** (`Ctrl+P` / `F2`) — fuzzy search all commands; `Alt+P` or `Ctrl+Shift+P` opens the JetBrains-style *search everywhere*: commands, project files and settings in one list (a double `Shift` does the same on terminals that report bare modifier presses)
 
 ## Install
 
@@ -238,7 +238,7 @@ terminal) are clickable; hovering one shows a callout with its shortcut.
 |------|--------|
 | `F12` / `Ctrl+Click` | Go to definition (LSP) |
 | `Ctrl+P` / `F2` | Command palette |
-| `Ctrl+Shift+P` / double `Shift` | Search everywhere — commands, files and settings |
+| `Alt+P` / `Ctrl+Shift+P` | Search everywhere — commands, files and settings (a double `Shift` does the same where the terminal reports bare modifiers) |
 | `F1` / `Ctrl+E` | Help overlay |
 | `Ctrl+Q` | Quit |
 | `Ctrl+C` | Copy the selection (never quits) |

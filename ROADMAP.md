@@ -465,8 +465,11 @@ plan with per-item estimates, design decisions and open questions lives in
       search: commands, project files and settings in one list, each result
       marked with what it is. Picking a file opens it, picking a setting
       opens the configuration file. `Ctrl+P` / `F2` keep searching commands
-      only, and the "Search Everywhere" command reaches the same list on
-      terminals that do not report a bare `Shift`.
+      only. Since barely any terminal reports a bare `Shift` (and on legacy
+      input `Ctrl+Shift+P` collapses into the `Ctrl+P` control byte), the
+      bindings that actually reach the list are `Alt+P` — distinguishable
+      everywhere, because `Alt+letter` is sent as `ESC+letter` — and
+      `Ctrl+Shift+P` on terminals that tell Shift apart.
 - [x] **Ctrl+C never quits**: Ctrl+C copies the selection (as before) and
       otherwise says how to leave the editor — an editor that dies on the key
       a terminal uses to interrupt a program is a trap. `Ctrl+Q` is the way
