@@ -47,6 +47,7 @@ var (
 	selectionStyle  = lipgloss.NewStyle().Background(lipgloss.Color("60")).Foreground(lipgloss.Color("255"))
 	ghostStyle      = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("243"))
 	blameStyle      = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("244"))
+	foldStyle       = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("110"))
 )
 
 type helpEntry struct {
@@ -102,6 +103,7 @@ var helpEntries = []helpEntry{
 	{"Alt+Click", "help.multicursor_click"},
 	{"Esc", "help.multicursor_esc"},
 	{"Alt+↑ / Alt+↓", "help.move_line"},
+	{"Alt+C / Alt+O", "help.fold"},
 	{"", ""},
 	{"F1 or Ctrl+E", "help.toggle_help"},
 	{"Ctrl+Q / Ctrl+C", "help.quit"},
@@ -346,6 +348,11 @@ func (m Model) gutterWidthForTab(t *tab) int {
 	if w < 6 {
 		w = 6
 	}
+	// Folding code gains one chevron column (▾ open block / ▸ folded), click
+	// and it expands/collapses the block.
+	if t.hasFolds(m.cfg.Editor.TabWidth) {
+		w++
+	}
 	return w
 }
 
@@ -587,27 +594,30 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	dapStoppedHere := m.dapRunState == dapStopped && m.dapCurPath == diagPath
 
 	wrap := p.wordWrap && contentW > 0
-	var segs []wrapSeg
-	if wrap {
-		segs = t.tabWrap(contentW, m.cfg.Editor.TabWidth)
-	}
+	disp := m.dispRows(paneIdx, contentW)
+	tabW := m.cfg.Editor.TabWidth
 
 	for row := 0; row < h; row++ {
-		ln := p.offsetY + row
-		segStart, segEnd := 0, 0
-		continuation := false
-		if wrap {
-			si := p.offsetY + row
-			if si >= len(segs) {
-				if gw > 0 {
-					rows[row] = strings.Repeat(" ", gw)
-				}
-				continue
+		var d dispRow
+		if di := p.offsetY + row; di >= 0 && di < len(disp) {
+			d = disp[di]
+		} else {
+			// Beyond the displayed content: a blank row.
+			if gw > 0 {
+				rows[row] = strings.Repeat(" ", gw)
 			}
-			ln = segs[si].line
-			segStart = segs[si].expStart
-			segEnd = segs[si].expEnd
-			continuation = segStart > 0
+			continue
+		}
+		ln, segStart, segEnd := d.ln, d.expStart, d.expEnd
+		continuation := !d.summary && segStart > 0
+
+		if d.summary {
+			// The line count summary of the folded block under it: an empty
+			// gutter with a folded chevron and the hint text. Expands on click.
+			blank := strings.Repeat(" ", gw-1)
+			gut := gutterStyle.Render(blank) + foldStyle.Render(m.g.expand)
+			rows[row] = gut + foldStyle.Render(m.g.ellipsis+" "+m.t("fold.hidden", d.hidden))
+			continue
 		}
 
 		if continuation {
@@ -698,6 +708,9 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 		gutStr += diagMarkStyle.Render(diagMark)
 		gutStr += gitMarkStyle.Render(gitMark)
 		gutStr += markStyle.Render(mark)
+		if chev, hasCol := m.foldChevron(t, ln, tabW); hasCol {
+			gutStr += foldStyle.Render(chev)
+		}
 
 		if active && !wrap && m.ghostVisible && len(m.ghostLines) > 1 && ln > m.ghostRow {
 			// Multi-line ghost: subsequent ghost lines appear on their own rows.

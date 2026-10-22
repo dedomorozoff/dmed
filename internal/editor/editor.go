@@ -48,6 +48,10 @@ type tab struct {
 	wrapW        int
 	wrapTabW     int
 	wrapText     string
+	foldCached   []foldRange   // indentation fold blocks, cached like wrapSegs
+	foldText     string
+	foldTabW     int
+	folds        map[int]bool // folded block start lines; nil = nothing folded
 }
 
 // wrapSeg describes one screen row of a wrapped (or plain) buffer line: the
@@ -2169,6 +2173,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.toggleWordWrap()
 	case "alt+b":
 		return m.toggleBlame()
+	case "alt+c":
+		m.foldCloseAtCursor()
+	case "alt+o":
+		m.foldOpenAtCursor()
 	case "ctrl+z":
 		if m.cur().buf.Undo() {
 			m.msg = ""
@@ -2241,12 +2249,14 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		} else {
 			m.cur().buf.MoveUp()
 		}
+		m.foldSkip(-1)
 	case "down":
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MoveAllDown()
 		} else {
 			m.cur().buf.MoveDown()
 		}
+		m.foldSkip(1)
 	case "left":
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MoveAllLeft()
@@ -2267,11 +2277,13 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		t := m.cur()
 		for i := 0; i < m.paneViewHeight(m.activePane)-2 && t.buf.CurLine() > 0; i++ {
 			t.buf.MoveUp()
+			m.foldSkip(-1)
 		}
 	case "pgdown":
 		t := m.cur()
 		for i := 0; i < m.paneViewHeight(m.activePane)-2 && t.buf.CurLine() < t.buf.LineCount()-1; i++ {
 			t.buf.MoveDown()
+			m.foldSkip(1)
 		}
 	case "enter":
 		if m.cur().buf.HasMultipleCursors() {
@@ -2437,34 +2449,45 @@ func (m *Model) clampScroll() {
 	h := m.paneViewHeight(m.activePane)
 	cur := t.buf.CurLine()
 	tabW := m.cfg.Editor.TabWidth
+	// Folding: rows are display rows (folded blocks collapsed to one hint
+	// line). A cursor that ended up on a hidden line — buffer edits shifting
+	// things around — unfolds the block that hides it first.
+	d := m.dispRows(m.activePane, m.paneContentWidth(m.activePane))
+	if dispIndexOfLine(d, cur) < 0 {
+		t.unfoldThrough(cur, tabW)
+		d = m.dispRows(m.activePane, m.paneContentWidth(m.activePane))
+	}
 	if p.wordWrap {
-		w := m.paneContentWidth(m.activePane)
-		if w > 0 && h > 0 {
-			segs := t.tabWrap(w, tabW)
-			expCol := visCol(t.buf.LineAt(cur), t.buf.Col(), tabW)
-			row, _ := segRowForCol(segs, cur, expCol)
-			if row < p.offsetY {
-				p.offsetY = row
-			}
-			if row >= p.offsetY+h {
-				p.offsetY = row - h + 1
-			}
-			if maxOff := len(segs) - h; p.offsetY > maxOff {
-				p.offsetY = maxOff
-			}
-			if p.offsetY < 0 {
-				p.offsetY = 0
-			}
+		expCol := visCol(t.buf.LineAt(cur), t.buf.Col(), tabW)
+		row := dispCursorRow(d, cur, expCol)
+		if row < p.offsetY {
+			p.offsetY = row
+		}
+		if row >= p.offsetY+h {
+			p.offsetY = row - h + 1
+		}
+		if maxOff := len(d) - h; p.offsetY > maxOff {
+			p.offsetY = maxOff
+		}
+		if p.offsetY < 0 {
+			p.offsetY = 0
 		}
 		p.offsetX = 0
 		return
 	}
-	if h > 0 {
-		if cur < p.offsetY {
-			p.offsetY = cur
+	if h > 0 && len(d) > 0 {
+		row := dispCursorRow(d, cur, 0)
+		if row < p.offsetY {
+			p.offsetY = row
 		}
-		if cur >= p.offsetY+h {
-			p.offsetY = cur - h + 1
+		if row >= p.offsetY+h {
+			p.offsetY = row - h + 1
+		}
+		if maxOff := len(d) - h; p.offsetY > maxOff {
+			p.offsetY = maxOff
+		}
+		if p.offsetY < 0 {
+			p.offsetY = 0
 		}
 	}
 	w := m.paneContentWidth(m.activePane)
@@ -2974,7 +2997,17 @@ func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
 	}
 
 	editorRow := y - 1
-	ln, rawCol := m.clickPosToLineCol(m.activePane, editorRow, x)
+	ln, rawCol, d := m.clickPosToLineCol(m.activePane, editorRow, x)
+	if d.summary {
+		// Drag started on a fold summary: expand the block and drag from its
+		// start line.
+		t := m.cur()
+		if t.toggleFoldAt(d.ln, m.cfg.Editor.TabWidth) {
+			m.clampScroll()
+		}
+		ln = d.ln
+		rawCol = 0
+	}
 
 	m.cur().buf.DragSelect(ln, rawCol)
 	return nil
@@ -3062,17 +3095,14 @@ func (m Model) cursorScreenPos() (int, int) {
 	gw := m.gutterWidthForTab(t)
 	leftW := m.leftRailWidth()
 
-	screenRow := curLine
-	segStart := 0
-	if p.wordWrap {
-		w := m.paneContentWidth(m.activePane)
-		if w > 0 {
-			segs := t.tabWrap(w, m.cfg.Editor.TabWidth)
-			row, es := segRowForCol(segs, curLine, expCol)
-			screenRow = row
-			segStart = es
-		}
+	screenRow, segStart := curLine, 0
+	d := m.dispRows(m.activePane, m.paneContentWidth(m.activePane))
+	if len(d) == 0 {
+		return 0, 0
 	}
+	row := dispCursorRow(d, curLine, expCol)
+	screenRow = row
+	segStart = d[row].expStart
 
 	// X position within the pane content area.
 	paneX := gw + (expCol - (p.offsetX + segStart))

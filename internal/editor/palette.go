@@ -39,6 +39,8 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "move_line_down", title: "cmd.move_line_down_t", desc: "cmd.move_line_down_d", action: func(m *Model) tea.Cmd { m.cur().buf.MoveLineDown(); return nil }},
 		{id: "toggle_comment", title: "cmd.toggle_comment_t", desc: "cmd.toggle_comment_d", action: func(m *Model) tea.Cmd { m.toggleComment(); return nil }},
 		{id: "toggle_bookmark", title: "cmd.toggle_bookmark_t", desc: "cmd.toggle_bookmark_d", action: func(m *Model) tea.Cmd { m.toggleBookmarkAt(m.cur().buf.CurLine()); return nil }},
+	{id: "fold_toggle", title: "cmd.fold_toggle_t", desc: "cmd.fold_toggle_d", action: func(m *Model) tea.Cmd { m.toggleFoldAtCursor(); return nil }},
+	{id: "fold_all", title: "cmd.fold_all_t", desc: "cmd.fold_all_d", action: func(m *Model) tea.Cmd { m.toggleFoldAll(); return nil }},
 		{id: "toggle_breakpoint", title: "cmd.toggle_breakpoint_t", desc: "cmd.toggle_breakpoint_d", action: func(m *Model) tea.Cmd { return m.toggleDebugBreakpoint() }},
 		{id: "goto_definition", title: "cmd.goto_definition_t", desc: "cmd.goto_definition_d", action: func(m *Model) tea.Cmd { return m.gotoDefinition() }},
 		{id: "git_commit", title: "cmd.git_commit_t", desc: "cmd.git_commit_d", action: func(m *Model) tea.Cmd { m.openGitPanel(); return nil }},

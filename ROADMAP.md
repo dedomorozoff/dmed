@@ -404,6 +404,20 @@ plan with per-item estimates, design decisions and open questions lives in
       replace), `parseWorkspaceEdit` (both `changes` and `documentChanges`
       reply shapes); command-only actions are shown but refuse to run.
       Legacy terminals that lose `Ctrl+Alt+*` use the palette commands.
+- [x] **Code block folding**: indentation-based fold ranges (a non-blank line
+      whose next non-blank line is deeper, ending where the indent falls back —
+      nested blocks included), display-only state that never touches the
+      buffer. The whole pane renders from one display-row list (`dispRows`):
+      folded blocks collapse to a `… N lines hidden` hint right under the
+      start line, working with and without word wrap. Folding goes through
+      chevrons in the gutter (▾/▸, one extra column only when the buffer is
+      foldable), a click anywhere on the summary row, Alt+C / Alt+O (vim
+      zc/zo), and "Edit: Fold All / Fold (cursor)" from the palette. Arrows
+      and PgUp/PgDn skip over hidden lines so the cursor can never enter a
+      folded block; a cursor that ends up on a hidden line (undo, an external
+      edit, a jump) forces the block open in `clampScroll`. Fold ranges are
+      cached like wrap segments and stale folded marks heal themselves on the
+      next render.
 
 ## Infrastructure: CI and releases
 
