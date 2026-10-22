@@ -159,6 +159,9 @@ dmed a.txt b.txt               # multiple files → tabs
 | `Alt+D` | Add multi-cursor at next word occurrence |
 | `Alt+Click` | Add cursor at click position |
 | `Esc` | Exit multi-cursor mode |
+| `Alt+C` / `Alt+O` | Fold / unfold the block at the cursor |
+| Click `▾`/`▸` in the gutter | Fold / unfold that block with the mouse |
+| Click `… N lines hidden` | Expand the folded block (works anywhere on the row) |
 | `Ctrl+Space` | Autocomplete (word + LSP) |
 | `Ctrl+U` | Uppercase selection / buffer |
 | `Enter` / `Backspace` / `Delete` | Standard editing |

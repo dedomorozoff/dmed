@@ -596,6 +596,16 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	wrap := p.wordWrap && contentW > 0
 	disp := m.dispRows(paneIdx, contentW)
 	tabW := m.cfg.Editor.TabWidth
+	// The painted gutter must be exactly gw cells wide: the line number block
+	// (right-aligned before the markers), the three shared marker columns and
+	// the optional fold chevron. The number block has to give the chevron its
+	// cell back, otherwise the whole gutter is one cell wider than
+	// gutterWidthForTab reports and every click lands one column right of the
+	// glyph under the pointer (the fold chevron included).
+	foldW := 0
+	if t.hasFolds(tabW) {
+		foldW = 1
+	}
 
 	for row := 0; row < h; row++ {
 		var d dispRow
@@ -689,7 +699,7 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 			markStyle = bmStyle
 		}
 
-		numPad := gw - 3 - len(num)
+		numPad := gw - 3 - foldW - len(num)
 		if numPad < 0 {
 			numPad = 0
 		}

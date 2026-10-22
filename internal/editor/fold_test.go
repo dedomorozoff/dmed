@@ -218,6 +218,85 @@ func TestFoldToggleKeysAndGutterClicks(t *testing.T) {
 	}
 }
 
+// TestFoldChevronClickToggles pins the mouse path: the painted chevron cell is
+// the gutter's last cell, so a left click on it folds and unfolds the block.
+// The gutter must be exactly gutterWidthForTab cells wide — one cell wider and
+// the click lands on the cell left of the glyph, which used to flip a
+// breakpoint instead of folding.
+func TestFoldChevronClickToggles(t *testing.T) {
+	m := foldModel(t)
+	gw := m.gutterWidthForTab(&m.tabs[0])
+	rows := plainRows(m.View().Content)
+	// Row 1 is "func main() {": its gutter, including the ▾, must end at gw.
+	if prefix := string([]rune(rows[1])[:gw]); !strings.HasSuffix(prefix, "▾") {
+		t.Fatalf("the chevron must be the gutter's last cell, gutter=%q", prefix)
+	}
+	if runeAt(rows[1], gw) != 'f' {
+		t.Fatalf("content must start right after the gutter, got %q", runeAt(rows[1], gw))
+	}
+
+	m.Update(tea.MouseClickMsg{X: gw - 1, Y: 1, Button: tea.MouseLeft})
+	if !m.tabs[0].folds[0] {
+		t.Fatalf("clicking the ▾ cell must fold the block, folds = %v", m.tabs[0].folds)
+	}
+	if got := m.tabs[0].buf.CurLine(); got != 0 {
+		t.Fatalf("a gutter click must not move the cursor, got line %d", got)
+	}
+
+	// The folded block still shows its start line with a ▸ in the same cell.
+	rows = plainRows(m.View().Content)
+	if prefix := string([]rune(rows[1])[:gw]); !strings.HasSuffix(prefix, "▸") {
+		t.Fatalf("a folded block must paint ▸ in the fold cell, gutter=%q", prefix)
+	}
+	// The summary row the folded block collapses to: blank cells up to the
+	// fold column, then the ▸.
+	if prefix := string([]rune(rows[2])[:gw]); !strings.HasSuffix(prefix, "▸") {
+		t.Fatalf("the summary row must paint ▸ in the fold cell, gutter=%q", prefix)
+	}
+	m.Update(tea.MouseClickMsg{X: gw - 1, Y: 1, Button: tea.MouseLeft})
+	if len(m.tabs[0].folds) != 0 {
+		t.Fatalf("a second click must unfold, folds = %v", m.tabs[0].folds)
+	}
+
+	// Any gutter cell of the summary row expands it too: the row stands for
+	// the hidden block and has no marker column to protect.
+	m.tabs[0].folds = map[int]bool{0: true}
+	m.Update(tea.MouseClickMsg{X: 1, Y: 2, Button: tea.MouseLeft})
+	if len(m.tabs[0].folds) != 0 {
+		t.Fatalf("clicking the summary row's gutter must unfold, folds = %v", m.tabs[0].folds)
+	}
+}
+
+// TestFoldGutterKeepsColumnAlignment: with folds present the gutter grows one
+// column, and a content click must still put the cursor on the character under
+// the pointer instead of one to its right.
+func TestFoldGutterKeepsColumnAlignment(t *testing.T) {
+	m := foldModel(t)
+	gw := m.gutterWidthForTab(&m.tabs[0])
+	// Column gw is the first content cell, so clicking it means column 0.
+	m.Update(tea.MouseClickMsg{X: gw, Y: 1, Button: tea.MouseLeft})
+	if got := m.tabs[0].buf.CurLine(); got != 0 {
+		t.Fatalf("click on row 1 must select line 0, got %d", got)
+	}
+	if got := m.tabs[0].buf.Col(); got != 0 {
+		t.Fatalf("click on the first content cell must select column 0, got %d", got)
+	}
+	// The next cell is column 1: 'u' in "func".
+	m.Update(tea.MouseClickMsg{X: gw + 1, Y: 1, Button: tea.MouseLeft})
+	if got := m.tabs[0].buf.Col(); got != 1 {
+		t.Fatalf("click one cell in must select column 1, got %d", got)
+	}
+}
+
+// runeAt returns the rune at 0-based cell x of a plain rendered row.
+func runeAt(row string, x int) rune {
+	rs := []rune(row)
+	if x < 0 || x >= len(rs) {
+		return 0
+	}
+	return rs[x]
+}
+
 func TestFoldSummaryClickUnfolds(t *testing.T) {
 	m := foldModel(t)
 	m.tabs[0].folds = map[int]bool{0: true}

@@ -485,7 +485,16 @@ func (m *Model) clickBuffer(x, y int, btn tea.MouseButton, mod tea.KeyMod) tea.C
 		ln, _, d := m.clickPosToLineCol(m.activePane, editorRow, x)
 		m.lastClickValid = false // a rapid second click must not toggle twice
 		tabW := m.cfg.Editor.TabWidth
-		if d.summary || (gx == gw-1 && t.hasFolds(tabW) && t.toggleFoldAt(ln, tabW)) {
+		// The gutter's last cell is the fold column whenever the buffer has
+		// anything to fold. It only ever toggles a fold: a blank chevron cell
+		// (a line that starts no block) must not fall through to the
+		// breakpoint toggle, which lives in the marker column to its left.
+		if d.summary {
+			t.toggleFoldAt(ln, tabW) // the summary row unfolds its block
+			return nil
+		}
+		if t.hasFolds(tabW) && gx == gw-1 {
+			t.toggleFoldAt(ln, tabW)
 			return nil
 		}
 		if btn == tea.MouseMiddle {

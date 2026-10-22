@@ -411,8 +411,12 @@ plan with per-item estimates, design decisions and open questions lives in
       folded blocks collapse to a `… N lines hidden` hint right under the
       start line, working with and without word wrap. Folding goes through
       chevrons in the gutter (▾/▸, one extra column only when the buffer is
-      foldable), a click anywhere on the summary row, Alt+C / Alt+O (vim
-      zc/zo), and "Edit: Fold All / Fold (cursor)" from the palette. Arrows
+      foldable, and that column is part of the reported gutter width so a
+      click lands on the cell under the pointer and the content stays aligned
+      with the gutter), a click anywhere on the summary row, Alt+C / Alt+O
+      (vim zc/zo), and "Edit: Toggle Fold" / "Edit: Toggle All Folds" from
+      the palette.
+      Arrows
       and PgUp/PgDn skip over hidden lines so the cursor can never enter a
       folded block; a cursor that ends up on a hidden line (undo, an external
       edit, a jump) forces the block open in `clampScroll`. Fold ranges are
