@@ -106,7 +106,7 @@ var helpEntries = []helpEntry{
 	{"Alt+C / Alt+O", "help.fold"},
 	{"", ""},
 	{"F1 or Ctrl+E", "help.toggle_help"},
-	{"Ctrl+Q / Ctrl+C", "help.quit"},
+	{"Ctrl+Q", "help.quit"},
 }
 
 func (m Model) finderExtraRows() int {

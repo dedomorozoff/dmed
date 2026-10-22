@@ -239,7 +239,8 @@ terminal) are clickable; hovering one shows a callout with its shortcut.
 | `F12` / `Ctrl+Click` | Go to definition (LSP) |
 | `Ctrl+P` / `F2` / double `Shift` | Command palette |
 | `F1` / `Ctrl+E` | Help overlay |
-| `Ctrl+Q` / `Ctrl+C` | Quit |
+| `Ctrl+Q` | Quit |
+| `Ctrl+C` | Copy the selection (never quits) |
 
 ## Configuration
 

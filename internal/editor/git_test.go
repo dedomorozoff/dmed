@@ -302,7 +302,7 @@ func TestQuitKeysWorkInAllModes(t *testing.T) {
 		t.Fatal("ctrl+q must quit while tree is focused")
 	}
 
-	// Git panel open (status mode): Ctrl+Q and Ctrl+C must quit
+	// Git panel open (status mode): Ctrl+Q must quit, Ctrl+C must not
 	m = New(f)
 	m.width, m.height = 80, 24
 	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
@@ -312,8 +312,12 @@ func TestQuitKeysWorkInAllModes(t *testing.T) {
 	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl}); cmd == nil {
 		t.Fatal("ctrl+q must quit while git panel is open")
 	}
-	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}); cmd == nil {
-		t.Fatal("ctrl+c must quit while git panel is open")
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if cmd != nil {
+		t.Fatal("ctrl+c must not quit while git panel is open")
+	}
+	if next.(Model).quitConfirm {
+		t.Fatal("ctrl+c must not ask to quit")
 	}
 
 	// Git commit mode: typing 'q'/'c' still enters the message; Ctrl+Q quits

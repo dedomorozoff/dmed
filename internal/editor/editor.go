@@ -1880,7 +1880,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.msg = m.t("msg.copied")
 			return nil
 		}
-		return m.requestQuit()
+		// Ctrl+C never quits: an editor that dies on the key a terminal
+		// uses to interrupt a program is a trap. Ctrl+Q is the way out.
+		m.msg = m.t("msg.quit_hint")
+		return nil
 	case "ctrl+w":
 		return m.closeActiveTab()
 	case "ctrl+x":

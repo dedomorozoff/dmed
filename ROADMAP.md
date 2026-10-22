@@ -461,6 +461,11 @@ plan with per-item estimates, design decisions and open questions lives in
       highlighting, and waits for the typing to settle before it starts.
       The line painting groups the characters of equal style into runs: a
       lipgloss render per character was thousands of calls per frame.
+- [x] **Ctrl+C never quits**: Ctrl+C copies the selection (as before) and
+      otherwise says how to leave the editor — an editor that dies on the key
+      a terminal uses to interrupt a program is a trap. `Ctrl+Q` is the way
+      out, and the interrupt signal is filtered out too (SIGTERM still stops
+      the editor).
 - [x] **Partial highlighting**: chroma hands out the tokens of a file in one
       go, so the colors of a large file only appeared when the whole file
       was tokenized. The tokenizer is now consumed as it goes and the pass
