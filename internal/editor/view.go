@@ -584,7 +584,7 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	active := paneIdx == m.activePane
 	rows := make([]string, h)
 
-	syntaxLines := t.getSyntaxLines(m.syn)
+	syntaxLines := t.getSyntaxLines()
 	diff := t.getDiff(m.repo)
 	diagPath, _ := filepath.Abs(t.path)
 	tabDiags := m.diags[diagPath]

@@ -186,6 +186,13 @@ Conventions:
 - Test seams must stay on the model, never in package globals: `aiFreeURLOverride`
   and `webSearchOverride` redirect the two network features to local servers so
   no unit test ever reaches the internet.
+- Syntax highlighting never runs on the UI thread: `internal/editor/syntax.go`
+  asks for a pass when the cached highlight no longer matches the buffer, the
+  pass runs in a background goroutine and the result arrives as a
+  `syntaxReadyMsg` through the `syntaxCh` channel (the waiter is armed in
+  `Init` and re-arms itself). A pass for text the buffer moved away from is
+  dropped; at most one pass per tab is in flight. Keep it that way — chroma
+  re-tokenizes the whole buffer and blocks for seconds on a large file.
 - The AI wizard loads the provider's model list when it opens and after every
   provider change (`testAIConnection` serves both the Test row and the list).
   `AITestResultMsg.Gen` stamps the request so a late reply from the previous

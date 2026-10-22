@@ -432,6 +432,14 @@ plan with per-item estimates, design decisions and open questions lives in
       folds) stop rebuilding the whole file string several times per
       keystroke. On a 20k-line file with everything folded this took the
       frame from 11 s to 17 ms.
+- [x] **Background syntax highlighting**: chroma re-tokenizes the whole
+      buffer, which on a large file costs seconds and hundreds of megabytes
+      of garbage. The highlighting now runs off the UI thread: the editor
+      asks for a pass when the cached highlight no longer matches the
+      buffer, the pass runs in the background and the result is swapped in
+      when it lands. A pass for text the buffer has moved away from is
+      dropped instead of painted. Typing never waits for the tokenizer any
+      more; the colors of a line that changed catch up a moment later.
 
 ## Infrastructure: CI and releases
 

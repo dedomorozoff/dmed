@@ -35,23 +35,24 @@ import (
 )
 
 type tab struct {
-	buf          *buffer.Buffer
-	path         string
-	syntaxCached []syntax.HighlightedLine
-	syntaxText   string
-	diffCached   vcs.FileDiff
-	diffText     string
-	blame        []vcs.BlameLine // git blame of HEAD lines; nil = not computed
-	lineEnding   string          // "lf" or "crlf"
-	encoding     string          // "utf-8", "utf-16le", "utf-16be", "latin-1"
-	wrapSegs     []wrapSeg
-	wrapW        int
-	wrapTabW     int
-	wrapText     string
-	foldCached   []foldRange // indentation fold blocks, cached like wrapSegs
-	foldText     string
-	foldTabW     int
-	folds        map[int]bool // folded block start lines; nil = nothing folded
+	buf           *buffer.Buffer
+	path          string
+	syntaxCached  []syntax.HighlightedLine
+	syntaxText    string
+	syntaxPending bool // a highlighting pass is scheduled or running
+	diffCached    vcs.FileDiff
+	diffText      string
+	blame         []vcs.BlameLine // git blame of HEAD lines; nil = not computed
+	lineEnding    string          // "lf" or "crlf"
+	encoding      string          // "utf-8", "utf-16le", "utf-16be", "latin-1"
+	wrapSegs      []wrapSeg
+	wrapW         int
+	wrapTabW      int
+	wrapText      string
+	foldCached    []foldRange // indentation fold blocks, cached like wrapSegs
+	foldText      string
+	foldTabW      int
+	folds         map[int]bool // folded block start lines; nil = nothing folded
 }
 
 // wrapSeg describes one screen row of a wrapped (or plain) buffer line: the
@@ -132,16 +133,10 @@ func detectFileInfo(data []byte) (lineEnding, encoding string) {
 	return
 }
 
-// getSyntaxLines returns the highlighted lines for the tab, cached against the
-// buffer text. h comes from the model so the theme is owned by the editor
-// rather than by package-level state in internal/syntax.
-func (t *tab) getSyntaxLines(h *syntax.Highlighter) []syntax.HighlightedLine {
-	text := t.buf.Text()
-	if t.syntaxCached != nil && t.syntaxText == text {
-		return t.syntaxCached
-	}
-	t.syntaxText = text
-	t.syntaxCached = h.HighlightBuffer(t.path, text)
+// getSyntaxLines returns the highlighted lines the tab currently knows about.
+// The highlighting itself runs in the background (see syntax.go): the UI
+// thread must never wait for a whole-file re-tokenisation.
+func (t *tab) getSyntaxLines() []syntax.HighlightedLine {
 	return t.syntaxCached
 }
 
@@ -455,6 +450,7 @@ type Model struct {
 	dapBreak              map[string]map[int]bool // abs path → line → true
 	dapBPVerif            map[string]map[int]bool // adapter-verified breakpoints
 	bookmarks             map[string]map[int]bool // abs path → line (1-based) → true
+	syntaxCh              chan syntaxReadyMsg     // finished background highlighting passes
 	dapCurPath            string
 	dapCurLine            int
 	dapBusy               bool
@@ -742,6 +738,7 @@ func New(paths ...string) Model {
 		dapBreak:              map[string]map[int]bool{},
 		dapBPVerif:            map[string]map[int]bool{},
 		bookmarks:             map[string]map[int]bool{},
+		syntaxCh:              make(chan syntaxReadyMsg, 8),
 		chatThreadPos:         -1,
 		chatPromptIdx:         -1,
 		todo:                  todo.New(),
@@ -1354,11 +1351,29 @@ func waitForFileEvent(ch <-chan string) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh), waitForDAPEvent(m.dapCh))
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh), waitForDAPEvent(m.dapCh), waitForSyntax(m.syntaxCh))
 }
 
+// Update handles a message and keeps the background highlighting in step
+// with the buffers: a stale highlight is recomputed off the UI thread, so
+// typing never waits for a whole-file re-tokenisation.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	mdl, cmd := m.update(msg)
+	mm, ok := mdl.(Model)
+	if !ok {
+		return mdl, cmd
+	}
+	mm.requestSyntax()
+	return mm, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case syntaxReadyMsg:
+		// A background pass landed: keep it if it still matches the buffer
+		// and arm the waiter for the next one.
+		m.applySyntax(msg)
+		return m, waitForSyntax(m.syntaxCh)
 	case FileChangedMsg:
 		path := msg.Path
 		// Hot-reload config when .dmed.conf changes
