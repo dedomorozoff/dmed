@@ -163,6 +163,31 @@ func TestViewRendersTreePanel(t *testing.T) {
 	}
 }
 
+func TestTreeLongNameIsNotRenderedBlank(t *testing.T) {
+	root := t.TempDir()
+	long := "very-long-file-name-here-go.txt"
+	writeTemp(t, root, long, "x\n")
+
+	m := New(root)
+	m.width, m.height = 100, 24
+	m.treeVisible = true
+	m.rebuildTree()
+
+	rows := m.treePanel(m.viewHeight())
+	var hit string
+	for _, r := range rows {
+		if strings.Contains(r, "…") {
+			hit = r
+		}
+	}
+	if hit == "" {
+		t.Fatal("the overlong tree entry did not render at all")
+	}
+	if !strings.Contains(hit, "…") {
+		t.Fatalf("an overlong name must be marked with an ellipsis, got %q", hit)
+	}
+}
+
 func TestTreeScrollKeepsSelectionVisible(t *testing.T) {
 	root := t.TempDir()
 	for i := 0; i < 50; i++ {

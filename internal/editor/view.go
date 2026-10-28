@@ -966,11 +966,19 @@ func (m Model) treePanel(h int) []string {
 			plainS := plain.String()
 			pad := inner - lipgloss.Width(line)
 			if pad < 0 {
-				// Truncate to the available width.
+				// An entry that does not fit must still show something: keep the
+				// runes that do fit and mark the cut with an ellipsis. Slicing
+				// plainS[:len+pad] outright can land at or before the start of
+				// the string for deeply nested names, which used to render the
+				// whole row blank instead of the name.
 				runes := []rune(plainS)
-				plainS = string(runes[:max(0, len(runes)+pad)])
+				keep := len(runes) + pad
+				if keep < 1 {
+					keep = 1
+				}
+				plainS = string(runes[:keep]) + "…"
 				line = plainS
-				pad = 0
+				pad = max(0, inner-lipgloss.Width(line))
 			}
 			fill := strings.Repeat(" ", pad)
 			if i == m.treeSel && m.treeFocus {

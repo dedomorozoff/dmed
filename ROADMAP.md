@@ -511,6 +511,13 @@ plan with per-item estimates, design decisions and open questions lives in
       chat still reachable via palette), scrolling a tall picture is the pane
       offset, the wheel scrolls it too. Reload (watcher) re-decodes and falls
       back to text with the reason if the file stopped being one.
+- [x] **Tree panel: overlong names render, not vanish**: an entry whose name
+      plus its tree prefix overflows the panel used to slice the plain string
+      with `len+pad`, which lands at or before the string start for deeply
+      nested names and rendered the row blank — nothing of the file was
+      visible. The render now keeps the runes that fit and marks the cut with
+      an ellipsis (`…`), so an overlong name shows a readable prefix instead
+      of empty space.
 
 ## Infrastructure: CI and releases
 
