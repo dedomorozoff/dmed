@@ -292,10 +292,18 @@ func (m Model) paneStatusBar(paneIdx int) string {
 	active := paneIdx == m.activePane
 
 	mark := fmt.Sprintf("[%d] %s", paneIdx+1, t.name(m.baseDir()))
-	lncol := m.t("status.lncol", t.buf.CurLine()+1, t.buf.Col()+1)
+	// A picture gets its caption instead of "Ln 1, Col 1" — a cursor position
+	// under a rendered image describes a document that is not there, and an
+	// encoding badge on a PNG is a question nobody asked.
+	var lncol string
+	if t.img != nil {
+		lncol = t.img.caption("")
+	} else {
+		lncol = m.t("status.lncol", t.buf.CurLine()+1, t.buf.Col()+1)
+	}
 	fileInfo := ""
 	langTag := ""
-	if t.path != "" {
+	if t.img == nil && t.path != "" {
 		endings := map[string]string{"lf": "LF", "crlf": "CRLF"}
 		fileInfo = " " + endings[t.lineEnding] + "/" + strings.ToUpper(t.encoding)
 		if lang := t.lang(); lang != "" {

@@ -155,6 +155,8 @@ var enCatalog = map[string]string{
 	"msg.cannot_save":         "cannot save: no file name",
 	"msg.new_file":            "new file: %s",
 	"msg.open_failed":         "open failed: %s",
+	"msg.image_failed":        "opened as text: %s",
+	"msg.image_readonly":      "this is a picture - there is nothing to edit or save",
 	"msg.watch_failed":        "cannot watch %s for external changes: %s",
 	"msg.created_folder":      "created folder: %s",
 	"msg.create_folder_fail":  "create folder failed: %s",
@@ -228,6 +230,7 @@ var enCatalog = map[string]string{
 	"msg.selected":            "selected: type to replace all occurrences",
 	"msg.no_definition":       "no definition found",
 	"fold.hidden":             "%d lines hidden",
+	"editor.image_failed":     "cannot draw this picture: %s",
 
 	// Project tree bottom hint bar (wrapped to the panel width at render time)
 	"tree.tip_new_file":  "new file · n",
@@ -437,6 +440,7 @@ var enCatalog = map[string]string{
 	"help.proj_search":       "find in project: search every file (Enter re-run; Tab toggles regex)",
 	"help.replace":           "search & replace (Tab switch, Enter rep, Ctrl+A all)",
 	"help.goto_line":         "go to line (N or N:C, +/- relative)",
+	"help.image_scroll":      "scroll a picture",
 	"help.word_wrap":         "toggle word wrap",
 	"help.blame":             "toggle inline git blame",
 	"help.git_panel":         "Git panel; Ctrl+B switches back to tree",
@@ -555,6 +559,8 @@ var ruCatalog = map[string]string{
 	"msg.cannot_save":         "нельзя сохранить: нет имени файла",
 	"msg.new_file":            "новый файл: %s",
 	"msg.open_failed":         "ошибка открытия: %s",
+	"msg.image_failed":        "открыл как текст: %s",
+	"msg.image_readonly":      "это изображение - редактировать и сохранять нечего",
 	"msg.watch_failed":        "не удалось следить за %s: внешние изменения не обнаружатся (%s)",
 	"msg.created_folder":      "создана папка: %s",
 	"msg.create_folder_fail":  "ошибка создания папки: %s",
@@ -628,6 +634,7 @@ var ruCatalog = map[string]string{
 	"msg.selected":            "выбрано: вводите, чтобы заменить все вхождения",
 	"msg.no_definition":       "определение не найдено",
 	"fold.hidden":             "скрыто строк: %d",
+	"editor.image_failed":     "не удаётся нарисовать изображение: %s",
 
 	// Project tree bottom hint bar (wrapped to the panel width at render time)
 	"tree.tip_new_file":  "новый файл · n",
@@ -838,6 +845,7 @@ var ruCatalog = map[string]string{
 	"help.proj_search":       "поиск в проекте: по всем файлам (Enter повторить; Tab включает regex)",
 	"help.replace":           "поиск и замена (Tab переключить, Enter заменить, Ctrl+A все)",
 	"help.goto_line":         "перейти к строке (N или N:C, +/- относительно)",
+	"help.image_scroll":      "прокрутка изображения",
 	"help.word_wrap":         "переключить перенос по словам",
 	"help.blame":             "показать inline git blame",
 	"help.git_panel":         "Git-панель; Ctrl+B возврат к дереву",

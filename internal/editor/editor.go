@@ -13,6 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/hinshun/vt10x"
 
 	"dmed/internal/agent"
@@ -63,6 +64,7 @@ type tab struct {
 	foldText       string
 	foldTabW       int
 	folds          map[int]bool // folded block start lines; nil = nothing folded
+	img            *imageView   // a picture tab: decoded frames, nil = plain text
 }
 
 // wrapSeg describes one screen row of a wrapped (or plain) buffer line: the
@@ -303,6 +305,13 @@ type Model struct {
 	width      int
 	height     int
 	msg        string
+
+	// imgPending keeps the animation-tick chain single: every message asks for
+	// a tick and without it each of them would start another chain.
+	imgPending bool
+	// profile is the terminal's colour answer (tea.ColorProfileMsg); the picture
+	// renderer must convert to it rather than ship escapes it cannot read.
+	profile colorprofile.Profile
 
 	promptOpen      bool
 	promptIn        []rune
@@ -923,7 +932,23 @@ func (m *Model) openPath(rawPath string) {
 		le, enc := detectFileInfo(data)
 		t.lineEnding = le
 		t.encoding = enc
-		t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
+		// A picture is opened as a picture, and only if the decoder agrees: a
+		// .png that is not one falls through to the text view below with the
+		// reason in the status line, because a tab full of mojibake and no
+		// explanation is worse than either. The extension is the cheap first
+		// question and the bytes are the real one, so a picture named without
+		// a suffix still opens as text — attempting a decode on every file the
+		// editor opens is the wrong question to ask of a log.
+		if looksLikeImage(path) {
+			if v, err2 := loadImage(data); err2 == nil {
+				t.img = v
+			} else {
+				m.msg = m.t("msg.image_failed", err2.Error())
+			}
+		}
+		if t.img == nil {
+			t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
+		}
 	}
 	if m.watcher != nil && path != "" {
 		if err := m.watcher.Watch(path); err != nil {
@@ -941,7 +966,8 @@ func (m *Model) openPath(rawPath string) {
 		m.plugins.Emit(m, "file_open")
 	}
 	// Hint when this file's language needs an LSP server that isn't installed.
-	if err == nil {
+	// A picture asks no LSP questions: the buffer behind it is empty by design.
+	if err == nil && t.img == nil {
 		if hint := m.lspMissingHintFor(t.path); hint != "" {
 			m.msg = m.t("msg.lsp_missing", hint)
 		}
@@ -1490,6 +1516,23 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			absT, _ := filepath.Abs(t.path)
 			if absT == path || t.path == path {
+				// A picture tab reloads as a picture — and falls back to text
+				// with the reason if the file stopped being one. Letting the
+				// bytes through to the buffer is the one place a re-decoded
+				// picture silently becomes mojibake again, and conflict mode
+				// is meaningless when the user cannot edit what is on screen.
+				if t.img != nil {
+					t.img = nil
+					if data, err := os.ReadFile(t.path); err == nil {
+						if v, err2 := loadImage(data); err2 == nil {
+							t.img = v
+						} else {
+							t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
+							m.msg = m.t("msg.image_failed", err2.Error())
+						}
+					}
+					break
+				}
 				if !t.buf.Dirty() {
 					if data, err := os.ReadFile(t.path); err == nil {
 						t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
@@ -1535,6 +1578,19 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.height = msg.Height
 		}
 		m.resizeTerminal()
+	case tea.ColorProfileMsg:
+		// The terminal's colour range: the picture renderer converts every
+		// pixel to it. A profile nobody delivered falls back to Detect at
+		// draw time.
+		m.profile = msg.Profile
+	case imgFrameMsg:
+		// The tick clears its own pending flag, then the tail either advances
+		// the animation (it is still on screen) or lets the chain die — and
+		// schedules the next frame either way.
+		m.imgPending = false
+		if m.animationDelay() > 0 {
+			m.advanceFrame()
+		}
 	case terminalOutputMsg:
 		if msg.gen != m.termGen {
 			return m, nil
@@ -1681,7 +1737,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateStatusHover(msg)
 	case tea.PasteMsg:
 		if text := msg.String(); text != "" {
-			if m.termOpen && m.termSession != nil {
+			if t := m.cur(); t != nil && t.img != nil {
+				// A paste arrives as one message carrying the whole text, so a
+				// check written for key presses alone would miss it entirely.
+				m.msg = m.t("msg.image_readonly")
+			} else if m.termOpen && m.termSession != nil {
 				_, _ = m.termSession.Write([]byte(strings.ReplaceAll(text, "\r\n", "\r")))
 			} else {
 				m.pasteInput(text)
@@ -1827,7 +1887,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyDapBPSyncs([]dapBPSyncMsg{msg})
 	}
 	m.clampScroll()
-	return m, nil
+	// The animation chain asks once per message: something may have brought a
+	// picture on screen, so the next frame gets scheduled from here — not from
+	// every branch of this switch.
+	return m, m.animCmd()
 }
 
 func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -2258,6 +2321,14 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.dismissGhost()
 		}
 	}
+	// A picture tab owns its keys first: nothing may reach the buffer, because a
+	// keypress that did would type into an empty document the user cannot see,
+	// and the first Ctrl+S would then replace the picture with what they typed.
+	// handleImageKey answers what is about the workspace (tab switching,
+	// scrolling, hunk jumps) and drops the rest.
+	if t := m.cur(); t != nil && t.img != nil {
+		return m.handleImageKey(s)
+	}
 	switch s {
 	case "ctrl+space":
 		return m.triggerCompletion(true)
@@ -2559,6 +2630,13 @@ func (m *Model) clampScroll() {
 	p := m.curPane()
 	t := m.cur()
 	if t == nil {
+		return
+	}
+	if t.img != nil {
+		// A picture's pane offset is its own scroll through the art, clamped by
+		// scrollImage. The buffer behind it is one empty line, and letting its
+		// geometry clamp here would pin every picture to the top of the pane
+		// on the next message that arrives.
 		return
 	}
 	h := m.paneViewHeight(m.activePane)

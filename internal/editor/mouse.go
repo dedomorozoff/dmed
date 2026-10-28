@@ -757,6 +757,12 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 		return m.wheelLeftRail(dir)
 	}
 
+	// A picture tab: the wheel scrolls the art with the pane's own offset.
+	if t := m.cur(); t != nil && t.img != nil {
+		m.scrollImage(dir)
+		return nil
+	}
+
 	// Buffer scroll.
 	p := m.curPane()
 	maxOff := len(m.dispRows(m.activePane, m.paneContentWidth(m.activePane))) - m.paneContentHeight(m.activePane)

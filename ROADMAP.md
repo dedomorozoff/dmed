@@ -497,6 +497,21 @@ plan with per-item estimates, design decisions and open questions lives in
       8-platform cross build stays green); user-supplied values move as bound
       parameters, all identifiers are double-quoted with "" escaping.
 
+- [x] **ASCII picture preview**: a `.png`/`.jpg`/`.jpeg`/`.gif`/`.bmp` file
+      (extension list + decoder as the real check) opens as a picture tab:
+      the buffer stays empty (the pane draws the picture, never loads the
+      bytes in), the pane renders half-blocks (`▀`, two pixels per cell, box
+      average with the aspect through the 2:1 cell) with the terminal's colour
+      profile via `colorprofile` (ANSI-256/ANSI/ASCII degradations) and the ASCII
+      ramp fallback for a colourless terminal, GIF frames animated through a
+      single tick chain (`imgFrameMsg` + `imgTick` + one pending flag, frame
+      counter in the caption, delay from the file's own numbers, clamped to
+      something watchable). Keys on a picture tab are the workspace's
+      (`Ctrl+S`/`Ctrl+C`/`Ctrl+V` refused as read-only with an explanation, `Ctrl+E`
+      chat still reachable via palette), scrolling a tall picture is the pane
+      offset, the wheel scrolls it too. Reload (watcher) re-decodes and falls
+      back to text with the reason if the file stopped being one.
+
 ## Infrastructure: CI and releases
 
 - [x] GitHub Actions CI (`ci.yml`): vet + unit tests + cross-build for 8 platforms

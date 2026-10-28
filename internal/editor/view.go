@@ -354,6 +354,11 @@ func (m Model) contextBottomRow() string {
 }
 
 func (m Model) gutterWidthForTab(t *tab) int {
+	// A picture has no lines to number: numbering every row "1" of the empty
+	// buffer behind it describes a document that does not exist.
+	if t.img != nil {
+		return 0
+	}
 	// Line number + one shared marker column (breakpoint ● / bookmark ◆).
 	w := len(strconv.Itoa(t.buf.LineCount())) + 3
 	if w < 6 {
@@ -588,6 +593,12 @@ func (m Model) composeSidebar(editor []string) []string {
 func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	p := &m.panes[paneIdx]
 	t := &m.tabs[p.tabIdx]
+	// A picture replaces the buffer rows entirely: no gutter, no syntax, no
+	// cursor — the art and a caption line. Everything assembled below starts
+	// from the buffer, which a picture tab keeps deliberately empty.
+	if t.img != nil {
+		return m.imageRows(t, h, totalW)
+	}
 	gw := m.gutterWidthForTab(t)
 	contentW := totalW - gw
 	if contentW < 0 {

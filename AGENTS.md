@@ -72,7 +72,9 @@ The code is split into focused internal packages:
   (Copilot-style ghost text), `agent_panel.go` (agent task queue UI),
   `git_panel.go`, `diffview.go`, `sqlite_view.go` (SQLite browser: table
   strip + paged row grid, immediate cell edits through `internal/sqlitedb`),
-  `plugins.go`, `plugin_store.go`, `lsp.go`,
+  `imageview.go` (picture tabs: ASCII/half-block render via
+  `internal/imgprev`, empty buffer + decoded frames, read-only key
+  handling, scroll, GIF tick chain), `plugins.go`, `plugin_store.go`, `lsp.go`,
   `ai_settings.go`, `transform.go`, `tools.go` (agent tools: READ/SEARCH/
   LIST_DIR/GLOB/RUN/REPLACE/EDIT), `tools_fs.go` (shared project walk plus the
   LIST_DIR/GLOB tools), `tools_core.go` (`toolEnv`: the TUI-free tool bodies
@@ -137,6 +139,11 @@ The code is split into focused internal packages:
   action); views and WITHOUT ROWID tables are read-only (no rowid address).
   A `.db`/`.sqlite` extension only earns the magic peek in `openPath`: the
   header decides.
+- `internal/imgprev/` — TUI-free ASCII terminal preview of images (no TUI
+  imports): decodes png/jpeg/gif, renders half-blocks (`▀`, two pixels per
+  cell, box-average samples, terminal colour profile via charmbracelet, ASCII
+  ramp fallback), frames an animation through `Animation.FrameDelay`, caps
+  frames at MaxFrames. Consumed by the editor's picture tabs.
 - `internal/plugin/` — gopher-lua plugin framework (`dmed.*` API); plugins
   load from `~/.dmed/plugins` and `<project>/.dmed/plugins` with hot-reload.
 - `internal/vcs/` — git via go-git (pure Go, no system git needed): status in
