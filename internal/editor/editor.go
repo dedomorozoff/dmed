@@ -28,6 +28,7 @@ import (
 	"dmed/internal/plugin"
 	"dmed/internal/ptyterm"
 	"dmed/internal/session"
+	"dmed/internal/sqlitedb"
 	"dmed/internal/syntax"
 	"dmed/internal/todo"
 	"dmed/internal/vcs"
@@ -443,6 +444,32 @@ type Model struct {
 	diffRightSyntax []syntax.HighlightedLine
 	diffOffsetY     int
 	diffOffsetX     int
+
+	// SQLite browser (fullscreen view opened for a .db file)
+	sqlOpen       bool
+	sqlPath       string
+	sqlDB         *sqlitedb.DB
+	sqlTables     []sqlitedb.Entry
+	sqlTbl        int // index into sqlTables
+	sqlCols       []sqlitedb.Column
+	sqlHasRid     bool // current table has rowid → editable
+	sqlRows       [][]sqlitedb.Value
+	sqlRids       []string
+	sqlTotal      int
+	sqlOff        int // first loaded row
+	sqlLim        int // page size
+	sqlRow        int // cursor row within the page
+	sqlCol        int // cursor column within sqlCols
+	sqlOffX       int // horizontal scroll in characters
+	sqlOrder      int // order-by column index, -1 = none
+	sqlDesc       bool
+	sqlFilter     string
+	sqlFilterIn   bool // filter input active on the bottom line
+	sqlFilterBuf  []rune
+	sqlEdit       *sqlCellEdit // active cell editor, nil otherwise
+	sqlSchema     bool         // DDL view shown instead of the grid
+	sqlSchemaOffY int
+	sqlSchemaText string
 
 	// Bottom terminal panel (real PTY + ANSI screen state)
 	termOpen     bool
@@ -875,6 +902,15 @@ func (m *Model) cur() *tab {
 
 func (m *Model) openPath(rawPath string) {
 	path := normalizePath(m.baseDir(), rawPath)
+	// A .db/.sqlite extension earns a peek at the file magic; a real SQLite
+	// file opens in the browser instead of a binary-garbage text tab.
+	if sqlitePathCandidate(path) {
+		if err := m.tryOpenSQLite(path); err == nil {
+			m.msg = m.t("msg.sqlite_opened", filepath.Base(path))
+			return
+		}
+		// Not (readable as) SQLite: fall through to the plain text open.
+	}
 	data, err := os.ReadFile(path)
 	t := tab{path: path, buf: buffer.New(), lineEnding: "lf", encoding: "utf-8"}
 	if err != nil {
@@ -2081,6 +2117,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.diffViewOpen {
 		return m.handleDiffView(msg)
+	}
+	if m.sqlOpen {
+		return m.handleSqlite(msg)
 	}
 	if m.agentReviewMode {
 		return m.handleAgentReview(msg)

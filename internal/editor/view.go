@@ -260,6 +260,7 @@ func (m Model) pluginStoreExtraRows() int {
 func (m Model) contextBottomExtraRows() int {
 	switch {
 	case m.diffViewOpen,
+		m.sqlOpen,
 		m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0,
 		m.aiReviewMode, m.agentReviewMode, m.chatReviewMode, m.agentPrompt,
 		m.askReq != nil,
@@ -284,6 +285,15 @@ func (m Model) viewHeight() int {
 func (m Model) contextBottomRow() string {
 	if m.diffViewOpen {
 		return m.diffBottom()
+	} else if m.sqlOpen {
+		switch {
+		case m.sqlEdit != nil:
+			return m.sqlEditLine()
+		case m.sqlFilterIn:
+			return m.sqlFilterLine()
+		default:
+			return m.sqlBottom()
+		}
 	} else if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0 {
 		return m.diffBottom()
 	} else if m.aiReviewMode {
@@ -368,6 +378,8 @@ func (m Model) View() tea.View {
 	rows = append(rows, m.tabBar())
 	if m.diffViewOpen {
 		rows = append(rows, m.diffViewRows(h)...)
+	} else if m.sqlOpen {
+		rows = append(rows, m.sqliteViewRows(h)...)
 	} else if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0 {
 		// Inline diff preview: show side-by-side diff of selected file/commit
 		// in the editor area while the git panel is open.

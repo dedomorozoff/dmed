@@ -203,7 +203,7 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 
 	// Full-screen modes replace the buffer; their content is scrolled with
 	// the wheel. A click places the cursor only in the buffer.
-	if m.diffViewOpen || m.aiReviewMode || m.agentReviewMode || m.chatReviewMode || m.conflictOpen || m.aiCfgOpen || m.helpOpen {
+	if m.diffViewOpen || m.sqlOpen || m.aiReviewMode || m.agentReviewMode || m.chatReviewMode || m.conflictOpen || m.aiCfgOpen || m.helpOpen {
 		return nil
 	}
 
@@ -703,6 +703,10 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 	case m.diffViewOpen:
 		m.diffOffsetY += dir
 		m.clampDiffScroll(h)
+		return nil
+	case m.sqlOpen:
+		// The wheel moves the rows one by one, like in the buffer.
+		m.sqliteMove(dir, 0)
 		return nil
 	case m.aiReviewMode:
 		m.aiReviewOffY += dir

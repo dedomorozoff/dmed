@@ -48,7 +48,7 @@ var statusIconDefs = []statusIcon{
 func (m Model) statusIconsVisible() bool {
 	switch {
 	case m.promptOpen, m.promptSave, m.quitConfirm,
-		m.searchOpen, m.gotoOpen, m.conflictOpen, m.diffViewOpen,
+		m.searchOpen, m.gotoOpen, m.conflictOpen, m.diffViewOpen, m.sqlOpen,
 		m.finderOpen, m.paletteOpen, m.langChooserOpen, m.pluginStoreOpen,
 		m.aiInlineOpen, m.aiInlineBusy, m.aiFixOpen, m.aiFixBusy,
 		m.aiReviewMode, m.aiFixReviewMode, m.agentReviewMode, m.chatReviewMode,

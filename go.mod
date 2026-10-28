@@ -12,6 +12,18 @@ require (
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	github.com/sergi/go-diff v1.4.0
 	github.com/yuin/gopher-lua v1.1.2
+	modernc.org/sqlite v1.61.0
+)
+
+require (
+	github.com/dustin/go-humanize v1.1.0 // indirect
+	github.com/google/uuid v1.6.0 // indirect
+	github.com/mattn/go-isatty v0.0.24 // indirect
+	github.com/ncruces/go-strftime v1.1.0 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	modernc.org/libc v1.79.0 // indirect
+	modernc.org/mathutil v1.7.1 // indirect
+	modernc.org/memory v1.12.1 // indirect
 )
 
 require (
@@ -48,7 +60,7 @@ require (
 	github.com/xo/terminfo v1.0.0 // indirect
 	golang.org/x/crypto v0.56.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )

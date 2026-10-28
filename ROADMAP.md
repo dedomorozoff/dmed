@@ -483,6 +483,19 @@ plan with per-item estimates, design decisions and open questions lives in
       The language tag of a file comes from a table instead of chroma:
       asking chroma for it initializes its lexer registry, which parses every
       embedded grammar and takes seconds.
+- [x] **SQLite browser**: opening a `.sqlite`/`.db` file (magic-header
+      verified, so a text-only `.db` stays a text tab) opens a full-screen
+      browser instead of a garbage binary tab: a table/view strip (Tab
+      cycles), paged row grid (50 rows), substring filter over every column
+      (`/`), sorting (`o` cycles the cursor column asc/desc/off), the CREATE
+      statement (`s`), and immediate editing with the rowid as the row
+      address — Enter edits the cell (empty value = NULL, values go in
+      bound), Ctrl+N inserts an all-defaults row, Ctrl+D deletes the cursor
+      row. Views and WITHOUT ROWID tables are shown read-only: without a
+      rowid there is no stable row address. The data layer is
+      `internal/sqlitedb` on modernc.org/sqlite (pure Go, no CGO — the
+      8-platform cross build stays green); user-supplied values move as bound
+      parameters, all identifiers are double-quoted with "" escaping.
 
 ## Infrastructure: CI and releases
 

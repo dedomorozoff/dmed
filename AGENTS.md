@@ -70,7 +70,9 @@ The code is split into focused internal packages:
   `completion.go`, `palette.go`, `session.go`, `terminal.go`, `chat.go`
   (AI chat), `ai_inline.go` (inline rewrite → diff review), `ghost.go`
   (Copilot-style ghost text), `agent_panel.go` (agent task queue UI),
-  `git_panel.go`, `diffview.go`, `plugins.go`, `plugin_store.go`, `lsp.go`,
+  `git_panel.go`, `diffview.go`, `sqlite_view.go` (SQLite browser: table
+  strip + paged row grid, immediate cell edits through `internal/sqlitedb`),
+  `plugins.go`, `plugin_store.go`, `lsp.go`,
   `ai_settings.go`, `transform.go`, `tools.go` (agent tools: READ/SEARCH/
   LIST_DIR/GLOB/RUN/REPLACE/EDIT), `tools_fs.go` (shared project walk plus the
   LIST_DIR/GLOB tools), `tools_core.go` (`toolEnv`: the TUI-free tool bodies
@@ -126,6 +128,15 @@ The code is split into focused internal packages:
   cannot catch this class of drift. Set `DMED_DBGP_DEBUG=1` to trace the wire.
 - `internal/lsp/` — JSON-RPC 2.0 LSP client over stdin/stdout (diagnostics,
   definition, didOpen/didChange); wired into autocompletion and the gutter.
+- `internal/sqlitedb/` — TUI-free SQLite data layer behind the browser
+  (`modernc.org/sqlite`, pure Go — no CGO, the 8-platform cross build must
+  stay green). `IsSQLite` checks the magic header (opening a candidate file
+  never creates one); identifiers are double-quoted with "" escaping and
+  user values always go in as bound parameters — never concatenate user text
+  into SQL. Editing is immediate (one parameterized UPDATE/INSERT/DELETE per
+  action); views and WITHOUT ROWID tables are read-only (no rowid address).
+  A `.db`/`.sqlite` extension only earns the magic peek in `openPath`: the
+  header decides.
 - `internal/plugin/` — gopher-lua plugin framework (`dmed.*` API); plugins
   load from `~/.dmed/plugins` and `<project>/.dmed/plugins` with hot-reload.
 - `internal/vcs/` — git via go-git (pure Go, no system git needed): status in
