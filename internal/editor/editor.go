@@ -100,12 +100,17 @@ func detectFileInfo(data []byte) (lineEnding, encoding string) {
 		data = data[2:]
 	}
 
-	// Detect CRLF
-	for _, b := range data {
-		if b == '\r' {
-			lineEnding = "crlf"
+	// Detect CRLF: only treat \r\n sequences as CRLF, not lone \r
+	// (old Mac line endings or stray carriage returns).
+	hasCRLF := false
+	for i := 0; i+1 < len(data); i++ {
+		if data[i] == '\r' && data[i+1] == '\n' {
+			hasCRLF = true
 			break
 		}
+	}
+	if hasCRLF {
+		lineEnding = "crlf"
 	}
 
 	// Check for non-ASCII bytes that aren't valid UTF-8
@@ -911,8 +916,17 @@ func (m *Model) cur() *tab {
 
 func (m *Model) openPath(rawPath string) {
 	path := normalizePath(m.baseDir(), rawPath)
-	// A .db/.sqlite extension earns a peek at the file magic; a real SQLite
-	// file opens in the browser instead of a binary-garbage text tab.
+	// Refuse to load obvious binary/non-text files as text buffers: rendering
+	// them as text corrupts the UI. Images and SQLite files have their own
+	// dedicated open paths below.
+	if !looksLikeImage(path) && !sqlitePathCandidate(path) {
+		if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
+			if !isPlausibleText(path) {
+				m.msg = "binary file not supported"
+				return
+			}
+		}
+	}
 	if sqlitePathCandidate(path) {
 		if err := m.tryOpenSQLite(path); err == nil {
 			m.msg = m.t("msg.sqlite_opened", filepath.Base(path))

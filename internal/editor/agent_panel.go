@@ -729,13 +729,16 @@ func (m *Model) reloadChangedBuffer(path string) {
 		full = filepath.Join(m.baseDir(), filepath.FromSlash(path))
 	}
 	absFull, _ := filepath.Abs(full)
+	absFull = filepath.Clean(absFull)
+	baseFull := filepath.Base(absFull)
 	for i := range m.tabs {
 		t := &m.tabs[i]
-		if t.path == "" || t.buf.Dirty() {
+		if t.path == "" || t.buf == nil || t.buf.Dirty() {
 			continue
 		}
 		absT, _ := filepath.Abs(t.path)
-		if absT != absFull {
+		absT = filepath.Clean(absT)
+		if absT != absFull && filepath.Base(absT) != baseFull {
 			continue
 		}
 		if data, err := os.ReadFile(full); err == nil {

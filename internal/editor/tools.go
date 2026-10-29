@@ -603,6 +603,10 @@ func isPlausibleText(path string) bool {
 	if n == 0 {
 		return true // empty file (e.g. freshly created) is fine to open
 	}
+	// UTF-16 (with BOM) is text even though it contains NUL bytes.
+	if n >= 2 && ((buf[0] == 0xFF && buf[1] == 0xFE) || (buf[0] == 0xFE && buf[1] == 0xFF)) {
+		return true
+	}
 	return bytes.IndexByte(buf[:n], 0) == -1
 }
 
