@@ -7,9 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbletea/v2"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"dmed/internal/buffer"
 	"dmed/internal/config"
 	"dmed/internal/i18n"
 	"dmed/internal/lsp"
@@ -23,7 +24,7 @@ var (
 	cursorStyle     = lipgloss.NewStyle().Reverse(true)
 	statusStyle     = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("250"))
 	statusHiStyle   = lipgloss.NewStyle().Background(lipgloss.Color("61")).Foreground(lipgloss.Color("255")).Bold(true)
-	langStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	langStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
 	hintStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	activePaneStyle = lipgloss.NewStyle().Background(lipgloss.Color("235"))
 	matchStyle      = lipgloss.NewStyle().Background(lipgloss.Color("214")).Foreground(lipgloss.Color("0"))
@@ -474,7 +475,11 @@ func (m Model) View() tea.View {
 	var v tea.View
 	v.SetContent(lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n")))
 	v.AltScreen = true
-	v.WindowTitle = "dmed — " + m.activeTab().name(m.baseDir())
+	if t := m.activeTab(); t != nil {
+		v.WindowTitle = "dmed — " + t.name(m.baseDir())
+	} else {
+		v.WindowTitle = "dmed"
+	}
 	// All-motion mode is required so hover (no button held) reaches the app;
 	// this powers the status-bar icon callout. Terminals without any-event
 	// tracking simply never deliver hover.
@@ -592,6 +597,13 @@ func (m Model) composeSidebar(editor []string) []string {
 
 func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	p := &m.panes[paneIdx]
+	if p.tabIdx < 0 || p.tabIdx >= len(m.tabs) {
+		rows := make([]string, h)
+		for i := range rows {
+			rows[i] = strings.Repeat(" ", totalW)
+		}
+		return rows
+	}
 	t := &m.tabs[p.tabIdx]
 	// A picture replaces the buffer rows entirely: no gutter, no syntax, no
 	// cursor — the art and a caption line. Everything assembled below starts
@@ -902,6 +914,11 @@ func (m Model) tabBar() string {
 	var parts []string
 	activeTab := m.activeTabIndex()
 	for i := range m.tabs {
+		// When a directory is opened, the placeholder untitled tab is not
+		// shown in the tab bar.
+		if m.root != "" && m.tabs[i].path == "" {
+			continue
+		}
 		name := m.tabLabel(i)
 		if i == activeTab {
 			parts = append(parts, statusHiStyle.Render(name))
@@ -2610,6 +2627,10 @@ func (m Model) palettePanel() []string {
 
 func (m Model) statusBar() string {
 	t := m.activeTab()
+	if t == nil {
+		// no open file (e.g. directory opened without an untitled tab)
+		t = &tab{buf: buffer.New(), lineEnding: "lf", encoding: "utf-8"}
+	}
 	// In a split each pane draws its own status line (name, Ln/Col, file
 	// format) at the bottom of its cell, so the app-wide line must not repeat
 	// that per-file state.
@@ -2634,14 +2655,14 @@ func (m Model) statusBar() string {
 	if !perPane && t.path != "" {
 		endings := map[string]string{"lf": "LF", "crlf": "CRLF"}
 		enc := strings.ToUpper(t.encoding)
-		fileInfo = endings[t.lineEnding] + " " + enc + " "
+		fileInfo = " " + endings[t.lineEnding] + " " + enc + " "
 		if lang := t.lang(); lang != "" {
-			langTag = lang + " "
+			langTag = lang
 		}
 	}
 	hint := ""
 	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gotoOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !m.projSearchOpen && !m.lspRenameOpen && !m.lspActionsOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
-		hint = m.t("status.f1_help")
+		hint = m.t("")
 		if m.layout != splitNone {
 			hint += m.t("status.f8_pane")
 		}
