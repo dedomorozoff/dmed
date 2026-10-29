@@ -108,6 +108,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "agent_tasks", title: "cmd.agent_tasks_t", desc: "cmd.agent_tasks_d", action: func(m *Model) tea.Cmd { return m.openAgentPanel() }},
 		{id: "agent_new", title: "cmd.agent_new_t", desc: "cmd.agent_new_d", action: func(m *Model) tea.Cmd { return m.startAgentTaskPrompt() }},
 		{id: "agent_undo", title: "cmd.agent_undo_t", desc: "cmd.agent_undo_d", action: func(m *Model) tea.Cmd { m.undoLastAgentApply(); return nil }},
+		{id: "version", kind: "version", title: "Version", desc: "Show dmed version", action: func(m *Model) tea.Cmd { m.msg = "dmed " + m.Version; return nil }},
 		{id: "settings", title: "cmd.settings_t", desc: "cmd.settings_d", action: func(m *Model) tea.Cmd { m.openConfigFile(); return nil }},
 		{id: "search_everywhere", title: "cmd.search_everywhere_t", desc: "cmd.search_everywhere_d", action: func(m *Model) tea.Cmd { m.startSearchEverywhere(); return nil }},
 		{id: "help", title: "cmd.help_t", desc: "cmd.help_d", action: func(m *Model) tea.Cmd { m.helpOpen = true; m.helpScroll = 0; return nil }},

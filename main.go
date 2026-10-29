@@ -29,6 +29,7 @@ func run() (err error) {
 	}()
 	model := editor.New(os.Args[1:]...)
 	model.ApplyTerminalCompat()
+	model.Version = version
 	// Ctrl+C must never kill the editor: in a terminal it arrives as a key
 	// (the editor copies the selection and says how to quit), and when the
 	// input is not a terminal it arrives as SIGINT, which bubbletea would

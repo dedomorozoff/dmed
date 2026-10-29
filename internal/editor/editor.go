@@ -310,6 +310,7 @@ type Model struct {
 	width      int
 	height     int
 	msg        string
+	Version    string
 
 	// imgPending keeps the animation-tick chain single: every message asks for
 	// a tick and without it each of them would start another chain.
