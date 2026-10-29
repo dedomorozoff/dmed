@@ -571,4 +571,3 @@ func TestRevertCommitNoAgentCommits(t *testing.T) {
 		t.Fatalf("no agent commits in history: h=%s err=%v", h, err)
 	}
 }
-
