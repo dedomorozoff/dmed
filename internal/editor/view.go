@@ -475,6 +475,7 @@ func (m Model) View() tea.View {
 	var v tea.View
 	v.SetContent(lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n")))
 	v.AltScreen = true
+	v.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
 	if t := m.activeTab(); t != nil {
 		v.WindowTitle = "dmed — " + t.name(m.baseDir())
 	} else {
