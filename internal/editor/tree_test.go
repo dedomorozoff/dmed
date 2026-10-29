@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func mkProj(t *testing.T) string {
@@ -163,6 +164,63 @@ func TestViewRendersTreePanel(t *testing.T) {
 	}
 }
 
+// deepTreeModel builds an editor with a tree panel over root containing
+// root/d1/d2/d3/d4/<name>, with every directory level expanded.
+func deepTreeModel(t *testing.T, root, name string) Model {
+	t.Helper()
+	dir := filepath.Join(root, "d1", "d2", "d3", "d4")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTemp(t, dir, name, "x\n")
+
+	m := New(root)
+	m.width, m.height = 100, 24
+	m.treeVisible = true
+	for _, d := range []string{"d1", filepath.Join("d1", "d2"), filepath.Join("d1", "d2", "d3"), filepath.Join("d1", "d2", "d3", "d4")} {
+		m.expanded[filepath.ToSlash(d)] = true
+	}
+	m.rebuildTree()
+	return m
+}
+
+// TestTreeDeepNestingKeepsNameVisible checks that a nested entry keeps its
+// whole file name: deep ancestor gauges collapse before the name is touched.
+func TestTreeDeepNestingKeepsNameVisible(t *testing.T) {
+	m := deepTreeModel(t, t.TempDir(), "deep.txt")
+
+	rows := m.treePanel(m.viewHeight())
+	full := strings.Join(rows, "\n")
+	if !strings.Contains(full, "deep.txt") {
+		t.Fatalf("deep entry must keep its full name, got:\n%s", full)
+	}
+	want := m.cfg.UI.TreeWidth
+	for i, r := range rows {
+		if w := lipgloss.Width(r); w != want {
+			t.Fatalf("tree row %d width = %d, want %d", i, w, want)
+		}
+	}
+}
+
+// TestTreeDeepNestingKeepsNameTail checks that when even the collapsed gauge
+// leaves no room, the name is cut from the head but keeps the tail (with the
+// extension) instead of hiding the file entirely.
+func TestTreeDeepNestingKeepsNameTail(t *testing.T) {
+	m := deepTreeModel(t, t.TempDir(), "my_project_module_very_long_section_kept_tail.txt")
+
+	rows := m.treePanel(m.viewHeight())
+	full := strings.Join(rows, "\n")
+	if !strings.Contains(full, "tail.txt") {
+		t.Fatalf("deep long name must keep its tail, got:\n%s", full)
+	}
+	want := m.cfg.UI.TreeWidth
+	for i, r := range rows {
+		if w := lipgloss.Width(r); w != want {
+			t.Fatalf("tree row %d width = %d, want %d", i, w, want)
+		}
+	}
+}
+
 func TestTreeLongNameIsNotRenderedBlank(t *testing.T) {
 	root := t.TempDir()
 	long := "very-long-file-name-here-go.txt"
@@ -185,6 +243,23 @@ func TestTreeLongNameIsNotRenderedBlank(t *testing.T) {
 	}
 	if !strings.Contains(hit, "…") {
 		t.Fatalf("an overlong name must be marked with an ellipsis, got %q", hit)
+	}
+}
+
+func TestTreeOverlongNameKeepsRowWidth(t *testing.T) {
+	root := t.TempDir()
+	writeTemp(t, root, "a-very-long-file-name-that-will-not-fit.txt", "x\n")
+
+	m := New(root)
+	m.width, m.height = 100, 24
+	m.treeVisible = true
+	m.rebuildTree()
+
+	want := m.cfg.UI.TreeWidth
+	for i, r := range m.treePanel(m.viewHeight()) {
+		if w := lipgloss.Width(r); w != want {
+			t.Fatalf("tree row %d width = %d, want %d (a wider row shifts the editor gutter)", i, w, want)
+		}
 	}
 }
 

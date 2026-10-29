@@ -511,13 +511,19 @@ plan with per-item estimates, design decisions and open questions lives in
       chat still reachable via palette), scrolling a tall picture is the pane
       offset, the wheel scrolls it too. Reload (watcher) re-decodes and falls
       back to text with the reason if the file stopped being one.
-- [x] **Tree panel: overlong names render, not vanish**: an entry whose name
-      plus its tree prefix overflows the panel used to slice the plain string
-      with `len+pad`, which lands at or before the string start for deeply
-      nested names and rendered the row blank — nothing of the file was
-      visible. The render now keeps the runes that fit and marks the cut with
-      an ellipsis (`…`), so an overlong name shows a readable prefix instead
-      of empty space.
+- [x] **Tree panel: names survive the width**. Three related failures, one
+      cause: entries were composed without a true width budget. An entry whose
+      name plus its tree prefix overflowed the panel used to slice the plain
+      string with `len+pad`, which lands at or before the string start for
+      deeply nested names and rendered the row blank; the same overflowing
+      rows were one cell wider than the panel, which shifted the whole editor
+      row (line numbers included) one character right on those lines only; and
+      deep ancestors ate the name outright (`│   │   ├── ` costs 4 cells per
+      level). The render now composes each row to the panel width: the
+      ancestor gauge collapses to an ellipsis before the final connector so a
+      nested file keeps its full name, only a name too long for whatever is
+      left is cut — from the head, keeping the readable tail (extension
+      included) — and no row ever grows past the panel width.
 
 ## Infrastructure: CI and releases
 

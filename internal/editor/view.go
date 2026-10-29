@@ -930,10 +930,40 @@ func (m Model) treePanel(h int) []string {
 		i := off + row
 		var cell string
 		if i < len(m.treeRows) {
-			e := m.treeRows[i]
-			var plain strings.Builder
-			var styled strings.Builder
-			if e.depth > 1 {
+			cell = m.treeEntryRow(m.treeRows[i], i == m.treeSel)
+		} else {
+			cell = strings.Repeat(" ", inner)
+		}
+		rows = append(rows, cell+" ")
+	}
+	return rows
+}
+
+// treeEntryRow renders one tree entry within the panel width (ready for the
+// trailing cell the panel appends to every row). Deep nesting must not eat the
+// file name: when the full ancestor gauge does not leave room for it, the
+// gauge collapses to an ellipsis before the connector, and only when even the
+// collapsed gauge is too wide is the name itself cut — from the head, so the
+// tail (with the extension) stays visible.
+func (m Model) treeEntryRow(e treeEntry, selected bool) string {
+	inner := m.cfg.UI.TreeWidth - 1
+
+	name := e.name
+	style := treeFileStyle
+	iconP, iconS := "", ""
+	if e.isDir {
+		iconP = m.g.expand + " "
+		if m.expanded[e.rel] {
+			iconP = m.g.collapse + " "
+		}
+		iconS = treeIconStyle.Render(iconP)
+		style = treeDirStyle
+	}
+
+	gauge := func(full bool) (string, string) {
+		var plain, styled strings.Builder
+		if e.depth > 1 {
+			if full {
 				for _, isLast := range e.anc {
 					seg := "    "
 					if !isLast {
@@ -942,58 +972,77 @@ func (m Model) treePanel(h int) []string {
 					plain.WriteString(seg)
 					styled.WriteString(treeConnStyle.Render(seg))
 				}
+			} else {
+				// Collapsed ancestors: an ellipsis takes the place of the
+				// verticals, the final connector keeps its usual width so
+				// siblings stay aligned.
+				seg := m.g.ellipsis + "  "
+				plain.WriteString(seg)
+				styled.WriteString(treeConnStyle.Render(seg))
+			}
+			seg := m.g.tee + m.g.hline + m.g.hline + " "
+			if e.last {
+				seg = m.g.corner + m.g.hline + m.g.hline + " "
+			}
+			plain.WriteString(seg)
+			styled.WriteString(treeConnStyle.Render(seg))
+		}
+		return plain.String(), styled.String()
+	}
+
+	fits := func(gaugeP string) bool {
+		return inner-lipgloss.Width(gaugeP)-lipgloss.Width(iconP)-lipgloss.Width(name) >= 0
+	}
+	gaugeP, gaugeS := gauge(true)
+	if !fits(gaugeP) {
+		gaugeP, gaugeS = gauge(false)
+	}
+	if !fits(gaugeP) {
+		// Last resort: strip the head of the name, keeping the tail.
+		if avail := inner - lipgloss.Width(gaugeP) - lipgloss.Width(iconP) - 1; avail > 0 {
+			name = m.fitStatusTail(name, avail)
+		} else {
+			// Nothing left but the connector itself: drop the collapsed
+			// ancestors entirely rather than the whole name.
+			gaugeP = ""
+			gaugeS = ""
+			if e.depth > 1 {
 				seg := m.g.tee + m.g.hline + m.g.hline + " "
 				if e.last {
 					seg = m.g.corner + m.g.hline + m.g.hline + " "
 				}
-				plain.WriteString(seg)
-				styled.WriteString(treeConnStyle.Render(seg))
+				gaugeP = seg
+				gaugeS = treeConnStyle.Render(seg)
 			}
-			if e.isDir {
-				icon := m.g.expand + " "
-				if m.expanded[e.rel] {
-					icon = m.g.collapse + " "
+			if !fits(gaugeP) {
+				if avail := inner - lipgloss.Width(gaugeP) - lipgloss.Width(iconP) - 1; avail > 0 {
+					name = m.fitStatusTail(name, avail)
 				}
-				plain.WriteString(icon)
-				styled.WriteString(treeIconStyle.Render(icon))
-				plain.WriteString(e.name)
-				styled.WriteString(treeDirStyle.Render(e.name))
-			} else {
-				plain.WriteString(e.name)
-				styled.WriteString(treeFileStyle.Render(e.name))
 			}
-			line := styled.String()
-			plainS := plain.String()
-			pad := inner - lipgloss.Width(line)
-			if pad < 0 {
-				// An entry that does not fit must still show something: keep the
-				// runes that do fit and mark the cut with an ellipsis. Slicing
-				// plainS[:len+pad] outright can land at or before the start of
-				// the string for deeply nested names, which used to render the
-				// whole row blank instead of the name.
-				runes := []rune(plainS)
-				keep := len(runes) + pad
-				if keep < 1 {
-					keep = 1
-				}
-				plainS = string(runes[:keep]) + "…"
-				line = plainS
-				pad = max(0, inner-lipgloss.Width(line))
-			}
-			fill := strings.Repeat(" ", pad)
-			if i == m.treeSel && m.treeFocus {
-				cell = statusHiStyle.Render(plainS + fill)
-			} else if i == m.treeSel {
-				cell = statusStyle.Render(plainS + fill)
-			} else {
-				cell = line + fill
-			}
-		} else {
-			cell = strings.Repeat(" ", inner)
 		}
-		rows = append(rows, cell+" ")
 	}
-	return rows
+
+	plainS := gaugeP + iconP + name
+	line := gaugeS + iconS + style.Render(name)
+	pad := inner - lipgloss.Width(line)
+	if pad < 0 {
+		// Safety net (e.g. names with double-width runes where rune counts
+		// are not cell widths): any row wider than the panel shifts the whole
+		// editor gutter, so it falls back to a plain trimmed row.
+		rs := []rune(plainS)
+		keep := min(max(inner-1, 1), len(rs))
+		plainS = string(rs[:keep]) + m.g.ellipsis
+		line = plainS
+		pad = max(0, inner-lipgloss.Width(line))
+	}
+	fill := strings.Repeat(" ", pad)
+	if selected && m.treeFocus {
+		return statusHiStyle.Render(plainS + fill)
+	}
+	if selected {
+		return statusStyle.Render(plainS + fill)
+	}
+	return line + fill
 }
 
 func padTo(s string, w int) string {
