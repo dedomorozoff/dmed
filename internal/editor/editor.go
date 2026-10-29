@@ -1975,7 +1975,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// project files and settings in one list.
 	// Bare modifier presses are only reported by terminals with the Kitty
 	// keyboard protocol / Windows Console API; elsewhere this is a no-op.
-	if !msg.IsRepeat && (msg.Code == tea.KeyLeftShift || msg.Code == tea.KeyRightShift) {
+	if !msg.IsRepeat && (msg.Code == tea.KeyLeftShift || msg.Code == tea.KeyRightShift || (msg.Code == 0 && msg.Text == "" && msg.Mod == tea.ModShift)) {
 		now := time.Now()
 		if now.Sub(m.lastShiftTime) <= doubleShiftInterval && !m.lastShiftTime.IsZero() {
 			m.lastShiftTime = time.Time{}
