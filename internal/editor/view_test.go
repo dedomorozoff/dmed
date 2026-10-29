@@ -66,3 +66,28 @@ func TestDiagMarkersRenderedInGutter(t *testing.T) {
 		t.Log("first line has no marker as expected")
 	}
 }
+
+func TestBracketPairHighlighting(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "b.go", "func foo() {\n\treturn\n}\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	// Cursor at '{' on line 0, col 11
+	m.cur().buf.SetCursor(0, 11)
+	m.View() // triggers renderPaneRows
+	tab := m.cur()
+	if !tab.hasDelimMatch {
+		t.Fatal("expected hasDelimMatch to be true for '{'")
+	}
+	if tab.delimMatch.ToLine != 2 || tab.delimMatch.ToCol != 0 {
+		t.Fatalf("expected match to (2, 0), got (%d, %d)", tab.delimMatch.ToLine, tab.delimMatch.ToCol)
+	}
+
+	// Move cursor to non-bracket 'f' at col 0
+	m.cur().buf.SetCursor(0, 0)
+	m.View()
+	if tab.hasDelimMatch {
+		t.Fatal("expected hasDelimMatch to be false on 'f'")
+	}
+}

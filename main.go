@@ -30,6 +30,12 @@ func run() (err error) {
 	model := editor.New(os.Args[1:]...)
 	model.ApplyTerminalCompat()
 	model.Version = version
+
+	// Enable Win32 input mode on terminals that support it (Windows Terminal / ConPTY),
+	// allowing bare modifier keys (like double Shift) to be reported as escape codes.
+	// Terminals that do not support private mode 9001 silently ignore it.
+	os.Stdout.WriteString("\x1b[?9001h")
+	defer os.Stdout.WriteString("\x1b[?9001l")
 	// Ctrl+C must never kill the editor: in a terminal it arrives as a key
 	// (the editor copies the selection and says how to quit), and when the
 	// input is not a terminal it arrives as SIGINT, which bubbletea would

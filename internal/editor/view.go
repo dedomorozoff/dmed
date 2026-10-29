@@ -19,36 +19,37 @@ import (
 )
 
 var (
-	gutterStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	curGutterStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
-	cursorStyle     = lipgloss.NewStyle().Reverse(true)
-	statusStyle     = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("250"))
-	statusHiStyle   = lipgloss.NewStyle().Background(lipgloss.Color("61")).Foreground(lipgloss.Color("255")).Bold(true)
-	langStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
-	hintStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	activePaneStyle = lipgloss.NewStyle().Background(lipgloss.Color("235"))
-	matchStyle      = lipgloss.NewStyle().Background(lipgloss.Color("214")).Foreground(lipgloss.Color("0"))
-	curMatchStyle   = lipgloss.NewStyle().Background(lipgloss.Color("226")).Foreground(lipgloss.Color("0")).Bold(true)
-	gitAddStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
-	gitModStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-	gitDelStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
-	diagErrStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
-	diagWarnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-	diagInfoStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
-	bpStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
-	bpDimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	bmStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
-	stopStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-	dapLineStyle    = lipgloss.NewStyle().Background(lipgloss.Color("236"))
-	okTestStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
-	errTestStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	diffAddBg       = lipgloss.NewStyle().Background(lipgloss.Color("22"))
-	diffDelBg       = lipgloss.NewStyle().Background(lipgloss.Color("52"))
-	diffModBg       = lipgloss.NewStyle().Background(lipgloss.Color("58"))
-	selectionStyle  = lipgloss.NewStyle().Background(lipgloss.Color("60")).Foreground(lipgloss.Color("255"))
-	ghostStyle      = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("243"))
-	blameStyle      = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("244"))
-	foldStyle       = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("110"))
+	gutterStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	curGutterStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	cursorStyle       = lipgloss.NewStyle().Reverse(true)
+	statusStyle       = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("250"))
+	statusHiStyle     = lipgloss.NewStyle().Background(lipgloss.Color("61")).Foreground(lipgloss.Color("255")).Bold(true)
+	langStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
+	hintStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	activePaneStyle   = lipgloss.NewStyle().Background(lipgloss.Color("235"))
+	matchStyle        = lipgloss.NewStyle().Background(lipgloss.Color("214")).Foreground(lipgloss.Color("0"))
+	curMatchStyle     = lipgloss.NewStyle().Background(lipgloss.Color("226")).Foreground(lipgloss.Color("0")).Bold(true)
+	gitAddStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
+	gitModStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	gitDelStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	diagErrStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	diagWarnStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	diagInfoStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
+	bpStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	bpDimStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	bmStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
+	stopStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	dapLineStyle      = lipgloss.NewStyle().Background(lipgloss.Color("236"))
+	okTestStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
+	errTestStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	diffAddBg         = lipgloss.NewStyle().Background(lipgloss.Color("22"))
+	diffDelBg         = lipgloss.NewStyle().Background(lipgloss.Color("52"))
+	diffModBg         = lipgloss.NewStyle().Background(lipgloss.Color("58"))
+	selectionStyle    = lipgloss.NewStyle().Background(lipgloss.Color("60")).Foreground(lipgloss.Color("255"))
+	ghostStyle        = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("243"))
+	blameStyle        = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("244"))
+	foldStyle         = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("110"))
+	bracketMatchStyle = lipgloss.NewStyle().Background(lipgloss.Color("239")).Foreground(lipgloss.Color("226")).Bold(true).Underline(true)
 )
 
 type helpEntry struct {
@@ -476,6 +477,7 @@ func (m Model) View() tea.View {
 	v.SetContent(lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n")))
 	v.AltScreen = true
 	v.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
+	v.KeyboardEnhancements.ReportEventTypes = true
 	if t := m.activeTab(); t != nil {
 		v.WindowTitle = "dmed — " + t.name(m.baseDir())
 	} else {
@@ -620,6 +622,12 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	cur := t.buf.CurLine()
 	active := paneIdx == m.activePane
 	rows := make([]string, h)
+
+	if active && !t.buf.HasSelection() {
+		t.delimMatch, t.hasDelimMatch = t.buf.MatchDelimiter(t.buf.CurLine(), t.buf.Col())
+	} else {
+		t.hasDelimMatch = false
+	}
 
 	syntaxLines := t.getSyntaxLines()
 	diff := t.getDiff()
@@ -2264,9 +2272,10 @@ func (m Model) folderPanel() []string {
 // Run keys for the line painting. The syntax tokens are non-negative, the
 // overrides use negative keys, so a run of equal key always has one style.
 const (
-	matchStyleKey     = -1
-	selectionStyleKey = -2
-	cursorStyleKey    = -3
+	matchStyleKey        = -1
+	selectionStyleKey    = -2
+	cursorStyleKey       = -3
+	bracketMatchStyleKey = -4
 )
 
 // styleKey returns the run key of an expanded position: the syntax token of
@@ -2424,6 +2433,16 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 		}
 	}
 
+	var bracketCols []int
+	if activePane && t.hasDelimMatch {
+		if ln == t.delimMatch.FromLine && t.delimMatch.FromCol < len(rawToExp) {
+			bracketCols = append(bracketCols, rawToExp[t.delimMatch.FromCol])
+		}
+		if ln == t.delimMatch.ToLine && t.delimMatch.ToCol < len(rawToExp) {
+			bracketCols = append(bracketCols, rawToExp[t.delimMatch.ToCol])
+		}
+	}
+
 	// Paint the line in runs of equal style: a lipgloss render per character
 	// costs thousands of calls per frame, a render per run a handful.
 	var out strings.Builder
@@ -2446,6 +2465,16 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 			}
 		}
 
+		isBracket := false
+		for _, bcol := range bracketCols {
+			if i == bcol {
+				st = bracketMatchStyle
+				key = bracketMatchStyleKey
+				isBracket = true
+				break
+			}
+		}
+
 		if selStart >= 0 && i >= selStart && i < selEnd {
 			st = selectionStyle
 			key = selectionStyleKey
@@ -2461,7 +2490,11 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 
 		for _, cc := range carets {
 			if i == cc {
-				st = cursorStyle
+				if isBracket {
+					st = bracketMatchStyle.Reverse(true)
+				} else {
+					st = cursorStyle
+				}
 				key = cursorStyleKey
 				break
 			}

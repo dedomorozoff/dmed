@@ -65,6 +65,8 @@ type tab struct {
 	foldTabW       int
 	folds          map[int]bool // folded block start lines; nil = nothing folded
 	img            *imageView   // a picture tab: decoded frames, nil = plain text
+	delimMatch     buffer.DelimiterMatch
+	hasDelimMatch  bool
 }
 
 // wrapSeg describes one screen row of a wrapped (or plain) buffer line: the
@@ -791,6 +793,21 @@ func controlByteKey(r rune, mod tea.KeyMod) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeySpace, Mod: mod | tea.ModCtrl}
 	}
 	return tea.KeyPressMsg{Code: r + 96, Mod: mod | tea.ModCtrl}
+}
+
+// isBareShift reports whether a key press event represents a bare Shift key
+// (without other character codes).
+func isBareShift(msg tea.KeyPressMsg, s string) bool {
+	if msg.Code == tea.KeyLeftShift || msg.Code == tea.KeyRightShift {
+		return true
+	}
+	if s == "leftshift" || s == "rightshift" || s == "shift" {
+		return true
+	}
+	if msg.Code == 0 && msg.Text == "" && msg.Mod == tea.ModShift {
+		return true
+	}
+	return false
 }
 
 func New(paths ...string) Model {
@@ -1924,7 +1941,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			msg = controlByteKey(r, msg.Mod)
 		}
 	} else if msg.Text == "" && msg.Code < 32 && !c0Special(msg.Code) {
-		msg = controlByteKey(msg.Code, msg.Mod)
+		if !(msg.Code == 0 && msg.Mod == tea.ModShift) {
+			msg = controlByteKey(msg.Code, msg.Mod)
+		}
 	}
 	// Normalize Russian ЙЦУКЕН → English QWERTY for layout-independent keys.
 	// Use []rune so multi-byte UTF-8 (Cyrillic) inputs don't leave trailing NULs.
@@ -1974,17 +1993,22 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// JetBrains-style double Shift opens "search everywhere": commands,
 	// project files and settings in one list.
 	// Bare modifier presses are only reported by terminals with the Kitty
-	// keyboard protocol / Windows Console API; elsewhere this is a no-op.
-	if !msg.IsRepeat && (msg.Code == tea.KeyLeftShift || msg.Code == tea.KeyRightShift || (msg.Code == 0 && msg.Text == "" && msg.Mod == tea.ModShift)) {
-		now := time.Now()
-		if now.Sub(m.lastShiftTime) <= doubleShiftInterval && !m.lastShiftTime.IsZero() {
-			m.lastShiftTime = time.Time{}
-			m.startSearchEverywhere()
-			return nil
+	// keyboard protocol or Win32 Input Mode; elsewhere this is a no-op.
+	if isBareShift(msg, s) {
+		if !msg.IsRepeat {
+			now := time.Now()
+			if now.Sub(m.lastShiftTime) <= doubleShiftInterval && !m.lastShiftTime.IsZero() {
+				m.lastShiftTime = time.Time{}
+				m.startSearchEverywhere()
+				return nil
+			}
+			m.lastShiftTime = now
 		}
-		m.lastShiftTime = now
 		return nil
 	}
+	// Any non-Shift key resets double-shift detection so chords or typing
+	// between Shift taps don't accidentally trigger the palette.
+	m.lastShiftTime = time.Time{}
 
 	// While the completion popup is open, navigation keys control it.
 	if m.complOpen && m.handleCompletionKey(s) {

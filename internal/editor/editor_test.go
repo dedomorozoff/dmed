@@ -849,3 +849,46 @@ func TestDoubleShiftIgnoresHeldRepeat(t *testing.T) {
 		t.Fatal("double shift after held repeat must open the palette")
 	}
 }
+
+func TestDoubleShiftInterruptedByOtherKey(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "a.txt", "hi\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	// First shift tap
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyLeftShift})
+	if m.paletteOpen {
+		t.Fatal("single shift must not open the palette")
+	}
+
+	// Another key in between (e.g. typing or arrow) must reset the double-shift sequence
+	m = press(m, tea.KeyPressMsg{Code: 'a', Text: "a"})
+	if m.paletteOpen {
+		t.Fatal("letter must not open the palette")
+	}
+
+	// Shift after another key must not trigger the palette (treated as new first tap)
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyRightShift})
+	if m.paletteOpen {
+		t.Fatal("shift after another key must not trigger double-shift palette")
+	}
+}
+
+func TestDoubleShiftModShiftEvent(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "a.txt", "hi\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	// Bare Shift event delivered as Code: 0, Mod: ModShift
+	m = press(m, tea.KeyPressMsg{Code: 0, Text: "", Mod: tea.ModShift})
+	if m.paletteOpen {
+		t.Fatal("single bare shift event must not open palette")
+	}
+
+	m = press(m, tea.KeyPressMsg{Code: 0, Text: "", Mod: tea.ModShift})
+	if !m.paletteOpen {
+		t.Fatal("double bare shift event must open palette")
+	}
+}
