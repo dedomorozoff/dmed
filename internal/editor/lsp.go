@@ -487,6 +487,58 @@ func (m *Model) applyWorkspaceEdit(edit *lsp.WorkspaceEdit) int {
 	return n
 }
 
+// lspFormatMsg carries the async full-document format result.
+type lspFormatMsg struct {
+	edit *lsp.WorkspaceEdit
+	err  error
+}
+
+// lspFormatCmd asks the server for a whole-document format of the current
+// buffer (textDocument/formatting): layout is the server's job - gofmt via
+// gopls, prettier via the TypeScript server, and so on. The buffer stays
+// dirty: the layout lands in the buffer, saving stays with the human.
+func (m *Model) lspFormatCmd() tea.Cmd {
+	t := m.cur()
+	if t == nil || t.path == "" {
+		return nil
+	}
+	cmd, _, lang := m.lspResolve(strings.ToLower(filepath.Ext(t.path)))
+	if cmd == "" {
+		m.msg = m.t("msg.no_lsp")
+		return nil
+	}
+	if m.lspClient == nil {
+		m.ensureLSP()
+	}
+	if m.lspClient == nil {
+		m.msg = m.t("msg.no_lsp")
+		return nil
+	}
+	c := m.lspClient
+	path := t.path
+	text := t.buf.Text()
+	return func() tea.Msg {
+		_ = c.EnsureOpened(path, lang, text)
+		edits, err := c.Format(path)
+		return lspFormatMsg{edit: edits, err: err}
+	}
+}
+
+// handleLspFormatMsg applies the format edit to the buffer (or every file of a
+// multi-file reply) and reports how much changed.
+func (m *Model) handleLspFormatMsg(msg lspFormatMsg) {
+	if msg.err != nil {
+		m.msg = m.t("msg.lsp_format_err", msg.err.Error())
+		return
+	}
+	n := m.applyWorkspaceEdit(msg.edit)
+	if n == 0 {
+		m.msg = m.t("msg.lsp_format_clean")
+		return
+	}
+	m.msg = m.t("msg.lsp_format_ok", n)
+}
+
 // startLspActionsCmd asks the server for code actions at the cursor.
 func (m *Model) startLspActionsCmd() tea.Cmd {
 	t := m.cur()

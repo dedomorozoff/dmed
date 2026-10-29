@@ -1793,6 +1793,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleLspRenameMsg(msg)
 	case lspActionsMsg:
 		m.handleLspActionsMsg(msg)
+	case agentUndoMsg:
+		m.handleAgentUndoMsg(msg)
+	case lspFormatMsg:
+		m.handleLspFormatMsg(msg)
 	case pluginStoreMsg:
 		m.storeLoading = false
 		if msg.err != nil {
@@ -2053,6 +2057,11 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "ctrl+alt+q":
 		return m.startLspActions()
+	case "ctrl+alt+f":
+		// Layout is the language server's job, not a reindent: reach
+		// textDocument/formatting where the terminal lets ctrl+alt through,
+		// palette command covers the rest.
+		return m.lspFormatCmd()
 	case "ctrl+h":
 		m.startReplace()
 		return nil

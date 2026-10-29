@@ -6,12 +6,14 @@ Guidance for AI coding agents working on this repository.
 
 dmed is a terminal code editor (Bubbletea/TUI in Go) with AI agents as
 first-class participants. It is well past the original "single-file skeleton":
-milestones M0–M7 of [ROADMAP.md](ROADMAP.md) are done (version 0.7.x) — the
+milestones M0–M7 of [ROADMAP.md](ROADMAP.md) are done (version 0.9.x) — the
 editor has splits, multi-cursor, rope-based buffers, syntax highlighting,
 file watching, git integration, AI chat/inline/ghost, a background agent
-queue with diff-review, LSP client, autocompletion, Lua plugins, an AI
-onboarding wizard, and DAP debugging (Go/Delve by default, any DAP adapter
-wired through `[debug]` config). Update ROADMAP checkboxes when you complete
+queue with diff-review, LSP client (diagnostics, definition, rename, code
+actions, formatting), autocompletion, Lua plugins, an AI
+onboarding wizard, DAP debugging (Go/Delve by default, any DAP adapter
+wired through `[debug]` config), a persistent terminal, a SQLite browser and
+a debugger panel. Update ROADMAP checkboxes when you complete
 work.
 
 The architectural rule of the project — now implemented, not aspirational —
@@ -129,7 +131,11 @@ The code is split into focused internal packages:
   interpreter and skips when PHP/Xdebug is absent — keep it, the mock engine
   cannot catch this class of drift. Set `DMED_DBGP_DEBUG=1` to trace the wire.
 - `internal/lsp/` — JSON-RPC 2.0 LSP client over stdin/stdout (diagnostics,
-  definition, didOpen/didChange); wired into autocompletion and the gutter.
+  definition, rename, code actions, formatting via textDocument/formatting,
+  didOpen/didChange); wired into autocompletion, the gutter, the palette and
+  the Ctrl+Alt+Q/R/F chords. Reply shapes differ per method: rename and code
+  actions return WorkspaceEdit maps, formatting a bare TextEdit array —
+  `parseWorkspaceEdit` and `parseFormatEdits` cover them separately.
 - `internal/sqlitedb/` — TUI-free SQLite data layer behind the browser
   (`modernc.org/sqlite`, pure Go — no CGO, the 8-platform cross build must
   stay green). `IsSQLite` checks the magic header (opening a candidate file
@@ -148,13 +154,24 @@ The code is split into focused internal packages:
   load from `~/.dmed/plugins` and `<project>/.dmed/plugins` with hot-reload.
 - `internal/vcs/` — git via go-git (pure Go, no system git needed): status in
   the gutter, hunks, side-by-side diffs, stage/unstage, commit, history,
-  branches. `internal/watcher/` — fsnotify external-change detection.
+  branches, and `RevertCommit`/`LastCommitWithSubject` — the refusal-safe
+  revert the editor's agent undo is built on (see Conventions). Paths returned
+  by `RevertCommit` are worktree-relative; resolve them against `repo.Root`,
+  not the editor's `baseDir()` (the two differ when `dmed file` runs outside
+  the project). `internal/watcher/` — fsnotify external-change detection.
   `internal/events/` — pub/sub bus (`file:changed`, `buffer:modified`,
   `buffer:saved`, `git:updated`, `agent:updated`) linking buffers ← watchers
   ← agents.
 - `internal/bundled/` — built-in plugins shipped with the binary (emmet,
   snippets). `internal/i18n/` — en/ru strings. `internal/session/` —
   save/restore open files across restarts. `internal/syntax/` — highlighting.
+- `internal/terminal/` — the persistent built-in terminal (`internal/ptyterm/`
+  underneath is the per-OS pty plumbing: ConPTY on Windows, creack/pty
+  elsewhere; platform tests split the two).
+- `internal/setup/` — the CLI onboarding wizard (`dmed setup-ai`); it and the
+  in-editor AI preferences write the same keys through `config.WriteAI`.
+- `internal/debug/` — `CapturePanicReport`: every goroutine's panic lands in
+  stderr as a report instead of killing the process.
 - `internal/todo/` — the model's checklist (thread-safe, no TUI): `Replace`
   from TODO_WRITE, `Merge` from TODO_SET (ticks a known step instead of
   appending a duplicate), `Render` is the single text both the model and the
@@ -191,7 +208,17 @@ Conventions:
   may need several approvals. A `ParkSubAgent` park is resolved by
   `pollSubAgentPark` when the queue task ends — never block the tool loop on a
   background task, it runs on the UI thread. Add new tool names to
-  `legacyToolName` so the aliases models reach for keep working.
+  `legacyToolName` so the aliases models reach for keep working. Touched-file
+  detection after a tool round costs two full project walks; the walks are
+  gated by `toolBatchTouchesDisk` — a batch without RUN/EDIT/REPLACE walks
+  nothing, keep that gate when new tools appear (a write-capable tool must be
+  added there or its output will not open tabs).
+- Accepted agent work is committed immediately, so the editor carries its own
+  undo: `undoLastAgentApply` (palette "Agent: Undo Last Apply", `u` in the
+  agent panel) reverts the newest `agent: …` commit via
+  `vcs.RevertCommit` — refuse-first: a file the user edited after the apply
+  aborts the whole revert, and the revert lands as its own
+  `agent: revert <hash>` commit so history keeps telling the truth.
 - Project walks (SEARCH/LIST_DIR/GLOB) go through `walkProject` +
   `newProjectSkip` in `internal/editor/tools_fs.go`; never re-implement the
   skip list. `globMayContain` prunes conservatively — a wrong prune hides a

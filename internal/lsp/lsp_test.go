@@ -17,6 +17,44 @@ type nopWC struct{}
 func (nopWC) Write(p []byte) (int, error) { return len(p), nil }
 func (nopWC) Close() error                { return nil }
 
+// TestParseFormatEdits pins the shape of a textDocument/formatting reply: a
+// bare TextEdit array (unlike the "changes"/"documentChanges" maps rename and
+// code actions return), and an empty/null answer meaning "nothing to do".
+func TestParseFormatEdits(t *testing.T) {
+	abs := "/home/u/main.go"
+	if uriToPath(pathToURI(abs)) == "" {
+		t.Fatal("sanity: uri round-trip must resolve")
+	}
+	res := json.RawMessage(`[
+		{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}},
+		 "newText":"package"},
+		{"range":{"start":{"line":1,"character":2},"end":{"line":1,"character":3}},
+		 "newText":"  x"}
+	]`)
+	ed := parseFormatEdits(res, abs)
+	if ed == nil || len(ed.Files) != 1 {
+		t.Fatalf("want one formatted file, got %+v", ed)
+	}
+	for p, edits := range ed.Files {
+		ur := uriToPath(pathToURI(abs))
+		if p != ur {
+			t.Fatalf("file key = %q, want the URI-normalized path %q", p, ur)
+		}
+		if len(edits) != 2 || edits[0].NewText != "package" || edits[1].EndCol != 3 {
+			t.Fatalf("edits = %+v", edits)
+		}
+	}
+	if parseFormatEdits(json.RawMessage("null"), abs) != nil {
+		t.Fatal("a null reply must mean no edits")
+	}
+	if parseFormatEdits(json.RawMessage("[]"), abs) != nil {
+		t.Fatal("an empty reply must mean no edits")
+	}
+	if parseFormatEdits(json.RawMessage("{broken"), abs) != nil {
+		t.Fatal("a malformed reply must mean no edits, not a crash")
+	}
+}
+
 // recWC appends every write so tests can inspect the emitted frames.
 type recWC struct{ buf bytes.Buffer }
 

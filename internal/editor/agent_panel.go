@@ -251,6 +251,8 @@ func (m *Model) handleAgent(msg tea.KeyPressMsg) tea.Cmd {
 	case "n":
 		m.agentPrompt = true
 		m.agentPromptIn = nil
+	case "u", "U":
+		m.undoLastAgentApply()
 	}
 	return nil
 }
@@ -589,6 +591,58 @@ func (m *Model) restoreAgentPanel() {
 	m.agentOpen = true
 	m.agentFocus = true
 	m.msg = ""
+}
+
+// agentMsgKind marks what undoLastAgentApply delivered.
+type agentUndoMsg struct {
+	paths []string
+	err   error
+}
+
+// undoLastAgentApply reverts the most recent `agent: …` commit from inside
+// the editor: every file the agent touched goes back to its pre-agent content
+// in a new "agent: revert <hash>" commit. Nothing is hidden: files the user
+// edited after the apply abort the whole revert, and the reverted paths land
+// in open tabs like any other applied series. It runs off the UI thread.
+func (m *Model) undoLastAgentApply() tea.Cmd {
+	if m.repo == nil {
+		m.msg = m.t("msg.agent_undo_nogit")
+		return nil
+	}
+	repo := m.repo
+	return func() tea.Msg {
+		h, err := repo.LastCommitWithSubject("agent: ", 500)
+		if err != nil {
+			return agentUndoMsg{err: err}
+		}
+		if h.IsZero() {
+			return agentUndoMsg{}
+		}
+		paths, err := repo.RevertCommit(h)
+		return agentUndoMsg{paths: paths, err: err}
+	}
+}
+
+// handleAgentUndoMsg lands on the UI thread and merges the revert outcome.
+// A nil path list means there was no agent commit to undo.
+func (m *Model) handleAgentUndoMsg(msg agentUndoMsg) {
+	switch {
+	case msg.err != nil:
+		m.msg = m.t("msg.agent_undo_fail", msg.err.Error())
+	case msg.paths == nil:
+		m.msg = m.t("msg.agent_undo_none")
+	default:
+		m.msg = m.t("msg.agent_undo_ok", len(msg.paths))
+		for _, rel := range msg.paths {
+			// Reload each reverted file like acceptAgentReview does, so open
+			// buffers show what the revert put back. The reverted paths are
+			// worktree-relative, resolved against the repository root (the
+			// editor's baseDir can differ, e.g. `dmed file` from elsewhere).
+			full := filepath.Join(m.repo.Root, filepath.FromSlash(rel))
+			m.openAiFile(full, true)
+		}
+	}
+	m.refreshGitFiles()
 }
 
 // agentFullPath resolves a change path (relative to the project root) to an

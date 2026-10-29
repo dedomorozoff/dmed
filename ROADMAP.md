@@ -524,6 +524,30 @@ plan with per-item estimates, design decisions and open questions lives in
       nested file keeps its full name, only a name too long for whatever is
       left is cut — from the head, keeping the readable tail (extension
       included) — and no row ever grows past the panel width.
+- [x] **LSP formatting**: `textDocument/formatting` reaches the language
+      server (`gopls`→gofmt, the TypeScript server→prettier, whatever else
+      implements it): `Ctrl+Alt+F` and the palette "Edit: Format Document"
+      ask for a whole-document layout, the reply (a bare TextEdit array,
+      parsed apart from the WorkspaceEdit shapes rename/code actions return)
+      lands in the buffer through the same `applyWorkspaceEdit` path and the
+      buffer stays dirty — the layout is on screen, saving stays the human's
+      call. Rename and code actions already existed; the analysis calling
+      them absent was out of date.
+- [x] **AI rounds stop walking the whole project**: the touched-file detection
+      after every tool batch cost two full `snapshotFiles` walks over the root
+      (`before` + `after`) even when the batch was pure reading (SEARCH,
+      GLOB, TODO_*). The walks are gated by `toolBatchTouchesDisk` now: only
+      a batch containing RUN/EDIT/REPLACE pays the walk, so read-only rounds
+      between AI iterations no longer crawl a large repository.
+- [x] **Undo of AI work from inside the editor**: accepted agent changes are
+      committed at once, so Ctrl+Z never could reach them. `u` in the agent
+      panel (or the palette command) reverts the newest `agent: …` commit
+      through `vcs.RevertCommit`: refuse-first — every working-tree file must
+      still match what the agent commit produced, one user edit after the
+      apply aborts the revert without writing a byte — and the restore is
+      staged into its own `agent: revert <hash>` commit, so the undo is
+      traceable in history rather than a silent tree rewrite. No external
+      terminal needed.
 
 ## Infrastructure: CI and releases
 

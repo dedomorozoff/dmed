@@ -259,6 +259,10 @@ var enCatalog = map[string]string{
 	"actions.title":      "code actions ",
 	"cmd.lsp_rename_t":   "Edit: Rename Symbol...", "cmd.lsp_rename_d": "Ctrl+Alt+R — Rename symbol under cursor via LSP",
 	"cmd.lsp_actions_t": "Edit: Code Actions...", "cmd.lsp_actions_d": "Ctrl+Alt+Q — Quick fixes and refactors via LSP",
+	"cmd.lsp_format_t":  "Edit: Format Document...", "cmd.lsp_format_d": "Ctrl+Alt+F — Lay the file out via LSP (gofmt, prettier)",
+	"msg.lsp_format_ok":    " formatted %d file(s), buffer dirty - Ctrl+S to keep",
+	"msg.lsp_format_clean": " [already formatted]",
+	"msg.lsp_format_err":   "format failed: %s",
 	// Conflict / search / replace / AI / finder lines
 	"psearch.prompt":        " find in project: ",
 	"psearch.hint_input":    "  (Enter: search, Tab: regex, Esc: close)",
@@ -380,6 +384,7 @@ var enCatalog = map[string]string{
 	"cmd.dap_settings_t": "Debug: DAP Settings...", "cmd.dap_settings_d": "Configure DAP adapter, launch request, program, args",
 	"cmd.agent_tasks_t": "Agent: Task Panel", "cmd.agent_tasks_d": "Alt+L — Background agent task list",
 	"cmd.agent_new_t": "Agent: New Task", "cmd.agent_new_d": "Run a background refactoring task",
+	"cmd.agent_undo_t": "Agent: Undo Last Apply", "cmd.agent_undo_d": "Revert the most recent agent commit (u in the panel)",
 	"cmd.settings_t": "Settings: Open Config", "cmd.settings_d": "Open .dmed.conf for editing",
 	"cmd.search_everywhere_t": "Search Everywhere", "cmd.search_everywhere_d": "Commands, files and settings in one list",
 	"cmd.help_t": "Help: Show Keybindings", "cmd.help_d": "F1 / Ctrl+E — Help panel",
@@ -405,6 +410,10 @@ var enCatalog = map[string]string{
 	"msg.agent_applied":       "agent changes applied and committed",
 	"msg.agent_applied_files": "%d created, %d modified — opened in tabs",
 	"msg.agent_discarded":     "agent changes discarded",
+	"msg.agent_undo_nogit":    "[agent undo needs a git repository]",
+	"msg.agent_undo_none":     "[no agent commit to undo]",
+	"msg.agent_undo_ok":       "agent apply reverted: %d file(s) back to pre-agent state, committed as agent: revert",
+	"msg.agent_undo_fail":     "agent undo: %s",
 
 	// Agent review + AI settings
 	"agent.review_hint":   "  (y: apply all, n: reject, Tab: next file, \u2191\u2193 scroll)",
@@ -663,6 +672,10 @@ var ruCatalog = map[string]string{
 	"actions.title":      "быстрые действия ",
 	"cmd.lsp_rename_t":   "Правка: Переименовать символ...", "cmd.lsp_rename_d": "Ctrl+Alt+R — переименование символа под курсором через LSP",
 	"cmd.lsp_actions_t": "Правка: Быстрые действия...", "cmd.lsp_actions_d": "Ctrl+Alt+Q — исправления и рефакторинги через LSP",
+	"cmd.lsp_format_t":  "Правка: Форматировать файл...", "cmd.lsp_format_d": "Ctrl+Alt+F — разложить файл через LSP (gofmt, prettier)",
+	"msg.lsp_format_ok":    " отформатировано файлов: %d, буфер не сохранён — Ctrl+S чтобы принять",
+	"msg.lsp_format_clean": " [уже отформатировано]",
+	"msg.lsp_format_err":   "ошибка форматирования: %s",
 	// Conflict / search / replace / AI / finder lines
 	"psearch.prompt":        " поиск по проекту: ",
 	"psearch.hint_input":    "  (Enter: искать, Tab: regex, Esc: закрыть)",
@@ -785,6 +798,7 @@ var ruCatalog = map[string]string{
 	"cmd.dap_settings_t": "Отладка: DAP-настройки...", "cmd.dap_settings_d": "Настроить адаптер DAP, launch-запрос, программу, аргументы",
 	"cmd.agent_tasks_t": "Агент: Панель задач", "cmd.agent_tasks_d": "Alt+L — список фоновых задач агента",
 	"cmd.agent_new_t": "Агент: Новая задача", "cmd.agent_new_d": "Запустить фоновую задачу рефакторинга",
+	"cmd.agent_undo_t": "Агент: Откатить последнее", "cmd.agent_undo_d": "Откат последнего агентского коммита (u в панели)",
 	"cmd.settings_t": "Настройки: Открыть конфиг", "cmd.settings_d": "Открыть .dmed.conf для редактирования",
 	"cmd.search_everywhere_t": "Поиск везде", "cmd.search_everywhere_d": "Команды, файлы и настройки в одном списке",
 	"cmd.help_t": "Справка: Клавиши", "cmd.help_d": "F1 / Ctrl+E — панель справки",
@@ -810,6 +824,10 @@ var ruCatalog = map[string]string{
 	"msg.agent_applied":       "изменения агента применены и закоммичены",
 	"msg.agent_applied_files": "создано %d, изменено %d — открыто во вкладках",
 	"msg.agent_discarded":     "изменения агента отклонены",
+	"msg.agent_undo_nogit":    "[для отката нужен git-репозиторий]",
+	"msg.agent_undo_none":     "[нет агентских коммитов для отката]",
+	"msg.agent_undo_ok":       "откат применённых изменений: файлов %d, закоммичено как agent: revert",
+	"msg.agent_undo_fail":     "ошибка отката агента: %s",
 
 	// Agent review + AI settings
 	"agent.review_hint":   "  (Y/\u043d: \u043f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c \u0432\u0441\u0451, N/\u0442: \u043e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c, Tab: \u0441\u043b\u0435\u0434.\u0444\u0430\u0439\u043b, \u2191\u2193 \u0441\u043a\u0440\u043e\u043b\u043b)",

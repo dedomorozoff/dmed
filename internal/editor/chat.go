@@ -737,7 +737,14 @@ type toolPark struct {
 // for a side-by-side diff review. It returns a tea.Cmd that continues the
 // conversation, or nil when waiting on human review or a parked decision.
 func (m *Model) handleChatToolsDone(content string, tools []ai.ToolCall) tea.Cmd {
-	before := snapshotFiles(m.root)
+	// Detecting what a batch created or rewrote costs two full project walks
+	// (before + after). A batch of read-only tools (SEARCH, GLOB, TODO_*, ...)
+	// cannot touch a single file, so it walks nothing - on a large repository
+	// that was the stall between every AI iteration.
+	var before map[string]fileState
+	if toolBatchTouchesDisk(tools) {
+		before = snapshotFiles(m.root)
+	}
 	results := make([]ai.Message, 0, len(tools))
 	var pending []agent.Change
 	var tracks []chatEditTrack
@@ -757,7 +764,9 @@ func (m *Model) handleChatToolsDone(content string, tools []ai.ToolCall) tea.Cmd
 	// Open every file the tools created or rewrote (e.g. by RUN) in tabs and
 	// summarize them in the transcript. EDIT proposals are still pending human
 	// review, so they open when accepted (see acceptChatReview).
-	m.openTouchedFiles(before, results)
+	if before != nil {
+		m.openTouchedFiles(before, results)
+	}
 
 	m.chatPendingAssistant = ai.Message{Role: "assistant", Content: content, ToolCalls: tools}
 	m.chatPendingResults = results

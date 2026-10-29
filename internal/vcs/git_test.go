@@ -438,3 +438,137 @@ func TestStageWithAlternateSpelling(t *testing.T) {
 		t.Fatalf("expected 1 hunk after edit, got %+v", d.Hunks)
 	}
 }
+
+// agentCommit commits "agent: <msg>" the way agent.Committer does, so tests
+// pin the exact commit shape an undo must recognise.
+func agentCommit(t *testing.T, repo *Repo, files map[string]string, deleted []string, msg string) {
+	t.Helper()
+	for name, content := range files {
+		full := filepath.Join(repo.Root, filepath.FromSlash(name))
+		if d := filepath.Dir(full); d != repo.Root {
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.Stage(full); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range deleted {
+		full := filepath.Join(repo.Root, filepath.FromSlash(name))
+		if err := os.Remove(full); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.Stage(full); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repo.Commit("agent: " + msg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRevertCommitRestoresAgentChanges(t *testing.T) {
+	dir, repo := initTestRepo(t)
+
+	// Pre-agent state: an extra file that only exists before the agent runs
+	// (the agent deletes it), and a rewritten sample.txt, both committed.
+	if err := os.WriteFile(filepath.Join(dir, "gone.txt"), []byte("gone file content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sample.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Stage(filepath.Join(dir, "gone.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Stage(filepath.Join(dir, "sample.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Commit("base state"); err != nil {
+		t.Fatal(err)
+	}
+
+	h, err := repo.LastCommitWithSubject("bogus: ", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !h.IsZero() {
+		t.Fatal("no bogus commits must exist in a fresh history")
+	}
+
+	// The agent: modified an existing file, created a new one, deleted one.
+	agentCommit(t, repo, map[string]string{
+		"sample.txt": "agent changed\n",
+		"sub/new.go": "package new\n",
+	}, []string{"gone.txt"}, "refactor things")
+
+	h, err = repo.LastCommitWithSubject("agent: ", 500)
+	if err != nil || h.IsZero() {
+		t.Fatalf("agent commit must be findable: h=%s err=%v", h, err)
+	}
+
+	paths, err := repo.RevertCommit(h)
+	if err != nil {
+		t.Fatalf("revert: %v", err)
+	}
+	if len(paths) != 3 {
+		t.Fatalf("reverted paths = %v, want 3", paths)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, "sample.txt"))
+	if err != nil || string(got) != "base\n" {
+		t.Fatalf("sample.txt after revert = %q (err %v), want base content", got, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "sub", "new.go")); !os.IsNotExist(statErr) {
+		t.Fatalf("agent-created sub/new.go must be removed, stat err=%v", statErr)
+	}
+	if got2, rerr := os.ReadFile(filepath.Join(dir, "gone.txt")); rerr != nil || string(got2) != "gone file content\n" {
+		t.Fatalf("deleted-by-agent file must return: %q err=%v", got2, rerr)
+	}
+	// The revert is its own commit on top.
+	log, lerr := repo.Log(10)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if log[0].Subject != "agent: revert "+h.String()[:7] {
+		t.Fatalf("top commit = %q", log[0].Subject)
+	}
+}
+
+func TestRevertCommitRefusesTouchedFiles(t *testing.T) {
+	dir, repo := initTestRepo(t)
+
+	agentCommit(t, repo, map[string]string{"sample.txt": "agent output\n"}, nil, "tweak")
+
+	// The user edits the file afterwards: the revert must refuse in full
+	// rather than overwrite newer work.
+	if err := os.WriteFile(filepath.Join(dir, "sample.txt"), []byte("user edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h, herr := repo.LastCommitWithSubject("agent: ", 500)
+	if herr != nil || h.IsZero() {
+		t.Fatalf("agent commit must exist: h=%s err=%v", h, herr)
+	}
+	paths, err := repo.RevertCommit(h)
+	if err == nil {
+		t.Fatalf("revert must refuse a file edited after the commit, got %v", paths)
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, "sample.txt"))
+	if string(got) != "user edited\n" {
+		t.Fatalf("refused revert must not touch the file, got %q", got)
+	}
+}
+
+func TestRevertCommitNoAgentCommits(t *testing.T) {
+	_, repo := initTestRepo(t)
+	h, err := repo.LastCommitWithSubject("agent: ", 500)
+	if err != nil || !h.IsZero() {
+		t.Fatalf("no agent commits in history: h=%s err=%v", h, err)
+	}
+}
+

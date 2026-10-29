@@ -713,6 +713,54 @@ func parseWorkspaceEdit(res json.RawMessage) *WorkspaceEdit {
 	return out
 }
 
+// Format asks the server for the edits that lay the whole document out
+// (documentFormattingProvider: gofmt via gopls, prettier via typescript-
+// language-server, and every other server that implements the request). The
+// reply is a bare TextEdit array — not the "changes"/"documentChanges"
+// WorkspaceEdit shapes code actions and rename use — so it parses separately.
+func (c *Client) Format(path string) (*WorkspaceEdit, error) {
+	abs, _ := filepath.Abs(path)
+	res, err := c.call("textDocument/formatting", map[string]interface{}{
+		"textDocument": map[string]interface{}{
+			"uri": pathToURI(abs),
+		},
+		"options": map[string]interface{}{
+			"tabSize":      4,
+			"insertSpaces": false,
+		},
+	})
+	if err != nil || len(res) == 0 {
+		return nil, err
+	}
+	return parseFormatEdits(res, abs), nil
+}
+
+// parseFormatEdits turns the bare TextEdit array a formatting reply carries
+// into a single-file WorkspaceEdit. Empty replies (null, empty array) are no
+// edits, not an error. The key is spelled through the URI like rename and
+// code actions do, so every WorkspaceEdit consumer sees the same spelling.
+func parseFormatEdits(res json.RawMessage, path string) *WorkspaceEdit {
+	var raws []rawEdit
+	if err := json.Unmarshal(res, &raws); err != nil {
+		return nil
+	}
+	if len(raws) == 0 {
+		return nil
+	}
+	out := &WorkspaceEdit{Files: map[string][]TextEdit{}}
+	p := uriToPath(pathToURI(path))
+	for _, e := range raws {
+		out.Files[p] = append(out.Files[p], TextEdit{
+			StartLine: e.Range.Start.Line,
+			StartCol:  e.Range.Start.Character,
+			EndLine:   e.Range.End.Line,
+			EndCol:    e.Range.End.Character,
+			NewText:   e.NewText,
+		})
+	}
+	return out
+}
+
 // Rename asks the server for the edits that rename the symbol at (line, col).
 func (c *Client) Rename(path string, line, col int, newName string) (*WorkspaceEdit, error) {
 	abs, _ := filepath.Abs(path)

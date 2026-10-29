@@ -6,123 +6,101 @@
 [![Last Commit](https://img.shields.io/github/last-commit/dedomorozoff/dmed)](https://github.com/dedomorozoff/dmed)
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/dedomorozoff/dmed/total)
 
-**dmEd** is a terminal-native, keyboard-driven code editor designed for the era of AI-assisted development. Built entirely in Go, it treats AI agents not as plugins, but as **first-class participants** in your workflow. 
+**dmEd** is a terminal-native, keyboard-driven code editor in Go: rope-backed buffers, multi-cursor editing, splits, LSP, a debugger, a persistent terminal and zero-dependency git — fast over SSH, instant from a cold start.
 
-AI agents can read, propose, and apply changes directly to your codebase — but **humans approve every single diff**. Nothing ever happens behind your back.
+AI is part of the workflow, not the point of it: agents read, propose and run — but **every diff is reviewed by a human before anything is written**, and accepted work can be undone from the editor itself.
 
 ## Key Highlights
 
-*   **Keyboard-First & Terminal-Native:** Fast, lightweight, and works seamlessly over SSH.
-*   **Human-in-the-Loop AI:** High-level autonomy for agents (Ollama, OpenAI, DeepSeek, etc.) with 100% human control via explicit diff reviews.
-*   **Zero-Dependency Git:** Native side-by-side diffs, gutter indicators, and staging directly from the editor without needing an external git binary.
-*   **All-in-One Dev Environment:** Built-in persistent terminal, LSP diagnostics,
-    autocompletion, and a plugin store out of the box.
-
+- **Built for the keyboard.** Every feature has a chord and a palette entry; nothing is mouse-only, and the mouse support that exists (gutter fold clicks, panel clicks, the debug tree) works on the same state the keys drive.
+- **Fast by construction.** Syntax highlighting, git diff and language servers all run off the UI thread; a keystroke on a 60k-line file paints in milliseconds.
+- **Zero external dependencies.** Go binaries only: git (go-git), SQLite (modernc.org/sqlite), syntax (Chroma) — no `git`, no CGO, nothing to install on the machine you SSH into.
+- **AI with a hard stop.** Chat, inline rewrite, ghost suggestions and background agents — all ending in the same diff-review → atomic-apply pipeline.
 
 ## Features
 
 ### Editor Core
 
-- Multi-file editing with **tabs** and **splits** (vertical/horizontal)
-- Fuzzy file finder (`Ctrl+O`) with subsequence scoring
-- Project tree sidebar (`Ctrl+B`) with fold/unfold navigation
-- Syntax highlighting (Chroma) for 100+ languages
-- Find & replace (`Ctrl+F` / `Ctrl+H`) with regex support
-- Move lines up/down (`Alt+↑/↓`) with undo
-- Full undo/redo with typing-run grouping
-- Clipboard: copy (`Ctrl+C`), cut (`Ctrl+X`), paste (`Ctrl+V`)
-- Multi-selection with `Shift+Arrows`
-- Uppercase selection or whole buffer (`Ctrl+U`)
-- Rope-backed buffer: O(1) undo, cheap branching
-- Configurable via `.dmed.conf` (INI format, hot-reload on save)
+- Rope-backed buffer with full **undo/redo** (`Ctrl+Z`/`Ctrl+R`), cheap on large files
+- **Multi-cursor**: `Alt+D` adds a cursor at the next word occurrence, `Alt+Click` anywhere, `Esc` exits
+- **Tabs and splits** (vertical `Ctrl+\`/`F6`, horizontal `Ctrl+Alt+H`/`F7`, focus/paste across panes)
+- **Syntax highlighting** (Chroma) for 100+ languages, styles configurable (`syntax_theme`), streamed in the background
+- **Code folding** (`Alt+C`/`Alt+O`, gutter chevrons, mouse-driven, hidden-line counts)
+- **Find & replace** in file (`Ctrl+F`/`Ctrl+H`) with regex; `F3`/`Shift+F3` walk matches
+- **Word wrap** (`Alt+Z`), sticky goal column, move lines (`Alt+↑/↓`), duplicate/delete line, `Ctrl+/` toggle comment
+- **Fuzzy file finder** (`Ctrl+O`/`F3`) over the project tree
+- **Search everywhere** (`Alt+P`, `Ctrl+Shift+P`, double `Shift`): commands, project files *and* settings in one JetBrains-style list; `Ctrl+P` searches commands alone
+- Files are stored with a trailing newline; dirty state is exact (normalized snapshots)
 
-### AI Integration
+### Files & Project
 
-- **Chat panel** (`Alt+A`) — streaming conversation with your code
-- **Works with zero setup**: no provider, no key, no account — the session falls
-  back to a keyless public provider and says so in the chat (a `CLOUD` badge
-  stays in the header). Set `free_fallback = false` to keep every request local.
-- **Inline rewrite** (`Alt+I`) — select text, describe change, review diff, accept/reject
-- **Tools the model can call**: `READ`, `SEARCH` (regex-capable), `LIST_DIR`,
-  `GLOB`, `RUN`, `REPLACE`, `EDIT`, `TODO_WRITE`/`TODO_SET`/`TODO_READ` (a
-  visible plan), `ASK_USER` (a question that pauses the loop until you answer),
-  `SWITCH_MODE` (ask to leave plan mode) and `WEB_SEARCH` (DuckDuckGo, opt-in),
-  plus `SUB_AGENT` to delegate a self-contained task to a background sub-agent
-  (read-only plus proposals — its diff waits in the agent panel, `Esc` cancels).
-  Read-only tools need no confirmation; every proposed change arrives as a diff
-  for you to accept or reject
-- **Plan mode** (`Ctrl+P` → `AI: Toggle Plan/Act Mode`): the model gets read-only
-  tools, writes down a plan, and asks you before it is allowed to edit anything
-- **Zero-config start**: with a running Ollama the chat just works — the first
-  model reported by the server is picked automatically
-- Built-in provider presets (wizard cycles them with `←`/`→`):
-  **Ollama** (local, free), **OpenAI**, **DeepSeek**, **Groq**,
-  **LM Studio** (local), **vLLM** (local), **Unsloth** (local), or any OpenAI-compatible server
-- **First-time setup, three ways**:
-  - `dmed setup-ai` — interactive CLI wizard (provider → key → test → saved)
-  - In the editor: `Ctrl+P` → `AI: Preferences...` — pick a preset with
-    `←`/`→`, paste the API key, press `t` to test the connection, `Ctrl+S` to save.
-    The **model list is fetched from the provider as soon as the panel opens**,
-    so the Model row shows what the server actually has (`←`/`→` to walk it)
-    instead of asking you to guess a name
-  - Environment variables (highest priority, nothing written to disk):
-    `DMED_PROVIDER`, `DMED_API_KEY`, `DMED_MODEL`, `DMED_OLLAMA_URL`
+- **Project tree** (`Ctrl+B`/`F9`): fold/unfold dirs, new file/folder (`n`/`N`), rename (`r`), duplicate (`d`), delete/trash (`Delete`/`t`), file names stay readable at any depth or panel width
+- **fsnotify watcher**: external changes offer reload/auto-merge; renamed files keep tabs
+- **Sessions**: open files restore across restarts
+- Config wired through `.dmed.conf` (INI, hot-reload on save)
 
-```sh
-# example: one-off run against DeepSeek without touching any config file
-DMED_PROVIDER=DeepSeek DMED_API_KEY=sk-... DMED_MODEL=deepseek-chat dmed
-```
+### Git (pure Go — no git binary)
 
-### Change Tracking
+- Gutter indicators: added `+`, modified `~`, deleted `_`
+- **Side-by-side diff** vs HEAD; per-line **inline blame** (`Alt+B`)
+- Stage/unstage/commit from the Git panel (`Ctrl+G`); fetch/push to `origin` (`f`/`p`)
+- Branches: create/switch; **history and per-commit diffs**
+- Hunk navigation (`Alt+[`/`Alt+]`)
 
-- **fsnotify** file watcher — detects external changes, offers reload/auto-merge
-- **Git integration** (pure Go, no git binary required):
-  - Gutter indicators: added `+`, modified `~`, deleted `_`
-  - Side-by-side diff view vs HEAD
-  - Stage/unstage/commit from the Git panel (`Ctrl+G`)
-  - Fetch / push to `origin` from the Git panel (`f` / `p`, in the status line)
-  - Inline per-line blame (`Alt+B`): who changed each line and when, like Zed
-  - Hunk navigation (`Alt+[` / `Alt+]`)
+### Databases & Pictures
+
+- **SQLite browser**: a `.sqlite`/`.db` file (magic-header checked, so a text-only `.db` stays a text tab) opens a paged table browser — substring filter over every column (`/`), sorting (`o`), the CREATE statement (`s`), immediate cell editing (`Enter`, empty = NULL), row insert (`Ctrl+N`)/delete (`Ctrl+D`). Views and `WITHOUT ROWID` tables open read-only.
+- **ASCII picture preview**: png/jpg/jpeg/gif/bmp render as half-block art with the terminal's colour profile (graceful ANSI/ASCII fallback), GIFs animate, tall pictures scroll (wheel included), tabs are read-only, the watcher re-decodes changes.
 
 ### Developer Tools
 
-- Built-in **terminal** (`Alt+T`) — persistent ConPTY/PTY shell session with ANSI emulation, colors, cursor addressing, resize, paste, keyboard/mouse forwarding, and support for interactive/full-screen TUI programs
-- **LSP client** — diagnostics (rendered in the gutter), completion, go-to-definition; hints the install command when a language server is missing
-- **Autocompletion** (`Ctrl+Space`, auto-trigger) — buffer words + LSP sources for Go, Python, TS/JS, Rust, C/C++, Lua, Ruby, PHP, Zig, JSON, YAML, CSS, HTML
-- **Debugger** (`Ctrl+Alt+D`) — DAP-based debugging: gutter breakpoints (`F4`), run/continue (`F5`, which pauses a running debuggee), step over/in/out (`F6`/`F7`/`Shift+F7`), stop (`Shift+F5`); a threads/stack/variables panel that is fully mouse-driven (click a thread, frame or variable to select it, double-click a `▸` variable to expand, the wheel walks the focused column, `l` peeks at the process console with scroll-back), an opt-in expression eval (`Tab`), and one shared gutter marker column — left click toggles a breakpoint, middle click (the wheel) toggles a bookmark; the panel itself scrolls like a pager (`↑↓`, `PgUp`/`PgDn`, `Home`/`End`; the wheel works too, and over the console column it walks the backlog), `l` peeks at the process console with scroll-back, `+`/`-` resize the panel, and the selected entry is drawn across the full panel width so a long frame path or variable value is readable; Go/Delve out of the box, any other DAP adapter (debugpy, lldb-dap, node, ...) via `[debug]` config, and PHP out of the box as well — Xdebug has no DAP, so dmed speaks its DBGp protocol directly (spawns `php` on the active file, sets breakpoints, steps, and walks the variables tree)
-- **Lua plugins** — keybindings, palette commands and events; hot-reload on edit, plus a built-in store (`Plugins: Install...`) with embedded and GitHub-hosted plugins
-- **Localization** — English/Russian UI, switchable from the palette
-- **Sessions** — auto-save/restore open files across restarts
-- **Command palette** (`Ctrl+P` / `F2`) — fuzzy search all commands; `Alt+P` or `Ctrl+Shift+P` opens the JetBrains-style *search everywhere*: commands, project files and settings in one list (a double `Shift` does the same on terminals that report bare modifier presses)
+- **Persistent built-in terminal** (`Alt+T`): ConPTY/PTY shell with ANSI colors, resize, paste, mouse forwarding and full-screen TUI support
+- **LSP**: diagnostics in the gutter, completion, go-to-definition (`F12`/`Ctrl+Click`), **rename** (`Ctrl+Alt+R`), **code actions** (`Ctrl+Alt+Q`), **format document** (`Ctrl+Alt+F` — the language server lays out the file, `gofmt` via gopls, `prettier` via the TS server; the result lands in the buffer unsaved, `Ctrl+S` keeps it). Missing servers print their install hint.
+- **Autocompletion** (`Ctrl+Space`, auto-trigger): buffer words + LSP for Go, Python, TS/JS, Rust, C/C++, Lua, Ruby, PHP, Zig, JSON, YAML, CSS, HTML
+- **Debugger** (`Ctrl+Alt+D`): DAP-based — gutter breakpoints (`F4` or left-click, bookmarks on middle-click), run/continue (`F5`), steps (`F6`/`F7`/`Shift+F7`), stop (`Shift+F5`); a threads/stack/variables/console panel that is fully mouse-driven with expression eval. Go/Delve and PHP/Xdebug (own DBGp client) out of the box; any other adapter (debugpy, lldb-dap, node/js-debug) via `[debug]` config.
+- **Lua plugins**: keybindings, palette commands and events; hot-reload; built-in plugin store
+- **Localization** en/ru, switchable from the palette
+- **Command palette** (`Ctrl+P`/`F2`) — everything above is reachable, searchable and documented there
+
+### AI (second to the editor, wired to the same review gate)
+
+- **Chat** (`Alt+A`): streaming conversation with project context; **inline rewrite** (`Alt+I`) rolls a selected region through a model, **ghost suggestions** (`Alt+G`) autocomplete inside the editor
+- **Works with zero setup**: no provider, no key, no account — a session falls back to a keyless public provider and says so (a `CLOUD` badge stays in the chat header). `free_fallback = false` keeps every request local; with a running Ollama the chat just works.
+- **Tools the model can call**: `READ`, `SEARCH` (regex), `LIST_DIR`, `GLOB`, `RUN`, `REPLACE`, `EDIT`, `TODO_*` (a visible plan), `ASK_USER` (the loop waits for your answer), `SWITCH_MODE`, `WEB_SEARCH` (opt-in DuckDuckGo) and `SUB_AGENT` (a delegated task whose diff waits in the same review panel). Read-only tools need no confirmation; every proposed change arrives as a diff to accept or reject
+- **Plan mode**: the model gets read-only tools and has to ask you before it may edit anything
+- **Background agents** (`Alt+L`): queue a refactoring task, watch progress, review the multi-file diff, cancel; **accept is committed to git, and `u` in the panel reverts it** — the undo refuses files you edited after the apply and lands as its own `agent: revert <hash>` commit
+- **Provider presets** (wizard cycles with `←`/`→`): **Ollama** (local), **OpenAI**, **DeepSeek**, **Groq**, **LM Studio**, **vLLM**, **Unsloth** or any OpenAI-compatible server; the model list is fetched live from the server as soon as the panel opens
+- **First-time setup, three ways**: `dmed setup-ai` (CLI wizard), `Ctrl+P → AI: Preferences...` (test with `t`, save with `Ctrl+S`), or environment variables (`DMED_PROVIDER`, `DMED_API_KEY`, `DMED_MODEL`, `DMED_OLLAMA_URL`):
+
+```sh
+DMED_PROVIDER=DeepSeek DMED_API_KEY=sk-... DMED_MODEL=deepseek-chat dmed
+```
 
 ## Install
 
-Install the latest release with a single command:
+One-liner (installs a prebuilt binary, no Go needed):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/dedomorozoff/dmed/main/install.sh | sh
 ```
 
-> Requires a Go toolchain **>= 1.26** for building from source; the one-liner
-> installs a prebuilt binary (no Go needed).
+Every release ships ready binaries for **linux amd64/arm64, macOS amd64/arm64, FreeBSD, OpenBSD, NetBSD and Windows amd64**, plus packages: `.deb` (Debian/Ubuntu), `.rpm` (Fedora), `.pkg.tar.zst` (Arch), a Termux `.deb` and a Windows `.zip` — see the [Releases page](https://github.com/dedomorozoff/dmed/releases).
 
-**Alternative — build from source:**
+Build from source:
 
 ```sh
-git clone https://github.com/dedomorozoff/dmed.git
-cd dmed
-make build        # produces ./dmed.exe (or ./dmed on Linux/macOS)
+git clone https://github.com/dedomorozoff/dmed.git && cd dmed && make build
 ```
 
-**Or install with Go directly:**
+Or with Go directly:
 
 ```sh
 go install github.com/dedomorozoff/dmed@latest
 ```
 
-> The one-liner installs to `~/.local/bin` on Linux/macOS/BSD and to
-> `%LOCALAPPDATA%\dmed` on native Windows. Add that directory to your `PATH`
-> if `dmed` isn't found after installing.
+> Requires Go **>= 1.26** to build; the one-liner installs to `~/.local/bin`
+> (Linux/macOS/BSD) or `%LOCALAPPDATA%\dmed` (Windows) — add it to `PATH` if
+> needed.
 
 ## Usage
 
@@ -132,38 +110,36 @@ dmed dir/                      # open folder — shows project tree
 dmed a.txt b.txt               # multiple files → tabs
 ```
 
+Open a file (`Ctrl+O` fuzzy finder or `Ctrl+T`), edit, `Ctrl+S` to save. `Ctrl+G` for git, `Alt+T` for the terminal, `Alt+A` for AI, `Ctrl+P` for everything else.
+
 ## Keybindings
 
 ### Navigation
 
 | Keys | Action |
 |------|--------|
-| `Arrows` | Move cursor |
-| `Home` / `End` | Line start / end |
-| `PgUp` / `PgDn` | Page up / down |
+| `Arrows`, `Home`/`End`, `PgUp`/`PgDn` | Cursor / line / page |
 | `Ctrl+↑/↓` | Scroll without moving cursor |
-| `Ctrl+L` | Go to line (N, N:C, or `+N`/`-N` relative) |
+| `Ctrl+L` | Go to line (`N`, `N:C`, or `+N`/`-N` relative) |
+| `Alt+←` / `Alt+→` | Switch tabs |
+| `Alt+1..9` | Jump to tab N |
 
 ### Editing
 
 | Keys | Action |
 |------|--------|
 | `Shift+Arrows` | Select text |
-| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste (`Ctrl+X` closes the tab when nothing is selected) |
 | `Ctrl+Z` / `Ctrl+R` | Undo / redo |
 | `Ctrl+Y` / `Ctrl+D` | Delete / duplicate line |
 | `Ctrl+/` | Toggle comment |
 | `Alt+Z` | Toggle word wrap |
-| `Alt+B` | Toggle inline git blame (author · when per line) |
+| `Alt+B` | Toggle inline git blame |
 | `Alt+↑` / `Alt+↓` | Move line up / down |
-| `Alt+D` | Add multi-cursor at next word occurrence |
-| `Alt+Click` | Add cursor at click position |
-| `Esc` | Exit multi-cursor mode |
-| `Alt+C` / `Alt+O` | Fold / unfold the block at the cursor |
-| Click `▾`/`▸` in the gutter | Fold / unfold that block with the mouse |
-| Click `… N lines hidden` | Expand the folded block (works anywhere on the row) |
-| `Ctrl+Space` | Autocomplete (word + LSP) |
+| `Alt+D` / `Alt+Click` | Multi-cursor (next word / at click), `Esc` exits |
+| `Alt+C` / `Alt+O` | Fold / unfold block at cursor |
 | `Ctrl+U` | Uppercase selection / buffer |
+| `Ctrl+Space` | Autocomplete (word + LSP) |
 | `Enter` / `Backspace` / `Delete` | Standard editing |
 
 ### Files & Tabs
@@ -173,9 +149,7 @@ dmed a.txt b.txt               # multiple files → tabs
 | `Ctrl+S` | Save (untitled: Save As) |
 | `Ctrl+T` | Open file by path |
 | `Ctrl+O` / `F3` | Fuzzy file finder |
-| `Ctrl+W` / `Ctrl+X` | Close tab (last quits) |
-| `Alt+←` / `Alt+→` | Switch tabs |
-| `Alt+1..9` | Jump to tab N |
+| `Ctrl+W` / `Ctrl+X` | Close tab (last quits; `Ctrl+X` cuts a selection instead) |
 
 ### Splits & Panels
 
@@ -187,66 +161,41 @@ dmed a.txt b.txt               # multiple files → tabs
 | `Ctrl+Alt+W` | Close pane |
 | `Ctrl+B` / `F9` | Toggle project tree |
 | `Ctrl+G` | Git panel |
-| `Alt+T` | Toggle terminal |
+| `Alt+T` | Terminal |
+| `Alt+A` / `Alt+L` | AI chat / Agent panel |
 
-The status bar's bottom-left icons (`▤` tree, `⎇` git, `✦` AI, `◉` debug, `❯`
-terminal) are clickable; hovering one shows a callout with its shortcut.
+The status bar icons (`▤` tree, `⎇` git, `✦` AI, `◉` debug, `❯` terminal) are clickable and show their shortcut on hover.
 
-### Debug
+### Debug (`Ctrl+Alt+D` opens the panel)
 
 | Keys | Action |
 |------|--------|
-| `Ctrl+Alt+D` | Toggle debug panel |
-| `F4` | Toggle breakpoint at cursor line (or left-click the gutter) |
-| Middle click (gutter) | Toggle bookmark |
+| `F4` | Toggle breakpoint at cursor (left-click gutter; middle-click = bookmark) |
 | `F5` | Run / continue / pause a running debuggee |
 | `Shift+F5` | Stop session |
-| `F6` | Step over (while the debug panel is open) |
-| `F7` | Step in (while the debug panel is open) |
-| `Shift+F7` | Step out (while the debug panel is open) |
+| `F6` / `F7` / `Shift+F7` | Step over / in / out (while the panel is open) |
 | `Tab` (in panel) | Cycle threads / stack / variables / eval input |
-| Click / wheel (in panel) | Select a thread, frame or variable; `Backspace` leaves an expanded variable |
+| Click / wheel (in panel) | Select thread, frame or variable; `▸` expands |
 
-### AI
-
-| Keys | Action |
-|------|--------|
-| `Alt+A` | Toggle AI chat panel |
-| `Alt+I` | Inline rewrite (select text first) |
-| `Alt+G` | Inline ghost suggestion (Tab accept, Esc dismiss) |
-| `Alt+L` | Agent panel — background task queue, progress, cancel |
-| `Ctrl+U` | Clear chat history (in chat panel) |
-
-### Search
+### LSP | Search | General
 
 | Keys | Action |
 |------|--------|
-| `Ctrl+F` | Find in file |
+| `F12` / `Ctrl+Click` | Go to definition |
+| `Ctrl+Alt+R` | Rename symbol (LSP, across files) |
+| `Ctrl+Alt+Q` | Code actions (quick fixes, refactors) |
+| `Ctrl+Alt+F` | Format document (LSP; buffer stays unsaved until `Ctrl+S`) |
+| `Ctrl+F` / `F3` / `Shift+F3` | Find / next / previous match |
 | `Ctrl+H` | Find & replace |
-| `F3` / `Shift+F3` | Next / previous match |
-
-### Git
-
-| Keys | Action |
-|------|--------|
-| `D` (in panel) | Side-by-side diff vs HEAD |
-| `Alt+[` / `Alt+]` | Previous / next hunk |
-
-### General
-
-| Keys | Action |
-|------|--------|
-| `F12` / `Ctrl+Click` | Go to definition (LSP) |
 | `Ctrl+P` / `F2` | Command palette |
-| `Alt+P` / `Ctrl+Shift+P` | Search everywhere — commands, files and settings (a double `Shift` does the same where the terminal reports bare modifiers) |
+| `Alt+P` / `Ctrl+Shift+P` | Search everywhere (double `Shift` works where the terminal reports it) |
 | `F1` / `Ctrl+E` | Help overlay |
-| `Ctrl+Q` | Quit |
+| `Ctrl+Q` | Quit (a dirty buffer asks first) |
 | `Ctrl+C` | Copy the selection (never quits) |
 
 ## Configuration
 
-Create `.dmed.conf` in your home directory (global) or project root (overrides global).
-Settings hot-reload on save.
+`.dmed.conf` in your home directory (global) or project root (project wins), hot-reload on save.
 
 ```ini
 [editor]
@@ -256,59 +205,52 @@ line_numbers = true
 word_wrap = false           # wrap long lines to pane width (Alt+Z toggles)
 skipped_dirs = .git,node_modules,vendor
 
-[ai]
-provider = Pollinations (free, no key)   # default: no account needed; wizard presets: Ollama (local) | OpenAI | DeepSeek | Groq | LM Studio (local) | vLLM (local) | Unsloth (local) | Custom
-                            # legacy values "ollama"/"openai" still work
+[ai]                        # everything below defaults sensibly; the wizard writes it
+provider = Pollinations (free, no key)   # wizard presets: Ollama (local) | OpenAI | DeepSeek | Groq | LM Studio (local) | vLLM (local) | Unsloth (local) | Custom
 model =                      # empty = first model reported by the server
 ollama_url = https://text.pollinations.ai   # base URL, no /v1 or /openai suffix (it is appended automatically)
-api_key =                    # for OpenAI-compatible providers that need one
+api_key =
 api_path =                   # endpoint prefix; /v1 by default, /openai for Pollinations (set by the wizard)
-models_path =                # model-list path; /v1/models by default, /models for Pollinations
+models_path =                # /v1/models by default, /models for Pollinations
 context_max = 6000           # max runes sent as file context
-temperature = 0              # generation temperature in tenths (7 => 0.7); 0 = provider default
-num_ctx = 0                  # context window in tokens for Ollama (num_ctx); 0 = default
-num_predict = 0              # max output tokens; 0 = provider default
-tool_rounds = 0              # chat tool-calling loop cap; 0 = built-in (6)
-allow_run = ask                # always | never | ask — ask (default) confirms each shell command the model proposes
-restrict_to_root = true       # true (default) keeps READ/EDIT/REPLACE inside the project root
-tools_enabled =               # optional whitelist of chat tools, e.g. read,search,list_dir,glob,run,replace,edit
-tools_disabled =              # optional blacklist applied after the whitelist
+temperature = 0              # tenths (7 => 0.7); 0 = provider default
+tool_rounds = 0              # chat tool-loop cap; 0 = built-in (6)
+allow_run = ask              # always | never | ask — ask (default) confirms each shell command
+restrict_to_root = true      # keeps READ/EDIT/REPLACE inside the project root
 mode = act                   # act | plan — plan exposes read-only tools only
-web_search = false            # true enables WEB_SEARCH (DuckDuckGo): the only tool that leaves this machine
-web_search_budget = 20        # web queries allowed per session
-free_fallback = true          # true (default): with nothing configured and no local answer, use the keyless provider
-system_prompt = You are a helpful coding assistant...
+web_search = false           # true enables WEB_SEARCH (DuckDuckGo), budgeted per session
+web_search_budget = 20
+free_fallback = true         # keyless provider when nothing is configured (a CLOUD badge marks it)
+system_prompt =
 
-[agent]                       # background agent tasks (M4): defaults are fine for most users
-system_prompt =               # instruction override for agents producing edits; empty = built-in
-context_max = 262144          # total bytes of file context gathered for the task
-subagent_prompt =             # instruction override for delegated sub-agents; empty = built-in
-subagent_rounds = 0           # tool-loop cap for one delegated task; 0 = built-in (6)
+[agent]                      # background agent tasks
+system_prompt =
+context_max = 262144
+subagent_prompt =
+subagent_rounds = 0
 
 [ui]
 tree_width = 25
-chat_width_pct = 40          # percentage of screen width
-lang = en                    # UI language: en | ru
+chat_width_pct = 40
+lang = en                    # en | ru
 
-[plugins]                     # remote source for the plugin store
-repo = dedomorozoff/dmed     # "owner/repo"
-dir = plugins                # directory holding .lua plugins
+[plugins]
+repo = dedomorozoff/dmed
+dir = plugins
 branch = main
 
-[debug]                       # DAP debugger (Go/Delve by default)
-mode = debug                  # launch mode passed to the adapter (debug/test/exec for Delve)
-program =                     # package dir / executable / module entry; empty = active file dir
-args =                        # whitespace-separated arguments for the debuggee
-stop_on_entry = false         # pause at program start
-adapter_cmd = dlv             # adapter binary (dlv, debugpy-adapter, lldb-dap, node, ...); dlv_path is a legacy alias
-adapter_mode = reverse        # reverse (adapter dials us back) | stdio (stdin/stdout DAP)
-adapter_args =                # extra CLI args for the adapter process
-launch_type = go              # DAP launch "type" field
-launch_request = launch       # launch | attach
-launch_json =                 # raw JSON merged into the launch body (adapter-specific keys win)
+[debug]                      # DAP debugger (Go/Delve by default)
+mode = debug                 # launch mode passed to the adapter (debug/test/exec for Delve)
+program =                    # package dir / executable; empty = active file dir
+args =
+adapter_cmd = dlv            # adapter binary (dlv, debugpy-adapter, lldb-dap, node, ...)
+adapter_mode = reverse       # reverse (adapter dials us back) | stdio
+launch_type = go
+launch_request = launch      # launch | attach
+launch_json =                # raw JSON merged into the launch body
 ```
 
-Example: debug a Python module through debugpy (a stdio DAP adapter):
+Example — debug a Python module through debugpy (a stdio DAP adapter):
 
 ```ini
 [debug]
@@ -319,79 +261,26 @@ program = /path/to/app
 launch_json = {"justMyCode": false}
 ```
 
-Node.js and TypeScript: with VS Code's "JavaScript Debugger" extension
-(`ms-vscode.js-debug`) installed, `.js/.mjs/.cjs/.jsx/.ts/.mts/.tsx` files are
-auto-detected and debugged through its standalone stdio adapter (`node
-src/dap.js`) — `F4` breakpoints, `F5` runs the active file, F6/F7 step. Without
-the extension, install the adapter once and/or point dmed at it:
-
-```sh
-npm i -g @vscode/js-debug-adapter     # adapter script: src/dap.js
-```
-
-```ini
-[debug]
-adapter_cmd = node
-adapter_mode = stdio
-adapter_args = C:/Users/me/node_modules/@vscode/js-debug-adapter/src/dap.js
-launch_type = node
-launch_request = launch
-```
-
-The adapter script is searched in `~/.vscode{-insiders,-server}/extensions`,
-`~/.vscodium/extensions`, `~/.cursor/extensions` and `~/node_modules`, and
-`DMED_JS_DEBUG=/path/to/dap.js` pins it explicitly. Attaching to an
-already-running process works the same way: run `node --inspect-brk app.js`,
-then set `launch_request = attach` with `launch_json =
-{"port": 9229}`.
+The VS Code "JavaScript Debugger" (`ms-vscode.js-debug`, adapter script `src/dap.js`) is auto-detected for `.js/.ts` files from `~/.vscode*/extensions`, `~/.cursor/extensions` and `~/node_modules`; `DMED_JS_DEBUG` pins it explicitly. Attaching to `node --inspect-brk app.js`: `launch_request = attach`, `launch_json = {"port": 9229}`.
 
 ## Documentation
 
 - [Plugins (Lua)](docs/PLUGINS.md) — write keybindings, palette commands, events
 - [Autocompletion & LSP](docs/AUTOCOMPLETION.md) — completion popup + language servers
 - [M4 Agents](docs/M4-AGENTS.md) — background agent tasks, queue, diff-review apply
-- [ROADMAP.md](ROADMAP.md) — milestones and status
-- [docs/IMPROVEMENT-PLAN.md](docs/IMPROVEMENT-PLAN.md) — what to improve next,
-  ordered by cost/benefit
-- [docs/AUDIT-2026-10-01.md](docs/AUDIT-2026-10-01.md) — the audit that led there
+- [ROADMAP.md](ROADMAP.md) — milestones, features and their design notes
+- [docs/RELEASE-v0.9.3.md](docs/RELEASE-v0.9.3.md) — the latest release notes
 
-[docs/AI-TOOLS-PLAN.md](docs/AI-TOOLS-PLAN.md) records the design behind the AI
-tool surface (why every tool is gated the way it is, and what was deliberately
-not done).
+## Known Limitations
 
-## Known limitations
+Worth knowing before you file a bug:
 
-Worth knowing before you file a bug.
-
-- **Keybindings must be checked in a real terminal.** Automated harnesses lose
-  most Ctrl-chords and break F-key sequences, so the binding table is verified
-  manually (Windows Terminal / mintty), not by CI.
-- **AI tools are safe by default and can be relaxed.** `allow_run = ask` means
-  the model has to ask before running a shell command, and
-  `restrict_to_root = true` keeps `READ`/`EDIT`/`REPLACE` inside the project.
-  Set both to `always`/`false` in `.dmed.conf` if you prefer the old behaviour.
-- **Small local models pick tools worse as the list grows.** Trim it with
-  `tools_enabled` (whitelist) or `tools_disabled` (blacklist) in `[ai]` — the
-  names also accept the common aliases (`read_file`, `grep`, `run_command`,
-  `write_file`, `edit_file`).
-- **The default provider is a public service (Pollinations, no account
-  needed).** Prompts and code leave the machine out of the box; prefer everything
-  local by picking `Ollama (local)` in `Ctrl+P` → `AI: Preferences...`.
-  With nothing configured and no answer from the configured provider, a session
-  also falls back to the keyless provider and says so in the chat, with a `CLOUD`
-  badge in the chat header. Set `free_fallback = false` to disable the fallback
-  (the default provider itself is not affected). The free tier is rate-limited
-  (roughly one request per 15s).
-- **`web_search` is off by default.** It is the only tool that reaches outside
-  the workspace; turn it on deliberately and watch the per-session budget.
-- **Accepted agent changes are committed to git but cannot be undone from the
-  editor yet.** Use `git revert` for now.
-- **Large repositories get slow between AI tool rounds**, because the editor
-  snapshots the whole project tree to detect touched files.
-- **LSP support is minimal**: diagnostics and go-to-definition. No
-  code actions or formatting yet.
-- **`php-test/`** is a manual fixture for Xdebug debugging, not used by any
-  automated test — see [php-test/README.md](php-test/README.md).
+- **Keybindings are verified in real terminals, not by CI.** Automated harnesses lose most Ctrl-chords and break F-key sequences, so the binding table is checked manually (Windows Terminal / mintty). dmed keeps a Windows-native binary, not a cygwin one — msys/pty follow the usual windows caveats.
+- **The default AI provider is a public keyless service (Pollinations).** Prompts and code leave the machine out of the box; prefer local by picking `Ollama (local)` in `Ctrl+P → AI: Preferences...`, and/or set `free_fallback = false`. The free tier is rate-limited (roughly one request per 15 s).
+- **`web_search` is off by default** — it is the only tool that reaches outside the workspace; enable it deliberately and watch the budget.
+- **Small local models pick tools worse as the list grows.** Trim the surface with `tools_enabled` (whitelist) or `tools_disabled` (blacklist); the names accept common aliases (`read_file`, `grep`, `run_command`, `write_file`, `edit_file`).
+- There is no automated TUI test — the editor is verified by hand for interactive flows; the core (buffer, rope, applier, providers, git, debug clients) is unit-tested.
+- **`php-test/`** is a manual fixture for Xdebug debugging, not used by automated tests — see [php-test/README.md](php-test/README.md).
 
 ## Architecture
 
@@ -399,17 +288,28 @@ Worth knowing before you file a bug.
 internal/buffer/     pure text buffer + undo/redo (no TUI deps)
 internal/rope/       persistent line-rope backing the buffer (O(1) undo)
 internal/editor/     Bubbletea model: keys, tabs, splits, rendering
+internal/agent/      background agents: queue, runner, atomic applier, git commit
+internal/ai/         provider interface: Ollama + OpenAI-compatible (streaming)
+internal/config/     INI parser, hot-reload, defaults, env overrides
+internal/lsp/        JSON-RPC 2.0 LSP client (diagnostics, def, rename, actions, format)
+internal/dap/        DAP client (framing, stdio/reverse launchers)
+internal/dbgp/       DBGp client for Xdebug (PHP): NUL-framed XML protocol
+internal/sqlitedb/   TUI-free SQLite data layer (modernc.org/sqlite, pure Go)
+internal/imgprev/    TUI-free ASCII terminal preview of images
 internal/plugin/     Lua plugin framework (gopher-lua)
 internal/bundled/    embedded official plugins for the plugin store
 internal/i18n/       en/ru localization catalogs
-internal/ai/         provider interface: Ollama + OpenAI-compatible
-internal/config/     INI parser, hot-reload, defaults
-internal/dap/        DAP client (debugging): framing, stdio/reverse launchers
-internal/syntax/     Chroma-based highlighting
+internal/syntax/     Chroma-based highlighting (streamed)
 internal/vcs/        pure-Go git operations (go-git)
-internal/lsp/        JSON-RPC 2.0 LSP client
-internal/events/     internal event bus
 internal/watcher/    fsnotify file watcher
+internal/events/     internal event bus
+internal/todo/       the model's task checklist
+internal/ask/        questions the model asks the user
+internal/websearch/  opt-in DuckDuckGo search for WEB_SEARCH
+internal/session/    save/restore of open files across restarts
+internal/terminal/   persistent built-in terminal (ConPTY/PTY + ANSI)
+internal/ptyterm/    low-level pty plumbing behind the terminal
+internal/debug/      panic-capture reporting for background goroutines
 main.go              CLI entry point
 ```
 
@@ -426,7 +326,7 @@ main.go              CLI entry point
 | M6 — AI onboarding (provider presets, setup wizard) | ✅ Done |
 | M7 — Debugging (DAP/Delve + generic adapters) | ✅ Done |
 
-See [ROADMAP.md](ROADMAP.md) for full details.
+Post-milestone work (SQLite browser, picture preview, Tree-panel width, LSP formatting, agent undo) is tracked in [ROADMAP.md](ROADMAP.md) together with the design rationale.
 
 ## License
 

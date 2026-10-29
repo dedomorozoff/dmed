@@ -285,6 +285,21 @@ var legacyToolName = map[string]string{
 	"delegate":    "SUB_AGENT",
 }
 
+// toolBatchTouchesDisk reports whether any tool call in the batch can change
+// files on disk: EDIT and REPLACE write directly, RUN executes an arbitrary
+// shell command in the project root. Everything else is read-only (or only
+// parks a proposal for review), so a batch without these three never walks
+// the project for touched-file detection.
+func toolBatchTouchesDisk(tools []ai.ToolCall) bool {
+	for _, tc := range tools {
+		switch normalizeToolName(tc.Name) {
+		case "RUN", "EDIT", "REPLACE":
+			return true
+		}
+	}
+	return false
+}
+
 // normalizeToolName resolves a model-provided tool name to a shipped one.
 func normalizeToolName(name string) string {
 	if t, ok := legacyToolName[strings.ToLower(name)]; ok {

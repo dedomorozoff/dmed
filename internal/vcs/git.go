@@ -1,6 +1,7 @@
 package vcs
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -739,6 +740,183 @@ type FileDiffView struct {
 
 // CommitDiff returns per-file side-by-side diffs for the given commit
 // compared to its parent (or empty tree for the first commit).
+// LastCommitWithSubject returns the most recent commit on the current branch
+// whose subject starts with prefix, scanning up to n commits back.
+// plumbing.ZeroHash means "not found".
+func (repo *Repo) LastCommitWithSubject(prefix string, n int) (plumbing.Hash, error) {
+	entries, err := repo.Log(n)
+	if err != nil {
+		return plumbing.ZeroHash, err
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Subject, prefix) {
+			return e.FullHash, nil
+		}
+	}
+	return plumbing.ZeroHash, nil
+}
+
+// RevertCommit undoes the changes of one commit in the working tree: every
+// file the commit touched is restored to its content before that commit and
+// the restore is staged into a single "revert" commit. The touched worktree
+// paths are returned.
+//
+// The restore is refuse-first about anything newer than the reverted commit:
+// every working-tree file must still match exactly what the reverted commit
+// produced, and a path the commit deleted must still be absent. One mismatch
+// aborts the whole revert with an error before a single byte is written, so
+// an undo either lands in full or does not touch the tree at all.
+func (repo *Repo) RevertCommit(hash plumbing.Hash) ([]string, error) {
+	commit, err := repo.r.CommitObject(hash)
+	if err != nil {
+		return nil, err
+	}
+	if commit.NumParents() == 0 {
+		return nil, fmt.Errorf("cannot revert the initial commit")
+	}
+	parent, err := commit.Parent(0)
+	if err != nil {
+		return nil, err
+	}
+	childTree, err := commit.Tree()
+	if err != nil {
+		return nil, err
+	}
+	parentTree, err := parent.Tree()
+	if err != nil {
+		return nil, err
+	}
+	changes, err := object.DiffTree(parentTree, childTree)
+	if err != nil {
+		return nil, err
+	}
+
+	// blobContent reads one tree entry as bytes; a missing entry reads as nil.
+	blobContent := func(t *object.Tree, path string) ([]byte, bool, error) {
+		e, err := t.FindEntry(path)
+		if err != nil {
+			// Absence is a legitimate outcome for the caller: nil, ok=false.
+			return nil, false, nil
+		}
+		blob, err := repo.r.BlobObject(e.Hash)
+		if err != nil {
+			return nil, false, err
+		}
+		rd, err := blob.Reader()
+		if err != nil {
+			return nil, false, err
+		}
+		defer rd.Close()
+		data, err := io.ReadAll(rd)
+		return data, true, err
+	}
+
+	// Pass 1 — decide every restore without touching the tree yet.
+	type restore struct {
+		rel string // worktree-slash-relative path, also the stage name
+		new []byte // the content to write; nil means delete the file
+	}
+	var plan []restore
+	for _, ch := range changes {
+		r := restore{}
+		switch {
+		case ch.To.Name == "":
+			// The commit deleted the file: reverting recreates it from the
+			// parent. A file that reappeared since the agent commit is newer
+			// work the revert must not overwrite.
+			rel := ch.From.Name
+			if _, err := os.Stat(filepath.Join(repo.Root, rel)); err == nil {
+				return nil, fmt.Errorf("revert: %s changed after the commit, refusing", rel)
+			}
+			data, ok, err := blobContent(parentTree, rel)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, fmt.Errorf("revert: %s not found in the parent commit", rel)
+			}
+			r.rel, r.new = rel, data
+		default:
+			// The commit added or rewrote the file: the working tree must
+			// still hold exactly what the commit wrote, then the revert puts
+			// back the parent's content (or deletes the file the commit
+			// created).
+			rel := ch.To.Name
+			cur, err := os.ReadFile(filepath.Join(repo.Root, rel))
+			if err != nil {
+				return nil, fmt.Errorf("revert: %s is missing, worktree moved on", rel)
+			}
+			want, ok, err := blobContent(childTree, rel)
+			if err != nil {
+				return nil, err
+			}
+			if !ok || !bytes.Equal(cur, want) {
+				return nil, fmt.Errorf("revert: %s changed after the commit, refusing", rel)
+			}
+			prev, ok, perr := blobContent(parentTree, ch.From.Name)
+			if perr != nil {
+				return nil, perr
+			}
+			if ch.From.Name == "" || !ok {
+				// Created by the commit: reverting removes it.
+				r.rel, r.new = rel, nil
+			} else {
+				r.rel, r.new = rel, prev
+			}
+		}
+		plan = append(plan, r)
+	}
+
+	// Pass 2 — write everything. Past refuse-first nothing may fail to be
+	// decided, only to hit the disk.
+	wt, err := repo.r.Worktree()
+	if err != nil {
+		return nil, err
+	}
+	short := hash.String()
+	if len(short) > 7 {
+		short = short[:7]
+	}
+	for _, r := range plan {
+		if r.new == nil {
+			if err := os.Remove(filepath.Join(repo.Root, r.rel)); err != nil && !os.IsNotExist(err) {
+				return nil, err
+			}
+			if _, err := wt.Remove(r.rel); err != nil && !os.IsNotExist(err) {
+				return nil, err
+			}
+			continue
+		}
+		full := filepath.Join(repo.Root, r.rel)
+		if dir := filepath.Dir(full); dir != repo.Root {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return nil, err
+			}
+		}
+		if err := os.WriteFile(full, r.new, 0o644); err != nil {
+			return nil, err
+		}
+		if _, err := wt.Add(r.rel); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := wt.Commit(fmt.Sprintf("agent: revert %s", short), &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "dmed",
+			Email: "dmed@local",
+			When:  time.Now(),
+		},
+	}); err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(plan))
+	for _, r := range plan {
+		paths = append(paths, r.rel)
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
 func (repo *Repo) CommitDiff(hash plumbing.Hash) ([]FileDiffView, error) {
 	commit, err := repo.r.CommitObject(hash)
 	if err != nil {
