@@ -2289,6 +2289,9 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 
 	for i, r := range raw {
 		rawToExp[i] = len(exp)
+		if r == '\r' {
+			continue
+		}
 		var st lipgloss.Style
 		var tok syntax.Token
 		if i < len(rawTokens) {

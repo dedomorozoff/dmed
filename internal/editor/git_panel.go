@@ -237,7 +237,7 @@ func (m *Model) refreshGitDiffPreview() {
 	if t := m.tabByPath(abs); t != nil {
 		right = t.buf.Text()
 	} else if data, rerr := os.ReadFile(abs); rerr == nil {
-		right = strings.ReplaceAll(string(data), "\r\n", "\n")
+		right = strings.ReplaceAll(strings.ReplaceAll(string(data), "\r\n", "\n"), "\r", "\n")
 	}
 
 	m.diffPath = fs.Path

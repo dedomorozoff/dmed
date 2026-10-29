@@ -961,7 +961,7 @@ func (m *Model) openPath(rawPath string) {
 			}
 		}
 		if t.img == nil {
-			t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
+			t.buf = buffer.Load(normalizePaste(string(data)))
 		}
 	}
 	if m.watcher != nil && path != "" {
@@ -1541,7 +1541,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if v, err2 := loadImage(data); err2 == nil {
 							t.img = v
 						} else {
-							t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
+							t.buf = buffer.Load(normalizePaste(string(data)))
 							m.msg = m.t("msg.image_failed", err2.Error())
 						}
 					}
@@ -1549,14 +1549,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if !t.buf.Dirty() {
 					if data, err := os.ReadFile(t.path); err == nil {
-						t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
+						t.buf = buffer.Load(normalizePaste(string(data)))
 						t.syntaxCached = nil
 						t.diffText = ""
 						m.msg = m.t("msg.reloaded_name", t.name(m.baseDir()))
 					}
 				} else {
 					if data, err := os.ReadFile(t.path); err == nil {
-						diskText := strings.ReplaceAll(string(data), "\r\n", "\n")
+						diskText := normalizePaste(string(data))
 						bufText := t.buf.Text()
 						m.conflictRows = vcs.SideBySide(bufText, diskText)
 						m.conflictLeftLines = strings.Split(strings.TrimRight(bufText, "\n"), "\n")
@@ -2149,7 +2149,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 				absT, _ := filepath.Abs(t.path)
 				if absT == m.conflictPath || t.path == m.conflictPath {
 					if data, err := os.ReadFile(t.path); err == nil {
-						t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
+						t.buf = buffer.Load(normalizePaste(string(data)))
 						t.syntaxCached = nil
 						t.diffText = ""
 						m.msg = m.t("msg.reloaded")

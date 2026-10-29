@@ -742,7 +742,7 @@ func (m *Model) reloadChangedBuffer(path string) {
 			continue
 		}
 		if data, err := os.ReadFile(full); err == nil {
-			t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
+			t.buf = buffer.Load(normalizePaste(string(data)))
 			t.syntaxCached = nil
 			t.diffText = ""
 		}
