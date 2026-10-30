@@ -39,7 +39,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "proj_search", title: "cmd.proj_search_t", desc: "cmd.proj_search_d", action: func(m *Model) tea.Cmd { m.startProjectSearch(); return nil }},
 		{id: "lsp_rename", title: "cmd.lsp_rename_t", desc: "cmd.lsp_rename_d", action: func(m *Model) tea.Cmd { m.startLspRename(); return nil }},
 		{id: "lsp_actions", title: "cmd.lsp_actions_t", desc: "cmd.lsp_actions_d", action: func(m *Model) tea.Cmd { return m.startLspActions() }},
-		{id: "lsp_format", title: "cmd.lsp_format_t", desc: "cmd.lsp_format_d", action: func(m *Model) tea.Cmd { return m.lspFormatCmd() }},
+		{id: "lsp_format", title: "cmd.lsp_format_t", desc: "cmd.lsp_format_d", action: func(m *Model) tea.Cmd { return m.lspFormatCmd() }}, // Ctrl+Alt+L (and the legacy Ctrl+Alt+F)
 		{id: "replace", title: "cmd.replace_t", desc: "cmd.replace_d", action: func(m *Model) tea.Cmd { m.startReplace(); return nil }},
 		{id: "goto_line", title: "cmd.goto_line_t", desc: "cmd.goto_line_d", action: func(m *Model) tea.Cmd { m.startGotoPrompt(); return nil }},
 		{id: "word_wrap", title: "cmd.word_wrap_t", desc: "cmd.word_wrap_d", action: func(m *Model) tea.Cmd { m.toggleWordWrap(); return nil }},

@@ -36,6 +36,34 @@ func TestCtrlAltControlByteInCode(t *testing.T) {
 	}
 }
 
+func TestCtrlAltLReformats(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "x.txt", "xx\n")
+	chdir(t, dir)
+
+	for _, k := range []tea.KeyPressMsg{
+		// The JetBrains reformat chord arrives either as a Text byte (ESC +
+		// \x0c packed with the Alt flag) or only in Code. It must reach the
+		// LSP format path even with no server around (msg.no_lsp), never
+		// reduce to alt+l (agent panel) or type an "l".
+		tea.KeyPressMsg{Text: "\x0c", Mod: tea.ModAlt},
+		tea.KeyPressMsg{Code: 0x0c, Mod: tea.ModAlt},
+	} {
+		m := New(f1)
+		m.cfg.LSP.Enabled = false
+		m = press(m, k)
+		if m.agentOpen {
+			t.Fatal("ctrl+alt+l must not open the agent panel")
+		}
+		if m.msg == "" {
+			t.Fatal("ctrl+alt+l must hit the reformat path (no_lsp reply), got an empty msg")
+		}
+		if got := m.cur().buf.Text(); got != "xx\n" {
+			t.Fatalf("ctrl+alt+l must not type into the buffer, got %q", got)
+		}
+	}
+}
+
 func TestCtrlSpaceFromNUL(t *testing.T) {
 	dir := t.TempDir()
 	f1 := writeTemp(t, dir, "x.txt", "x\n")

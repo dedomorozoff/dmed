@@ -69,6 +69,7 @@ var helpEntries = []helpEntry{
 	{"Ctrl+Shift+F", "help.proj_search"},
 	{"Ctrl+H", "help.replace"},
 	{"Ctrl+L", "help.goto_line"},
+	{"Ctrl+Alt+L", "help.format"},
 	{"Alt+Z", "help.word_wrap"},
 	{"Alt+B", "help.blame"},
 	{"Ctrl+G", "help.git_panel"},

@@ -403,7 +403,8 @@ type Model struct {
 	projSearchScan  bool // a background walk is in flight
 	projSearchCh    chan projSearchMsg
 
-	// LSP rename (Ctrl+Alt+R) and code actions (Ctrl+Alt+Q).
+	// LSP rename (Ctrl+Alt+R), code actions (Ctrl+Alt+Q) and reformat
+	// (Ctrl+Alt+L, legacy fallback Ctrl+Alt+F).
 	lspRenameOpen  bool
 	lspRenameIn    []rune
 	lspActionsOpen bool
@@ -2096,10 +2097,15 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "ctrl+alt+q":
 		return m.startLspActions()
+	case "ctrl+alt+l":
+		// JetBrains-style reformat chord (+ note: alt+l alone toggles the
+		// agent panel). Layout is the language server's job, not a reindent:
+		// reach textDocument/formatting where the terminal lets ctrl+alt
+		// through, palette command covers the rest.
+		return m.lspFormatCmd()
 	case "ctrl+alt+f":
-		// Layout is the language server's job, not a reindent: reach
-		// textDocument/formatting where the terminal lets ctrl+alt through,
-		// palette command covers the rest.
+		// Same reformat, the pre-JetBrains chord kept as a fallback for
+		// terminals that mangle ctrl+alt+L (ctrl+L alone is goto-line).
 		return m.lspFormatCmd()
 	case "ctrl+h":
 		m.startReplace()
