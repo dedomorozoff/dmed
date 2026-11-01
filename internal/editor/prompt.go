@@ -230,6 +230,7 @@ func (m *Model) applyGoto(s string) {
 	if line >= t.buf.LineCount() {
 		line = t.buf.LineCount() - 1
 	}
+	m.pushJump()
 	t.buf.SetCursor(line, 0)
 	if col > 0 {
 		if col > t.buf.LineLen(line) {

@@ -115,7 +115,10 @@ The code is split into focused internal packages:
   one. `conflictOpen`/`handleConflict` is the watcher's external-change reload
   prompt, not this feature),
   `session.go` (save/restore of the session),
-  `finder.go` (fuzzy file finder), `split.go`, `tree.go`, `mouse.go`,
+  `finder.go` (fuzzy file finder), `split.go` (the panes and their layout; a
+  `pane` holds the tab index, the scroll offsets, word wrap and the two jump-list
+  stacks — positions named by path, not by tab index, which every close
+  renumbers), `tree.go`, `mouse.go`,
   `completion.go`, `palette.go`, `terminal.go`, `chat.go`
   (AI chat), `ai_inline.go` (inline rewrite → diff review), `ghost.go`
   (Copilot-style ghost text), `agent_panel.go` (agent task queue UI),
@@ -129,6 +132,13 @@ The code is split into focused internal packages:
   status-bar message; the text work is the buffer's), `delimiter.go` (the
   bracket jump and select-inside commands: the same thin shape, and pure caret
   moves — no edit, no undo step, no dirty flag; the scanning is the buffer's),
+  `jumplist.go` (the jump-list commands: `Ctrl+Alt+←`/`→` walk the pane's two
+  stacks. `pushJump` is called by the four discrete jumps — the definition reply,
+  a project-search hit, go-to-line, the debugger's stop line — and in the handler
+  that moves the caret, not where the request started, because the reply is async.
+  Nothing else records a position: arrows, clicks, the in-file find moves and the
+  chords that already walk back (`Alt+N`, `Alt+[`/`]`, `Ctrl+]`) would flood the
+  history. Like the bracket commands these are caret and focus moves only),
   `fold.go` (the indentation fold ranges and the display-row list the whole
   pane renders from. The fold commands act on the block the cursor *belongs
   to* — `foldTargetAt`: the block starting on its line, the innermost one

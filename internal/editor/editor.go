@@ -1471,6 +1471,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if msg.loc == nil {
 			m.msg = m.t("msg.no_definition")
 		} else {
+			// A jump the user cannot walk back by hand: record where it starts
+			// before moving, here rather than in gotoDefinition, because the
+			// reply is async and the caret the user stands on when it lands is
+			// the position back has to return to.
+			m.pushJump()
 			m.focusOrOpen(msg.loc.Path)
 			if t := m.cur(); t != nil {
 				t.buf.SetCursor(msg.loc.Line, msg.loc.Col)

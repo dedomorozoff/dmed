@@ -2,11 +2,23 @@ package editor
 
 import tea "charm.land/bubbletea/v2"
 
+// jumpPoint is one entry of the pane's jump history: a caret position. It is
+// named by path rather than by tab index, because indices are renumbered by
+// every close (fixPaneTabsAfterClose) while a path still resolves through
+// focusOrOpen — even after the tab was closed and needs reopening.
+type jumpPoint struct {
+	path string
+	line int
+	col  int
+}
+
 type pane struct {
 	tabIdx   int
 	offsetX  int
 	offsetY  int
 	wordWrap bool
+	backs    []jumpPoint
+	forwards []jumpPoint
 }
 
 type splitLayout int

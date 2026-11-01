@@ -108,6 +108,14 @@ func TestKeyOfNormalization(t *testing.T) {
 			wantText: "",
 		},
 		{
+			// The jump list chords: modifier order in the name is what the
+			// binding tables are keyed by.
+			name:     "ctrl+alt with an arrow is named ctrl first",
+			msg:      tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModCtrl | tea.ModAlt},
+			wantKey:  "ctrl+alt+left",
+			wantText: "",
+		},
+		{
 			// Terminals put the raw control byte in Text for these and
 			// String() prints it verbatim: a name no binding could ever match.
 			name:     "enter is named from the code when Text carries CR",
@@ -348,6 +356,32 @@ func TestEditorBindingsFire(t *testing.T) {
 					t.Fatalf("the chord must reach the select command, msg = %q", m.msg)
 				}
 				mustText(t, m.cur().buf.Text(), "one\ntwo\nthree\n")
+			}},
+		{"ctrl+alt+left walks the jump list back",
+			tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModCtrl | tea.ModAlt},
+			func(m *Model) {
+				m.cur().buf.SetCursor(2, 1)
+				m.pushJump() // where a jump left the caret before moving it
+				m.cur().buf.SetCursor(0, 0)
+			},
+			func(t *testing.T, m Model) {
+				if l, c := m.cur().buf.CurLine(), m.cur().buf.Col(); l != 2 || c != 1 {
+					t.Fatalf("back must return to 2:1, got %d:%d (msg %q)", l, c, m.msg)
+				}
+				mustText(t, m.cur().buf.Text(), "one\ntwo\nthree\n")
+			}},
+		{"ctrl+alt+right walks the jump list forward",
+			tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModCtrl | tea.ModAlt},
+			func(m *Model) {
+				m.cur().buf.SetCursor(2, 1)
+				m.pushJump()
+				m.cur().buf.SetCursor(0, 0)
+				m.jumpBack() // arms the forward stack with 0:0
+			},
+			func(t *testing.T, m Model) {
+				if l, c := m.cur().buf.CurLine(), m.cur().buf.Col(); l != 0 || c != 0 {
+					t.Fatalf("forward must return to 0:0, got %d:%d (msg %q)", l, c, m.msg)
+				}
 			}},
 		{"enter splits the line at the cursor",
 			tea.KeyPressMsg{Code: tea.KeyEnter}, afterFirstRune,

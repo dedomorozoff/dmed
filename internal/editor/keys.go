@@ -590,6 +590,17 @@ var editorBindings = map[string]binding{
 		m.switchTab(1)
 		return nil, true
 	},
+	"ctrl+alt+left": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		// The jump list. A terminal that cannot tell this chord from Alt+←
+		// hands the key to the tab switch above, so the palette's
+		// "Jump Back" / "Jump Forward" are the portable route.
+		m.jumpBack()
+		return nil, true
+	},
+	"ctrl+alt+right": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.jumpForward()
+		return nil, true
+	},
 	"alt+up": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.MoveLineUp()
 		return nil, true

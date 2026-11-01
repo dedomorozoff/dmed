@@ -83,6 +83,7 @@ var helpEntries = []helpEntry{
 	{"Ctrl+Shift+O / T / B", "help.merge_resolve"},
 	{"Ctrl+]", "help.jump_bracket"},
 	{"Ctrl+Shift+]", "help.select_inside"},
+	{"Ctrl+Alt+← / →", "help.jump_list"},
 	{"Alt+M / Alt+N / S+Alt+N", "help.bookmark"},
 	{"Ctrl+O", "help.finder"},
 	{"Ctrl+T", "help.open"},

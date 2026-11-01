@@ -555,7 +555,7 @@ plan with per-item estimates, design decisions and open questions lives in
       traceable in history rather than a silent tree rewrite. No external
       terminal needed.
 
-## M9–M13 — planned (M9 started: bracket matching, selection transformations)
+## M9–M13 — planned (M9 started: bracket matching, selection transformations, jump list)
 
 The list below is drawn from the aftermath of Post-M8: the "chroma →
 tree-sitter (later)" note in the stack, the plugins' "Remaining: more
@@ -618,8 +618,28 @@ Order and contents will be refined as work proceeds.
       `Ctrl+U` on an unselected buffer: it no longer rebuilds the buffer, so the
       undo history and the caret survive it.
 - Macros: record/playback (`Alt+R`), respecting multi-cursor.
-- Navigation: jump list (back/forward, pushed on goto-definition),
-  MRU tab switching (`Ctrl+Tab`), "go to last edit position".
+- [x] **Jump list**: `Ctrl+Alt+←` / `Ctrl+Alt+→` (also the `Edit: Jump Back` /
+      `Edit: Jump Forward` palette commands) walk the positions the discrete jumps
+      came from, per pane. Only a jump the user cannot retrace by hand records one:
+      goto-definition (`F12` and `Ctrl+Click`, both through the async reply), a
+      Find-in-Project hit, `Ctrl+L` Go-to-Line and the debugger's stop line.
+      Arrows, clicks, the in-file find moves and the walks that already own a chord
+      (`Alt+N` bookmarks, `Alt+[` / `Alt+]` hunks, `Ctrl+]` the pair) push nothing:
+      a chord that can retrace itself needs no history, and a history that grows
+      while the user types is a history nobody can read. An entry is a
+      `(path, line, column)` triple, never a tab index — indices are renumbered by
+      every close, while a path still resolves through `focusOrOpen`, so a back
+      step reopens a file whose tab was closed meanwhile. A new jump abandons the
+      forward branch, an entry equal to where the caret already stands is skipped
+      at both ends so no press can be visibly a no-op, and both stacks are capped
+      at 64 with the oldest dropped. The pair of stacks lives in the `pane` next to
+      the scroll offsets: each split answers for its own navigation and nothing is
+      persisted. Pure caret and focus moves — no edit, no dirty flag, no undo step,
+      secondary cursors dropped first, `clampScroll` unfolding a block the landing
+      line hides inside. A terminal that cannot tell `Ctrl+Alt+←` from `Alt+←`
+      gives the tab switch, which is why the palette route is the documented one.
+- MRU tab switching (`Ctrl+Tab`) and "go to last edit position" — the latter needs
+  a change counter in `internal/buffer` to know where the last edit was.
 - [x] **Replace in Project**: the counterpart of Find in Project
       (`Ctrl+Shift+R`, also in the palette). A two-step prompt (query, then
       replacement) streams a file-level preview, one whole-file `agent.Change`

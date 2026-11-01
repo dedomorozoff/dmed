@@ -1192,6 +1192,7 @@ func (m *Model) handleDapFollowMsg() tea.Cmd {
 	if m.dapRunState != dapStopped || m.dapCurPath == "" || m.dapCurLine <= 0 {
 		return nil
 	}
+	m.pushJump()
 	m.focusOrOpen(m.dapCurPath)
 	if t := m.cur(); t != nil {
 		t.buf.SetCursor(m.dapCurLine-1, 0)

@@ -545,6 +545,7 @@ func (m *Model) jumpProjSel(sel int) {
 // next hit stays one Enter away.
 func (m *Model) openProjHit(h projHit) {
 	full := normalizePath(m.baseDir(), filepath.FromSlash(h.path))
+	m.pushJump()
 	m.focusOrOpen(full)
 	if t := m.cur(); t != nil {
 		t.buf.SetCursor(h.line, h.col)

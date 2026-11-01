@@ -58,6 +58,24 @@ Page up / page down
 Scroll without moving cursor
 .It Sy Ctrl+L
 Go to line (N, N:C, or +N/-N relative)
+.It Sy Ctrl+Alt+Left / Ctrl+Alt+Right
+Jump back / forward through the jump list: the positions this pane's discrete
+jumps came from. A position is recorded by go to definition
+.Pq F12 or Ctrl+Click ,
+a Find in Project hit,
+.Sy Ctrl+L
+and the debugger's stop line — not by motion the cursor keys already retrace
+(arrows, clicks, the in-file find moves, bookmarks, hunks, the bracket pair), so
+the list stays short enough to walk. Entries name the file by path, so a back
+step reopens a file whose tab was closed meanwhile; the two stacks live in the
+pane and are not saved across runs. Where the terminal cannot tell the chord
+from
+.Sy Alt+Left/Right
+(the tab switch), use the
+.Dq Edit: Jump Back
+and
+.Dq Edit: Jump Forward
+palette commands.
 .El
 .Ss Editing
 .Bl -tag -width "Alt+Up/Down"
