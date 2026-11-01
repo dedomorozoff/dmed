@@ -514,6 +514,32 @@ var editorBindings = map[string]binding{
 		m.jumpChange(1)
 		return nil, true
 	},
+	"ctrl+]": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		// No backward chord next to it on purpose: Ctrl+[ *is* Escape, the two
+		// are indistinguishable on every terminal. The jump always lands on a
+		// delimiter instead, so pressing this one chord twice walks the pair.
+		m.jumpToMatchingDelimiterActive()
+		return nil, true
+	},
+	"ctrl+}": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		// Ctrl+] arrives as the control byte 0x1d on legacy terminals, and
+		// controlByteKey re-encodes that as ctrl+} — ] and } share the byte. The
+		// alias keeps the chord from falling through unclaimed; the palette
+		// command "Edit: Select Inside Brackets" is the portable route for
+		// the shifted chord below.
+		m.jumpToMatchingDelimiterActive()
+		return nil, true
+	},
+	"ctrl+shift+]": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.selectInsideBracketsActive()
+		return nil, true
+	},
+	"ctrl+shift+}": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		// Same chord on terminals that report the shifted glyph (}) as the key
+		// instead of the physical one (]).
+		m.selectInsideBracketsActive()
+		return nil, true
+	},
 	"ctrl+\\": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.toggleSplitVert()
 		return nil, true

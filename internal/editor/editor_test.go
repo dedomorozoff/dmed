@@ -142,7 +142,7 @@ func TestGotoPaletteCommand(t *testing.T) {
 	m.paletteQ = []rune("go to line")
 	sel := m.filterPalette()
 	if len(sel) != 1 {
-		t.Fatalf("expected 1 palette hit, got %d", len(sel))
+		t.Fatalf("expected 1 palette hit, got %d: %v", len(sel), paletteIDs(sel))
 	}
 	c := sel[0]
 	c.action(&m)

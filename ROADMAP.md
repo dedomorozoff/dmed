@@ -549,7 +549,7 @@ plan with per-item estimates, design decisions and open questions lives in
       traceable in history rather than a silent tree rewrite. No external
       terminal needed.
 
-## M9–M13 — planned (not started)
+## M9–M13 — planned (M9 started: bracket matching, selection transformations)
 
 The list below is drawn from the aftermath of Post-M8: the "chroma →
 tree-sitter (later)" note in the stack, the plugins' "Remaining: more
@@ -557,9 +557,30 @@ events/API", the hard-coded keybindings and gaps found in daily use.
 Order and contents will be refined as work proceeds.
 
 ### M9 — editing: the last gaps
-- Bracket matching: highlight the pair under the cursor, `Ctrl+]` jump,
-  select inside brackets; pairs come from the fold scan (same indentation)
-  until there is an AST.
+- [x] **Bracket matching**: the pair under the cursor is highlighted, `Ctrl+]`
+      jumps to it and `Ctrl+Shift+]` selects inside it. Pairs come from the
+      scanner in `internal/buffer/match.go`, not from the fold scan: it walks the
+      buffer itself — brackets by depth, quotes by line parity, `\(`-style escapes
+      skipped — inside a 2000-line window, so no AST is needed and nothing is
+      re-tokenized. The jump answers from anywhere, not only with the caret on a
+      delimiter: first the partner of the delimiter it sits on (brackets *and*
+      quotes), otherwise the closing delimiter of the innermost enclosing pair.
+      Enclosing is brackets-only, because deciding "am I inside a string" needs the
+      line-wide quote parity that is a different question from scanning a region.
+      The left walk raises a per-type debt at every closer and lets an opener pay
+      it, so in `f(a) + g(b)` the caret inside `g` gets `g`'s paren and a pair
+      already closed to the left cancels itself out. Landing *on* a delimiter is
+      what makes one chord walk the pair back — necessary, since a backward
+      `Ctrl+[` cannot exist: it *is* Escape. `Ctrl+]` and its legacy-terminal alias
+      `ctrl+}` (the two share one control byte) jump, while the shifted select
+      chord needs a terminal that can tell them apart and is palette-only elsewhere.
+      Select inside takes the content only, in one step, delimiters excluded; empty
+      brackets are not a refusal — the caret moves between them and the status line
+      says so. With no pair anywhere nothing moves and no message lies about a
+      match. Both commands drop secondary cursors, dirty nothing and push no undo
+      step, and the selection needed its own setter (`SelectRange`) for exactly that
+      reason: `DragSelect` re-clamps the column through the sticky goal column and
+      would quietly move an end the command had just computed.
 - Column (rectangular) selection: `Alt+Shift+arrows`, drag with a modifier;
   pasting a block unfolds it into one multi-cursor per line.
 - [x] **Selection transformations**: upper/lower case (`Ctrl+U`/`Ctrl+Shift+U`),
@@ -643,7 +664,8 @@ cross-build. The cheap part first:
 - Embedded languages (markdown code blocks, template strings) where
   chroma can do it — composite lexers.
 - Tree-sitter stays a stretch goal, only if pure-Go bindings appear; then
-  folding and bracket matching move from heuristics to the AST.
+  folding and bracket matching move from the buffer's own scans
+  (`buffer/match.go`, the fold scan) to the AST.
 
 ### M12 — AI v3: agents without stops
 - MCP client: attaching external tool servers (`[ai] mcp_servers`), their

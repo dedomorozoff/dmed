@@ -67,6 +67,14 @@ func TestKeyOfNormalization(t *testing.T) {
 			wantText: "",
 		},
 		{
+			// ] and } share the control byte, so a legacy terminal's Ctrl+] is
+			// indistinguishable from a shifted one: the jump binds both names.
+			name:     "the ctrl+] control byte arrives as ctrl+}",
+			msg:      tea.KeyPressMsg{Text: "\x1d"},
+			wantKey:  "ctrl+}",
+			wantText: "",
+		},
+		{
 			name:     "cyrillic code of a ctrl chord maps to the physical key",
 			msg:      tea.KeyPressMsg{Code: 'ы', Mod: tea.ModCtrl},
 			wantKey:  "ctrl+s",
@@ -325,6 +333,22 @@ func TestEditorBindingsFire(t *testing.T) {
 		{"ctrl+alt+n numbers the line under the cursor",
 			tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl | tea.ModAlt}, nil,
 			func(t *testing.T, m Model) { mustText(t, m.cur().buf.Text(), "1. one\ntwo\nthree\n") }},
+		{"ctrl+] fires the bracket jump",
+			tea.KeyPressMsg{Code: ']', Mod: tea.ModCtrl}, nil,
+			func(t *testing.T, m Model) {
+				if m.msg != "no matching bracket around the cursor" {
+					t.Fatalf("the chord must reach the jump command, msg = %q", m.msg)
+				}
+				mustText(t, m.cur().buf.Text(), "one\ntwo\nthree\n")
+			}},
+		{"ctrl+shift+] fires select inside brackets",
+			tea.KeyPressMsg{Code: ']', Mod: tea.ModCtrl | tea.ModShift}, nil,
+			func(t *testing.T, m Model) {
+				if m.msg != "no matching bracket around the cursor" {
+					t.Fatalf("the chord must reach the select command, msg = %q", m.msg)
+				}
+				mustText(t, m.cur().buf.Text(), "one\ntwo\nthree\n")
+			}},
 		{"enter splits the line at the cursor",
 			tea.KeyPressMsg{Code: tea.KeyEnter}, afterFirstRune,
 			func(t *testing.T, m Model) { mustText(t, m.cur().buf.Text(), "o\nne\ntwo\nthree\n") }},

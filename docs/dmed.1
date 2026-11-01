@@ -84,6 +84,21 @@ left untouched. Also reachable as the
 .Dq Merge: Take …
 palette commands, which is the route on terminals that cannot tell these
 chords from their control bytes.
+.It Sy Ctrl+]
+Jump to the matching bracket or quote. With the cursor between a pair it goes
+to that pair's closing delimiter, so the same chord walks back and forth —
+there is no backward chord because
+.Sy Ctrl+[
+is Escape. A legacy terminal sends one control byte for
+.Sy Ctrl+]
+and the shifted key, and both names are bound.
+.It Sy Ctrl+Shift+]
+Select what is between the pair the cursor belongs to, the delimiters excluded;
+empty brackets just move the cursor between them. Only brackets are found from
+inside a pair — a quote works when the cursor sits on it. Where the terminal
+cannot tell the chord from its control byte, use the
+.Dq Edit: Select Inside Brackets
+palette command.
 .It Sy Ctrl+U / Ctrl+Shift+U
 Uppercase / lowercase the selection, or the whole buffer when nothing is
 selected

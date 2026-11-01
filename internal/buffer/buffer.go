@@ -127,6 +127,25 @@ func (b *Buffer) DragSelect(line, col int) {
 	b.clampCol()
 }
 
+// SelectRange selects the span from (startLine,startCol) to (endLine,endCol) —
+// end exclusive — with the anchor at the start and the cursor at the end. The
+// ends may be given in either order. Unlike DragSelect it does not route the
+// column through the sticky goal column: a command that already knows both
+// ends must not have them re-clamped by cursor history. An empty range leaves
+// no selection.
+func (b *Buffer) SelectRange(startLine, startCol, endLine, endCol int) {
+	if startLine > endLine || (startLine == endLine && startCol > endCol) {
+		startLine, startCol, endLine, endCol = endLine, endCol, startLine, startCol
+	}
+	startCol = clampCol(startCol, b.d.lineAt(startLine))
+	endCol = clampCol(endCol, b.d.lineAt(endLine))
+	b.breakGroup()
+	b.hasSelection = startLine != endLine || startCol != endCol
+	b.selLine, b.selCol = startLine, startCol
+	b.line, b.col = endLine, endCol
+	b.goalCol = b.col
+}
+
 // LineLen returns the number of runes in the given line.
 func (b *Buffer) LineLen(i int) int { return b.lineLen(i) }
 

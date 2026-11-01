@@ -66,7 +66,10 @@ The code is split into focused internal packages:
 - `internal/buffer/` — pure text buffer. Rope-based document
   (`buffer.go`, `doc.go`, `internal/rope`) with cursor, sticky goal column,
   undo/redo with typing-run grouping, multi-cursor support
-  (`multicursor.go`) and the selection transformations
+  (`multicursor.go`), the delimiter matcher (`match.go`: the pair highlight, the
+  jump target and the inside-pair range — brackets by depth, quotes by line
+  parity, escapes skipped, every walk bounded by `maxScanLines`, no TUI imports
+  and no re-tokenizing) and the selection transformations
   (`transform.go`: case fold, block sort, trailing trim, indent alignment,
   list numbering). Line-range operations — these plus `IndentLines`,
   `ToggleComment`, `MoveLineUp/Down` — all take the same shape: `beginChange` +
@@ -75,6 +78,9 @@ The code is split into focused internal packages:
   operation that changed nothing pushes nothing, so `Ctrl+Z` never "undoes" a
   no-op. Never rewrite text by replacing the buffer with `buffer.Load`: that
   drops the undo history, the caret and the selection along with the rope.
+  A command that already knows both ends of a selection sets them with
+  `SelectRange`, never `DragSelect`: the latter re-clamps the column through the
+  sticky goal column and silently moves the end it was handed.
   Must stay free of TUI imports; behavior changes belong
   in the corresponding `_test.go`. Undo grouping: consecutive inserts at
   adjacent positions form one undo step; any other operation breaks the group
@@ -120,7 +126,10 @@ The code is split into focused internal packages:
   handling, scroll, GIF tick chain), `plugins.go`, `plugin_store.go`, `lsp.go`,
   `ai_settings.go`, `transform.go` (the selection-transformation commands pick
   the target — selection lines, or the whole buffer for a trim — and the
-  status-bar message; the text work is the buffer's), `tools.go` (agent tools:
+  status-bar message; the text work is the buffer's), `delimiter.go` (the
+  bracket jump and select-inside commands: the same thin shape, and pure caret
+  moves — no edit, no undo step, no dirty flag; the scanning is the buffer's),
+  `tools.go` (agent tools:
   READ/SEARCH/LIST_DIR/GLOB/RUN/REPLACE/EDIT), `tools_fs.go` (shared project
   walk plus the LIST_DIR/GLOB tools), `tools_core.go` (`toolEnv`: the TUI-free
   tool bodies shared by the chat and by background sub-agents), `tools_plan.go`

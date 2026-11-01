@@ -91,6 +91,110 @@ func (b *Buffer) MatchDelimiter(line, col int) (DelimiterMatch, bool) {
 	return DelimiterMatch{}, false
 }
 
+// MatchingDelimiter is the jump target for a caret position. When the caret sits
+// on (or just after) a delimiter it returns that delimiter's partner — brackets
+// and quotes both, exactly the pair the highlight draws. When the caret sits
+// between a pair instead, it returns the closing delimiter of the innermost
+// enclosing bracket pair, so pressing the same chord again now lands the caret
+// on a delimiter and crosses back.
+func (b *Buffer) MatchingDelimiter(line, col int) (int, int, bool) {
+	if m, ok := b.MatchDelimiter(line, col); ok {
+		return m.ToLine, m.ToCol, true
+	}
+	m, ok := b.enclosingBracket(line, col)
+	if !ok {
+		return 0, 0, false
+	}
+	return m.ToLine, m.ToCol, true
+}
+
+// InsidePair returns the text range strictly between the pair the position
+// belongs to: the pair whose delimiter it sits on (brackets and quotes), or the
+// innermost enclosing bracket pair. The delimiters themselves are outside the
+// range, so an empty pair yields start == end.
+func (b *Buffer) InsidePair(line, col int) (startLine, startCol, endLine, endCol int, ok bool) {
+	m, has := b.MatchDelimiter(line, col)
+	if !has {
+		if m, has = b.enclosingBracket(line, col); !has {
+			return 0, 0, 0, 0, false
+		}
+	}
+	// MatchDelimiter anchors its result at the position it was asked about, so
+	// the partner can be to the left of it.
+	l1, c1, l2, c2 := m.FromLine, m.FromCol, m.ToLine, m.ToCol
+	if l2 < l1 || (l2 == l1 && c2 < c1) {
+		l1, c1, l2, c2 = l2, c2, l1, c1
+	}
+	// A delimiter occupies the cell between positions c and c+1, so the content
+	// starts one past the opener and ends at the closer.
+	return l1, c1 + 1, l2, c2, true
+}
+
+// enclosingBracket finds the innermost bracket pair that strictly contains the
+// position: From* is its opener, To* its closer. Walking left from the caret,
+// every closer raises that type's debt and an opener pays a debt if it has one,
+// so a pair already closed before the caret can never be mistaken for the
+// enclosing one — in "f(a) + g(b)" with the caret inside g, the candidate is g's
+// paren, not f's.
+//
+// Quotes are deliberately not considered here: deciding whether a position is
+// inside a string needs the line-wide quote parity matchQuote works per position,
+// which is a different question from scanning a region. The enclosing scan is
+// bounded by maxScanLines like the other walks.
+func (b *Buffer) enclosingBracket(line, col int) (DelimiterMatch, bool) {
+	if line < 0 || line >= b.LineCount() {
+		return DelimiterMatch{}, false
+	}
+	startLine := line - maxScanLines
+	if startLine < 0 {
+		startLine = 0
+	}
+	var debt [3]int
+	for l := line; l >= startLine; l-- {
+		raw := b.LineAt(l)
+		endCol := len(raw) - 1
+		if l == line {
+			endCol = col - 1
+		}
+		for c := endCol; c >= 0; c-- {
+			if isEscaped(raw, c) {
+				continue
+			}
+			ch := raw[c]
+			if closer, isOpen := bracketPairs[ch]; isOpen {
+				k := bracketKind(ch)
+				if debt[k] > 0 {
+					debt[k]--
+					continue
+				}
+				// Unmatched to the left of the caret, so its partner is at or past
+				// the caret: this is the innermost enclosing pair.
+				fwd, ok := b.matchForwardBracket(l, c, ch, closer)
+				if !ok {
+					return DelimiterMatch{}, false
+				}
+				return DelimiterMatch{FromLine: l, FromCol: c, ToLine: fwd.ToLine, ToCol: fwd.ToCol}, true
+			}
+			if opener, isClose := bracketReverse[ch]; isClose {
+				debt[bracketKind(opener)]++
+			}
+		}
+	}
+	return DelimiterMatch{}, false
+}
+
+// bracketKind numbers the three bracket types, one debt counter per type.
+func bracketKind(r rune) int {
+	switch r {
+	case '(', ')':
+		return 0
+	case '[', ']':
+		return 1
+	default:
+		return 2
+	}
+}
+
 func (b *Buffer) matchQuote(line, col int, q rune) (DelimiterMatch, bool) {
 	raw := b.LineAt(line)
 
