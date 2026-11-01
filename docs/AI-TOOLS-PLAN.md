@@ -4,9 +4,10 @@ A plan to bring tool-calling up to a proper level: project navigation, a
 plan mode with a task list, a dialog with the user, delegation to a nested
 agent, and web search.
 
-The plan's context is the 2026-10-01 audit ([AUDIT-2026-10-01.md](AUDIT-2026-10-01.md);
-one of its open items — splitting `editor.go` — closes in the same effort:
-new tools are new code in `internal/editor`, and the split goes with it).
+The plan's context is the 2026-10-01 audit, kept in git history as
+`docs/AUDIT-2026-10-01.md` at rev `a86f2da`; one of its open items —
+splitting `editor.go` — closes in the same effort: new tools are new code in
+`internal/editor`, and the split goes with it.
 
 ---
 

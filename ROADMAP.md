@@ -635,9 +635,11 @@ cross-build. The cheap part first:
 ## Tech debt left by the October audit
 
 The 2026-10-01 audit plan (`docs/IMPROVEMENT-PLAN.md`, v0.8.3, rev `1b0c9b3`)
-is closed; the file was removed (2026-11) after folding the last two items
-here, and the full historical breakdown lives in
-[docs/AUDIT-2026-10-01.md](docs/AUDIT-2026-10-01.md).
+is closed; both it and the full breakdown (`docs/AUDIT-2026-10-01.md`, last
+present at rev `a86f2da` — `git show a86f2da:docs/AUDIT-2026-10-01.md`) were
+removed in 2026-11 after folding the open items here. The snapshot was UTF-16,
+so no viewer ever rendered it, and closed findings rot faster than they get
+reread.
 
 - [x] **Split `editor.go` + a binding table.** `handleKey` was ~565 lines and
       hundreds of `case`s. It is now `keys.go`: one `keyOf(msg)` that returns
