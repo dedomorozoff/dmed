@@ -257,6 +257,13 @@ var globalBindings = map[string]binding{
 		m.startProjectSearch()
 		return nil, true
 	},
+	"ctrl+shift+r": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		// Same caveat as Ctrl+Shift+F, with a worse collision: on a legacy
+		// terminal this arrives as Ctrl+R, which is redo, so the palette command
+		// "Replace in Project" is the portable way in.
+		m.startProjectReplace()
+		return nil, true
+	},
 	"ctrl+alt+r": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.startLspRename()
 		return nil, true
@@ -830,6 +837,11 @@ func (m *Model) dispatchPanes(s string, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	}
 	// Find in Project owns its keys first: it is a bottom overlay like the
 	// finder, and its Enter must not jump the file-search cursor underneath.
+	// The replace review answers before the panel, since both are open while a
+	// previewed file is being reviewed.
+	if m.projReplReview {
+		return m.handleProjReplReview(s), true
+	}
 	if m.projSearchOpen {
 		return m.handleProjSearch(s, msg), true
 	}

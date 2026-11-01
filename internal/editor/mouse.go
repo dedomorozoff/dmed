@@ -203,7 +203,7 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 
 	// Full-screen modes replace the buffer; their content is scrolled with
 	// the wheel. A click places the cursor only in the buffer.
-	if m.diffViewOpen || m.sqlOpen || m.aiReviewMode || m.agentReviewMode || m.chatReviewMode || m.conflictOpen || m.aiCfgOpen || m.helpOpen {
+	if m.diffViewOpen || m.sqlOpen || m.aiReviewMode || m.agentReviewMode || m.chatReviewMode || m.projReplReview || m.conflictOpen || m.aiCfgOpen || m.helpOpen {
 		return nil
 	}
 
@@ -613,6 +613,18 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 	if m.gitDiffFocused {
 		m.diffOffsetY += dir
 		m.clampDiffScroll(h)
+		return nil
+	}
+
+	// The replace review fills the editor area, so the wheel scrolls its diff.
+	if m.projReplReview {
+		m.projReplOffY += dir
+		if m.projReplOffY < 0 {
+			m.projReplOffY = 0
+		}
+		if maxOff := len(m.projReplRows) - 1; m.projReplOffY > maxOff {
+			m.projReplOffY = max(0, maxOff)
+		}
 		return nil
 	}
 

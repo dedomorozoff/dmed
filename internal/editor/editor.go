@@ -396,9 +396,29 @@ type Model struct {
 	projSearchHits  []projHit
 	projSearchSel   int
 	projSearchOff   int
-	projSearchGen   int
+	projSearchGen   int  // one generation stamps both scans of this panel
 	projSearchScan  bool // a background walk is in flight
 	projSearchCh    chan projSearchMsg
+
+	// Replace in project (Ctrl+Shift+R): the same panel with a second field. The
+	// scan produces a file-level preview, and nothing is written until a diff
+	// review hands the series to the agent Applier.
+	projSearchRepl bool
+	projReplStep   int // 0 find field, 1 replace field, 2 preview list
+	projReplWith   []rune
+	projReplFiles  []projReplFile
+	projReplOrder  []int // rows that carry a change, in list order
+	projReplStats  projReplStats
+	projReplScan   bool
+	projReplCh     chan projReplMsg
+	// The side-by-side review of one pending change.
+	projReplReview bool
+	projReplRevIdx int
+	projReplRows   []vcs.DiffRow
+	projReplLeft   []string
+	projReplRight  []string
+	projReplOffY   int
+	projReplOffX   int
 
 	// LSP rename (Ctrl+Alt+R), code actions (Ctrl+Alt+Q) and reformat
 	// (Ctrl+Alt+L, legacy fallback Ctrl+Alt+F).
@@ -695,19 +715,22 @@ type Model struct {
 	pendingQuit bool
 
 	// Agent background tasks (M4)
-	agentQueue    *agent.Queue
-	agentRunner   *agent.Runner
-	agentApplier  *agent.Applier
-	agentCommit   *agent.Committer
-	agentCtx      context.Context
-	agentCancel   context.CancelFunc
-	agentCh       chan struct{} // repaint signal from the agent worker
-	agentOpen     bool
-	agentFocus    bool // keys route to the agent panel; open+unfocused shows it in the sidebar
-	agentPrompt   bool // entering a new task prompt
-	agentPromptIn []rune
-	agentSel      int
-	agentOffset   int
+	agentQueue   *agent.Queue
+	agentRunner  *agent.Runner
+	agentApplier *agent.Applier
+	agentCommit  *agent.Committer
+	// projReplApplier is the human path's atomic writer: Replace in Project
+	// lands its previewed series through it, never with a direct file write.
+	projReplApplier *agent.Applier
+	agentCtx        context.Context
+	agentCancel     context.CancelFunc
+	agentCh         chan struct{} // repaint signal from the agent worker
+	agentOpen       bool
+	agentFocus      bool // keys route to the agent panel; open+unfocused shows it in the sidebar
+	agentPrompt     bool // entering a new task prompt
+	agentPromptIn   []rune
+	agentSel        int
+	agentOffset     int
 
 	// Agent diff review (T6): a task's proposed changes shown side-by-side.
 	agentReviewMode   bool
@@ -992,7 +1015,11 @@ func (m *Model) pasteInput(text string) {
 		}
 		return
 	case m.projSearchOpen && m.projSearchInput:
-		m.projSearchQ = append(m.projSearchQ, []rune(text)...)
+		if m.projSearchRepl && m.projReplStep == 1 {
+			m.projReplWith = append(m.projReplWith, []rune(text)...)
+		} else {
+			m.projSearchQ = append(m.projSearchQ, []rune(text)...)
+		}
 		return
 	case m.lspRenameOpen:
 		m.lspRenameIn = append(m.lspRenameIn, []rune(text)...)
@@ -1274,6 +1301,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case projSearchMsg:
 		m.handleProjSearchMessage(msg)
 		return m, waitForProjSearch(m.projSearchCh)
+	case projReplMsg:
+		m.handleProjReplMessage(msg)
+		return m, waitForProjRepl(m.projReplCh)
 	case ChatOutputMsg:
 		if msg.Gen != m.chatGen {
 			return m, nil // stale event from a cancelled/cleared conversation

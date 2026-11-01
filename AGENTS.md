@@ -86,7 +86,12 @@ The code is split into focused internal packages:
   through to the next stage. The rest is split by concern: `view.go`
   (rendering), `tabs.go` (open/close/switch/save/quit confirmation),
   `prompt.go` (bottom prompts, including go-to-line), `search.go` (in-file
-  find/replace), `session.go` (save/restore of the session),
+  find/replace), `projectsearch.go` (Find in Project: the streamed scan, the
+  generation stamp and the hit panel), `projectreplace.go` (Replace in
+  Project: the human's batch edit — a per-file preview, a side-by-side diff
+  review and an atomic `agent.Applier` apply, with files an open tab still
+  holds unsaved and non-UTF-8 files listed as excluded instead of written),
+  `session.go` (save/restore of the session),
   `finder.go` (fuzzy file finder), `split.go`, `tree.go`, `mouse.go`,
   `completion.go`, `palette.go`, `terminal.go`, `chat.go`
   (AI chat), `ai_inline.go` (inline rewrite → diff review), `ghost.go`
@@ -218,7 +223,11 @@ Conventions:
 - Agent edits go through `internal/agent.Applier`: validate all
   `Change.Orig` against current content, then write atomically with rollback;
   an approved series becomes one git commit (`agent: <prompt first line>`).
-  Do not bypass this for AI-produced edits.
+  Do not bypass this for AI-produced edits. Replace in Project is the human's
+  use of the very same pipeline (preview, diff review, `Applier.Apply`), and
+  its series is deliberately *not* committed: the `agent:` subject is what
+  `undoLastAgentApply` looks for, and a bulk rename is ordinary working-tree
+  work.
 - Chat tools return one `ToolResult` (text + optional `Change` + optional
   `Park`). Anything that needs a human decision *parks* the loop instead of
   writing a marker into the transcript: the result carries a readable

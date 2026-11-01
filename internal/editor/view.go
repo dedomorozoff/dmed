@@ -67,6 +67,7 @@ var helpEntries = []helpEntry{
 	{"", ""},
 	{"Ctrl+F", "help.search"},
 	{"Ctrl+Shift+F", "help.proj_search"},
+	{"Ctrl+Shift+R", "help.proj_replace"},
 	{"Ctrl+H", "help.replace"},
 	{"Ctrl+L", "help.goto_line"},
 	{"Ctrl+Alt+L", "help.format"},
@@ -265,7 +266,7 @@ func (m Model) contextBottomExtraRows() int {
 	case m.diffViewOpen,
 		m.sqlOpen,
 		m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0,
-		m.aiReviewMode, m.agentReviewMode, m.chatReviewMode, m.agentPrompt,
+		m.aiReviewMode, m.agentReviewMode, m.chatReviewMode, m.projReplReview, m.agentPrompt,
 		m.askReq != nil,
 		m.aiInlineOpen, m.aiInlineBusy, m.aiFixOpen, m.aiFixBusy,
 		m.aiFixReviewMode, m.conflictOpen, m.treeConfirm != "", m.quitConfirm,
@@ -305,6 +306,8 @@ func (m Model) contextBottomRow() string {
 		return m.agentReviewBottom()
 	} else if m.chatReviewMode {
 		return m.chatReviewBottom()
+	} else if m.projReplReview {
+		return m.projReplReviewBottom()
 	} else if m.agentPrompt {
 		return m.agentPromptLine()
 	} else if m.askReq != nil {
@@ -401,6 +404,8 @@ func (m Model) View() tea.View {
 		rows = append(rows, m.renderSideBySide(m.agentReviewLeft, m.agentReviewRight, m.agentReviewRows, m.agentReviewOffY, m.agentReviewOffX, m.width, h, nil, nil)...)
 	} else if m.chatReviewMode {
 		rows = append(rows, m.renderSideBySide(m.chatReviewLeft, m.chatReviewRight, m.chatReviewRows, m.chatReviewOffY, m.chatReviewOffX, m.width, h, nil, nil)...)
+	} else if m.projReplReview {
+		rows = append(rows, m.renderSideBySide(m.projReplLeft, m.projReplRight, m.projReplRows, m.projReplOffY, m.projReplOffX, m.width, h, nil, nil)...)
 	} else if m.conflictOpen && len(m.conflictRows) > 0 {
 		rows = append(rows, m.renderSideBySide(m.conflictLeftLines, m.conflictRightLines, m.conflictRows, m.conflictOffY, m.conflictOffX, m.width, h, nil, nil)...)
 	} else if m.aiCfgOpen {
@@ -2147,36 +2152,61 @@ func (m Model) lspActionsPanel() []string {
 	return rows
 }
 
+// projListRow renders row i of the panel list: a hit in Find in Project, a
+// previewed file in Replace in Project.
+func (m Model) projListRow(i int) string {
+	if m.projSearchRepl {
+		return m.projReplRow(i)
+	}
+	return m.projSearchRow(i)
+}
+
+// projReplPromptRows is the extra prompt line Replace in Project adds for the
+// replacement text.
+func (m Model) projReplPromptRows() int {
+	if m.projSearchRepl {
+		return 1
+	}
+	return 0
+}
+
 func (m Model) projSearchExtraRows() int {
 	if !m.projSearchOpen {
 		return 0
 	}
-	n := len(m.projSearchHits)
+	n := m.projListLen()
 	if n > projSearchVisible {
 		n = projSearchVisible
 	}
-	return n + 3 // divider + prompt row + hint row
+	return n + 3 + m.projReplPromptRows() // divider + prompt row(s) + hint row
 }
 
 func (m Model) projSearchPanel() []string {
-	rows := make([]string, 0, projSearchVisible+3)
-	n := len(m.projSearchHits)
+	rows := make([]string, 0, projSearchVisible+4)
+	n := m.projListLen()
 	if n > 0 {
 		end := m.projSearchOff + projSearchVisible
 		for i := m.projSearchOff; i < end && i < n; i++ {
-			rows = append(rows, m.projSearchRow(i))
+			rows = append(rows, m.projListRow(i))
 		}
 	} else if len(m.projSearchQ) > 0 {
 		rows = append(rows, statusStyle.Render(padTo(" "+m.projSearchStatus()+" ", m.width)))
 	}
 	rows = append(rows, m.projSearchPromptLine())
+	if m.projSearchRepl {
+		rows = append(rows, m.projReplPromptLine())
+	}
 	rows = append(rows, hintStyle.Render(padTo(m.projSearchHint(), m.width)))
 	return rows
 }
 
 func (m Model) projSearchPromptLine() string {
-	line := statusHiStyle.Render(m.t("psearch.prompt")) + statusStyle.Render(string(m.projSearchQ))
-	if m.projSearchInput {
+	label := "psearch.prompt"
+	if m.projSearchRepl {
+		label = "psearch.repl_prompt"
+	}
+	line := statusHiStyle.Render(m.t(label)) + statusStyle.Render(string(m.projSearchQ))
+	if m.projSearchInput && !(m.projSearchRepl && m.projReplStep == 1) {
 		line += cursorStyle.Render(" ")
 	} else {
 		line += statusStyle.Render(" ")

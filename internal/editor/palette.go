@@ -37,6 +37,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "finder", title: "cmd.finder_t", desc: "cmd.finder_d", action: func(m *Model) tea.Cmd { m.startFinder(); return nil }},
 		{id: "search", title: "cmd.search_t", desc: "cmd.search_d", action: func(m *Model) tea.Cmd { m.startSearch(); return nil }},
 		{id: "proj_search", title: "cmd.proj_search_t", desc: "cmd.proj_search_d", action: func(m *Model) tea.Cmd { m.startProjectSearch(); return nil }},
+		{id: "proj_replace", title: "cmd.proj_replace_t", desc: "cmd.proj_replace_d", action: func(m *Model) tea.Cmd { m.startProjectReplace(); return nil }},
 		{id: "lsp_rename", title: "cmd.lsp_rename_t", desc: "cmd.lsp_rename_d", action: func(m *Model) tea.Cmd { m.startLspRename(); return nil }},
 		{id: "lsp_actions", title: "cmd.lsp_actions_t", desc: "cmd.lsp_actions_d", action: func(m *Model) tea.Cmd { return m.startLspActions() }},
 		{id: "lsp_format", title: "cmd.lsp_format_t", desc: "cmd.lsp_format_d", action: func(m *Model) tea.Cmd { return m.lspFormatCmd() }}, // Ctrl+Alt+L (and the legacy Ctrl+Alt+F)

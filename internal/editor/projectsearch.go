@@ -149,6 +149,66 @@ func (sm *searchMatcher) match(line []rune) []searchMatch {
 	return matchLiteral(line, sm.query, sm.insens)
 }
 
+// substitute replaces every match on one line and reports how many occurrences
+// landed. It is the replace counterpart of match, on purpose: the project-wide
+// replace must change exactly the occurrences the Find panel listed, so a
+// literal query honours smart case here too, and a regex skips the zero-width
+// matches matchRegexpLine skips (replacing those would append the replacement
+// everywhere and still count them as hits).
+func (sm *searchMatcher) substitute(line, repl string) (string, int) {
+	if len(sm.query) == 0 || sm.invalid {
+		return line, 0
+	}
+	if sm.re != nil {
+		// Byte offsets, spliced right to left so an earlier replacement never
+		// moves the offsets of the ones after it. re.Expand is what gives $1 /
+		// ${name} the same meaning as in the in-file replace, and it needs the
+		// submatch indices of the whole match, not just its bounds.
+		locs := sm.re.FindAllStringSubmatchIndex(line, -1)
+		out := line
+		n := 0
+		for i := len(locs) - 1; i >= 0; i-- {
+			loc := locs[i]
+			if loc[1] <= loc[0] {
+				continue
+			}
+			newest := sm.re.Expand(nil, []byte(repl), []byte(line), loc)
+			out = line[:loc[0]] + string(newest) + out[loc[1]:]
+			n++
+		}
+		return out, n
+	}
+	runes := []rune(line)
+	hits := matchLiteral(runes, sm.query, sm.insens)
+	if len(hits) == 0 {
+		return line, 0
+	}
+	rep := []rune(repl)
+	out := runes
+	for i := len(hits) - 1; i >= 0; i-- {
+		h := hits[i]
+		spliced := make([]rune, 0, len(out)-h.length+len(rep))
+		spliced = append(spliced, out[:h.col]...)
+		spliced = append(spliced, rep...)
+		spliced = append(spliced, out[h.col+h.length:]...)
+		out = spliced
+	}
+	return string(out), len(hits)
+}
+
+// countIn counts the occurrences in raw file bytes, one line at a time with the
+// terminator left out of the match. It is the same rule match() applies, so a
+// preview row for a file that stays out of the series can still tell the user how
+// many matches it holds.
+func (sm *searchMatcher) countIn(data []byte) int {
+	total := 0
+	for _, chunk := range splitKeepEndings(data) {
+		body, _ := splitEnding(chunk)
+		total += len(sm.match([]rune(body)))
+	}
+	return total
+}
+
 // matchRanges is the in-file searcher's view of one line: it uses the memoized
 // regex (a regexp compiles once per query, not per rendered line).
 func (m *Model) matchRanges(line []rune) []searchMatch {
@@ -233,6 +293,16 @@ type projSearchMsg struct {
 func (m *Model) startProjectSearch() {
 	m.projSearchOpen = true
 	m.projSearchInput = true
+	// Switching flavours orphans whatever scan is in flight: both lists answer to
+	// the same generation, so a late replace batch must not append rows to a find
+	// panel (and the row renderer would index the wrong list).
+	m.projSearchRepl = false
+	m.projReplStep = 0
+	m.projReplCh = nil
+	m.projReplScan = false
+	m.projReplFiles = nil
+	m.projReplOrder = nil
+	m.projReplStats = projReplStats{}
 	m.projSearchSel = 0
 	m.projSearchOff = 0
 }
@@ -348,6 +418,14 @@ func searchProject(base string, skip projectSkip, sm *searchMatcher, visit func(
 }
 
 func (m *Model) handleProjSearch(s string, msg tea.KeyPressMsg) tea.Cmd {
+	// Replace in Project shares this panel and its keys, but the prompt has two
+	// steps and the list holds files instead of hits.
+	if m.projSearchRepl {
+		if m.projSearchInput {
+			return m.handleProjReplInput(s, msg)
+		}
+		return m.handleProjReplList(s, msg)
+	}
 	if m.projSearchInput {
 		return m.handleProjSearchInput(s, msg)
 	}
@@ -408,18 +486,46 @@ func (m *Model) stopProjectSearch() {
 	m.projSearchGen++
 	m.projSearchCh = nil
 	m.projSearchScan = false
+	// The replace half goes with it: a preview the user closed is not a series
+	// that may still be applied, and the review overlay reads from it.
+	m.projSearchRepl = false
+	m.projReplStep = 0
+	m.projReplCh = nil
+	m.projReplScan = false
+	m.projReplFiles = nil
+	m.projReplOrder = nil
+	m.projReplStats = projReplStats{}
+	m.projReplReview = false
+	m.projReplRows = nil
+	m.projReplLeft = nil
+	m.projReplRight = nil
+}
+
+// projListLen is how many rows the panel's list holds right now: hits in Find in
+// Project, files in Replace in Project. Selection and scrolling are shared, so
+// everything that bounds them asks here instead of reaching for one of the lists.
+func (m Model) projListLen() int {
+	if m.projSearchRepl {
+		return len(m.projReplFiles)
+	}
+	return len(m.projSearchHits)
 }
 
 // jumpProjSel moves the selection to sel and scrolls the visible window so it
 // stays in view.
 func (m *Model) jumpProjSel(sel int) {
-	n := len(m.projSearchHits)
+	n := m.projListLen()
 	if sel < 0 {
 		sel = 0
 	} else if sel >= n {
 		sel = n - 1
 	}
 	m.projSearchSel = sel
+	if n == 0 {
+		m.projSearchSel = 0
+		m.projSearchOff = 0
+		return
+	}
 	if n <= projSearchVisible {
 		m.projSearchOff = 0
 		return
@@ -449,6 +555,9 @@ func (m *Model) openProjHit(h projHit) {
 
 // statusHint is the prompt-row suffix showing why the list looks as it does.
 func (m Model) projSearchStatus() string {
+	if m.projSearchRepl {
+		return m.projReplStatus()
+	}
 	if m.projSearchScan {
 		return m.t("psearch.scanning")
 	}
@@ -459,6 +568,9 @@ func (m Model) projSearchStatus() string {
 }
 
 func (m Model) projSearchHint() string {
+	if m.projSearchRepl {
+		return m.projReplHint()
+	}
 	if m.projSearchInput {
 		return m.t("psearch.hint_input")
 	}

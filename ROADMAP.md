@@ -567,9 +567,19 @@ Order and contents will be refined as work proceeds.
 - Macros: record/playback (`Alt+R`), respecting multi-cursor.
 - Navigation: jump list (back/forward, pushed on goto-definition),
   MRU tab switching (`Ctrl+Tab`), "go to last edit position".
-- Replace in Project: the counterpart of Find in Project (`Ctrl+Shift+F`)
-  with a batched preview — through `internal/agent.Applier` with diff
-  review, never around it.
+- [x] **Replace in Project**: the counterpart of Find in Project
+      (`Ctrl+Shift+R`, also in the palette). A two-step prompt (query, then
+      replacement) streams a file-level preview, one whole-file `agent.Change`
+      per matching file, and `Enter` opens a side-by-side diff review of that
+      series — `y` applies the file under review, `a` the whole batch, `n`
+      discards. Nothing is ever written around the review: `agent.Applier`
+      re-validates every `Orig` against the disk and writes all-or-nothing, so
+      one edited file between the preview and the answer rejects the series
+      without touching a byte. Files an open tab still holds unsaved and
+      non-UTF-8 files are listed as excluded rather than silently rewritten,
+      and the file cap (200) is reported, never applied quietly. The applied
+      series is deliberately not committed — a human bulk edit is ordinary
+      working-tree work, and git is the undo.
 - Merge conflicts: navigate the `<<<<<<<`/`=======`/`>>>>>>>` markers,
   take ours/theirs/both under the cursor.
 
