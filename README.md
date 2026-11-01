@@ -144,7 +144,11 @@ Open a file (`Ctrl+O` fuzzy finder or `Ctrl+T`), edit, `Ctrl+S` to save. `Ctrl+G
 | `Alt+D` / `Alt+Click` | Multi-cursor (next word / at click), `Esc` exits |
 | `Alt+C` / `Alt+O` | Fold / unfold block at cursor |
 | `Ctrl+Shift+O` / `T` / `B` | Merge conflict: take ours / theirs / both under the cursor |
-| `Ctrl+U` | Uppercase selection / buffer |
+| `Ctrl+U` / `Ctrl+Shift+U` | Uppercase / lowercase selection (or whole buffer) |
+| `Alt+Shift+S` | Sort selected lines (blank lines last) |
+| `Alt+Shift+T` | Trim trailing whitespace (whole file when nothing is selected) |
+| `Ctrl+Alt+J` | Align selected lines to the deepest indent column in the block |
+| `Ctrl+Alt+N` | Number selected lines `1.`, `2.`, … |
 | `Ctrl+Space` | Autocomplete (word + LSP) |
 | `Enter` / `Backspace` / `Delete` | Standard editing |
 

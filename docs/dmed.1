@@ -84,6 +84,23 @@ left untouched. Also reachable as the
 .Dq Merge: Take …
 palette commands, which is the route on terminals that cannot tell these
 chords from their control bytes.
+.It Sy Ctrl+U / Ctrl+Shift+U
+Uppercase / lowercase the selection, or the whole buffer when nothing is
+selected
+.It Sy Alt+Shift+S
+Sort the selected lines (the cursor line when nothing is selected): compared
+case-insensitively, blank lines last
+.It Sy Alt+Shift+T
+Trim trailing spaces and tabs from the selected lines, or from the whole file
+when nothing is selected
+.It Sy Ctrl+Alt+J
+Pad the selected lines with spaces so their text starts at the deepest column
+the block already has; an existing tab indent is never rewritten
+.It Sy Ctrl+Alt+N
+Number the selected lines 1., 2., … after their indentation; blank lines are
+skipped and an existing
+.Dq N.
+marker is replaced, so the command can be repeated
 .It Sy Enter / Backspace / Delete / Tab
 Standard editing
 .El

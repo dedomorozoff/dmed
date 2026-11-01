@@ -65,8 +65,17 @@ The code is split into focused internal packages:
 
 - `internal/buffer/` — pure text buffer. Rope-based document
   (`buffer.go`, `doc.go`, `internal/rope`) with cursor, sticky goal column,
-  undo/redo with typing-run grouping, and multi-cursor support
-  (`multicursor.go`). Must stay free of TUI imports; behavior changes belong
+  undo/redo with typing-run grouping, multi-cursor support
+  (`multicursor.go`) and the selection transformations
+  (`transform.go`: case fold, block sort, trailing trim, indent alignment,
+  list numbering). Line-range operations — these plus `IndentLines`,
+  `ToggleComment`, `MoveLineUp/Down` — all take the same shape: `beginChange` +
+  `pushUndo`, `linesCopy`, rewrite `mat[from..to]`, `setLines`, then clamp the
+  caret and the selection anchor (`commitRange`). One undo step each, and an
+  operation that changed nothing pushes nothing, so `Ctrl+Z` never "undoes" a
+  no-op. Never rewrite text by replacing the buffer with `buffer.Load`: that
+  drops the undo history, the caret and the selection along with the rope.
+  Must stay free of TUI imports; behavior changes belong
   in the corresponding `_test.go`. Undo grouping: consecutive inserts at
   adjacent positions form one undo step; any other operation breaks the group
   (`beginChange`/`breakGroup`).
@@ -109,10 +118,12 @@ The code is split into focused internal packages:
   `imageview.go` (picture tabs: ASCII/half-block render via
   `internal/imgprev`, empty buffer + decoded frames, read-only key
   handling, scroll, GIF tick chain), `plugins.go`, `plugin_store.go`, `lsp.go`,
-  `ai_settings.go`, `transform.go`, `tools.go` (agent tools: READ/SEARCH/
-  LIST_DIR/GLOB/RUN/REPLACE/EDIT), `tools_fs.go` (shared project walk plus the
-  LIST_DIR/GLOB tools), `tools_core.go` (`toolEnv`: the TUI-free tool bodies
-  shared by the chat and by background sub-agents), `tools_plan.go`
+  `ai_settings.go`, `transform.go` (the selection-transformation commands pick
+  the target — selection lines, or the whole buffer for a trim — and the
+  status-bar message; the text work is the buffer's), `tools.go` (agent tools:
+  READ/SEARCH/LIST_DIR/GLOB/RUN/REPLACE/EDIT), `tools_fs.go` (shared project
+  walk plus the LIST_DIR/GLOB tools), `tools_core.go` (`toolEnv`: the TUI-free
+  tool bodies shared by the chat and by background sub-agents), `tools_plan.go`
   (TODO_* / ASK_USER / SWITCH_MODE tools and the question overlay),
   `tools_web.go` (WEB_SEARCH plus the plan/act modes),
   `tools_subagent.go` (SUB_AGENT: the tool, the tool surface a sub-agent gets,

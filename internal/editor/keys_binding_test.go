@@ -218,6 +218,17 @@ func TestEditorBindingsFire(t *testing.T) {
 		m.cur().buf.LineEndWithSelect()
 	}
 	afterFirstRune := func(m *Model) { m.cur().buf.SetCursor(0, 1) }
+	selectAllLines := func(m *Model) {
+		m.cur().buf.SetCursor(0, 0)
+		m.cur().buf.MoveDownWithSelect()
+		m.cur().buf.MoveDownWithSelect()
+	}
+	indentLastLineAndSelect := func(m *Model) {
+		m.cur().buf.SetCursor(2, 0)
+		m.cur().buf.IndentLines("  ")
+		selectAllLines(m)
+	}
+	uppercaseBuffer := func(m *Model) { m.cur().buf.ApplyCase(true) }
 
 	cases := []struct {
 		name  string
@@ -295,6 +306,25 @@ func TestEditorBindingsFire(t *testing.T) {
 		{"ctrl+u uppercases the selection only",
 			tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}, selectFirstLine,
 			func(t *testing.T, m Model) { mustText(t, m.cur().buf.Text(), "ONE\ntwo\nthree\n") }},
+		{"ctrl+shift+u lowercases the buffer",
+			tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl | tea.ModShift}, uppercaseBuffer,
+			func(t *testing.T, m Model) { mustText(t, m.cur().buf.Text(), "one\ntwo\nthree\n") }},
+		{"alt+shift+s sorts the selected lines",
+			tea.KeyPressMsg{Code: 's', Mod: tea.ModAlt | tea.ModShift}, selectAllLines,
+			func(t *testing.T, m Model) { mustText(t, m.cur().buf.Text(), "one\nthree\ntwo\n") }},
+		{"alt+shift+t trims the whole file",
+			tea.KeyPressMsg{Code: 't', Mod: tea.ModAlt | tea.ModShift}, nil,
+			func(t *testing.T, m Model) {
+				if m.msg != "nothing to change" {
+					t.Fatalf("a clean file must say so, msg = %q", m.msg)
+				}
+			}},
+		{"ctrl+alt+j pads the selected lines to the deepest column",
+			tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl | tea.ModAlt}, indentLastLineAndSelect,
+			func(t *testing.T, m Model) { mustText(t, m.cur().buf.Text(), "  one\n  two\n  three\n") }},
+		{"ctrl+alt+n numbers the line under the cursor",
+			tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl | tea.ModAlt}, nil,
+			func(t *testing.T, m Model) { mustText(t, m.cur().buf.Text(), "1. one\ntwo\nthree\n") }},
 		{"enter splits the line at the cursor",
 			tea.KeyPressMsg{Code: tea.KeyEnter}, afterFirstRune,
 			func(t *testing.T, m Model) { mustText(t, m.cur().buf.Text(), "o\nne\ntwo\nthree\n") }},

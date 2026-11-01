@@ -456,6 +456,33 @@ var editorBindings = map[string]binding{
 		m.uppercaseActive()
 		return nil, true
 	},
+	"ctrl+shift+u": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		// On legacy terminals Ctrl+Shift+U arrives as Ctrl+U (both are the
+		// control byte), so there it uppercases instead of lowercasing — the
+		// same family, nothing destroyed. The palette command "Edit: Lowercase"
+		// is the portable route.
+		m.lowercaseActive()
+		return nil, true
+	},
+	"alt+shift+s": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.sortLinesActive()
+		return nil, true
+	},
+	"alt+shift+t": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		// A terminal that cannot separate the chord from Alt+T toggles the
+		// built-in terminal instead; "Edit: Trim Trailing Whitespace" in the
+		// palette does the job everywhere.
+		m.trimTrailingActive()
+		return nil, true
+	},
+	"ctrl+alt+j": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.alignIndentActive()
+		return nil, true
+	},
+	"ctrl+alt+n": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.numberLinesActive()
+		return nil, true
+	},
 	"ctrl+r": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.cur().buf.Redo() {
 			m.msg = ""

@@ -562,8 +562,28 @@ Order and contents will be refined as work proceeds.
   until there is an AST.
 - Column (rectangular) selection: `Alt+Shift+arrows`, drag with a modifier;
   pasting a block unfolds it into one multi-cursor per line.
-- Selection transformations: upper/lower case, sort lines, trim,
-  align to a column, insert sequence numbering 1..N.
+- [x] **Selection transformations**: upper/lower case (`Ctrl+U`/`Ctrl+Shift+U`),
+      sort lines (`Alt+Shift+S`), trim trailing whitespace (`Alt+Shift+T`),
+      align indentation (`Ctrl+Alt+J`) and sequence numbering 1..N
+      (`Ctrl+Alt+N`), all also palette commands. Case folds the selected
+      characters; the line-wise commands take the whole lines the selection
+      touches — the cursor line when there is none, the rule `DuplicateLine` and
+      `IndentLines` already follow. Sort compares case-folded and breaks the tie
+      on the exact runes, so the order is total, and moves blank lines to the end
+      of the block where a gap in a list does not read as a bug. Trim cuts
+      trailing spaces and tabs only (indentation and interior blank lines are
+      content) and, with nothing selected, cleans the whole file — the pre-commit
+      case. Align never rewrites an indent: it pads the shallower lines with
+      spaces up to the deepest content column the block already has, measured in
+      expanded columns, so a tab-indented line stays byte-for-byte its own.
+      Numbering writes `N. ` after the line's indentation, skips blank lines
+      without consuming a number and replaces an existing `N.`/`N)` marker, so
+      pressing it twice cannot yield `2. 1. item`. Each command is one undo step,
+      keeps the selection (none of them changes the line count, so the same block
+      can be transformed again) and drops secondary cursors, because a block
+      rewrite permutes whole lines under them. Fixing the primitive also fixed
+      `Ctrl+U` on an unselected buffer: it no longer rebuilds the buffer, so the
+      undo history and the caret survive it.
 - Macros: record/playback (`Alt+R`), respecting multi-cursor.
 - Navigation: jump list (back/forward, pushed on goto-definition),
   MRU tab switching (`Ctrl+Tab`), "go to last edit position".
