@@ -81,6 +81,13 @@ func (m *Model) openPath(rawPath string) {
 		if hint := m.lspMissingHintFor(t.path); hint != "" {
 			m.msg = m.t("msg.lsp_missing", hint)
 		}
+		// Last on purpose: a file nobody can merge yet is more urgent than a
+		// language server that is not installed, and this line is the only way
+		// someone who merged in the built-in terminal learns the editor resolves
+		// the markers.
+		if hint := m.mergeConflictHint(t.buf); hint != "" {
+			m.msg = hint
+		}
 	}
 }
 

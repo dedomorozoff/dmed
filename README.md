@@ -46,6 +46,11 @@ AI is part of the workflow, not the point of it: agents read, propose and run �
 - Stage/unstage/commit from the Git panel (`Ctrl+G`); fetch/push to `origin` (`f`/`p`)
 - Branches: create/switch; **history and per-commit diffs**
 - Hunk navigation (`Alt+[`/`Alt+]`)
+- **Merge conflicts**: opening a conflicted file reports how many blocks it has;
+  `Alt+[`/`Alt+]` jump between them (and back to hunks once none are left),
+  `Ctrl+Shift+O`/`T`/`B` (or the palette) take ours / theirs / both under the
+  cursor. One resolution is one undo step; markers that do not form a complete
+  block are never edited, and nothing is saved or staged by the action
 
 ### Databases & Pictures
 
@@ -138,6 +143,7 @@ Open a file (`Ctrl+O` fuzzy finder or `Ctrl+T`), edit, `Ctrl+S` to save. `Ctrl+G
 | `Alt+↑` / `Alt+↓` | Move line up / down |
 | `Alt+D` / `Alt+Click` | Multi-cursor (next word / at click), `Esc` exits |
 | `Alt+C` / `Alt+O` | Fold / unfold block at cursor |
+| `Ctrl+Shift+O` / `T` / `B` | Merge conflict: take ours / theirs / both under the cursor |
 | `Ctrl+U` | Uppercase selection / buffer |
 | `Ctrl+Space` | Autocomplete (word + LSP) |
 | `Enter` / `Backspace` / `Delete` | Standard editing |

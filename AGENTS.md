@@ -91,6 +91,14 @@ The code is split into focused internal packages:
   Project: the human's batch edit — a per-file preview, a side-by-side diff
   review and an atomic `agent.Applier` apply, with files an open tab still
   holds unsaved and non-UTF-8 files listed as excluded instead of written),
+  `mergeconflict.go` (merge conflicts: the strict marker scan — column 0,
+  exactly seven characters, the diff3 `|||||||` base always dropped, markers that
+  never close refused rather than guessed at — and the ours/theirs/both
+  resolutions, each one `buffer.ReplaceSpan` in the buffer, so there is no
+  overlay, no new mode and nothing written to disk; `Alt+[` / `Alt+]` navigate
+  conflicts while the file has any and fall back to Git hunks after the last
+  one. `conflictOpen`/`handleConflict` is the watcher's external-change reload
+  prompt, not this feature),
   `session.go` (save/restore of the session),
   `finder.go` (fuzzy file finder), `split.go`, `tree.go`, `mouse.go`,
   `completion.go`, `palette.go`, `terminal.go`, `chat.go`

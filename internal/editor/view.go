@@ -80,6 +80,7 @@ var helpEntries = []helpEntry{
 	{"F12 / Ctrl+Click", "help.goto_def"},
 	{"D (in Git panel)", "help.git_diff"},
 	{"Alt+[ / Alt+]", "help.hunk"},
+	{"Ctrl+Shift+O / T / B", "help.merge_resolve"},
 	{"Alt+M / Alt+N / S+Alt+N", "help.bookmark"},
 	{"Ctrl+O", "help.finder"},
 	{"Ctrl+T", "help.open"},

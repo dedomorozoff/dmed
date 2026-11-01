@@ -77,6 +77,13 @@ Toggle word wrap
 Toggle inline git blame (who changed each line and when)
 .It Sy Alt+Up / Alt+Down
 Move line up / down
+.It Sy Ctrl+Shift+O / Ctrl+Shift+T / Ctrl+Shift+B
+Merge conflict under the cursor: keep our side / their side / both. One
+resolution is one undo step; markers that do not form a complete block are
+left untouched. Also reachable as the
+.Dq Merge: Take …
+palette commands, which is the route on terminals that cannot tell these
+chords from their control bytes.
 .It Sy Enter / Backspace / Delete / Tab
 Standard editing
 .El
@@ -160,7 +167,8 @@ Next / previous match
 .It Sy D (in panel)
 Side-by-side diff vs HEAD
 .It Sy Alt+[ / Alt+]
-Previous / next hunk
+Previous / next merge conflict while the file holds markers, previous / next
+hunk once it has none
 .El
 .Ss General
 .Bl -tag -width "Ctrl+P"

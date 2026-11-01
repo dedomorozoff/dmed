@@ -580,8 +580,24 @@ Order and contents will be refined as work proceeds.
       and the file cap (200) is reported, never applied quietly. The applied
       series is deliberately not committed — a human bulk edit is ordinary
       working-tree work, and git is the undo.
-- Merge conflicts: navigate the `<<<<<<<`/`=======`/`>>>>>>>` markers,
-  take ours/theirs/both under the cursor.
+- [x] **Merge conflicts**: navigate the `<<<<<<<`/`=======`/`>>>>>>>` markers and
+      take ours/theirs/both under the cursor (`Ctrl+Shift+O`/`T`/`B`, the same
+      three in the palette; `Alt+[`/`Alt+]` jump between conflicts). No overlay
+      and no new mode: the markers are text the buffer already holds, so one
+      resolution is one `buffer.ReplaceSpan` — one undo step per hunk, `Ctrl+Z`
+      peels exactly one. Markers are matched strictly (column 0, exactly seven
+      characters, then git's label or the end of the line; the separator only as
+      a bare `=======` line, so a Markdown setext underline is never read as a
+      conflict), the diff3 `|||||||` base section is recognized and always
+      dropped as context, and a `<<<<<<<` that never closes is reported as
+      malformed and never edited — guessing there would delete text the user
+      still has to read. `Alt+[`/`Alt+]` prefer conflicts over Git hunks while
+      the file holds any (a conflicted file always has a HEAD diff too, so the
+      other order would make conflicts unreachable by keyboard) and go back to
+      hunk navigation once the last one is resolved. An empty side leaves no
+      blank line behind, opening a conflicted file reports how many there are,
+      and the action touches neither disk nor the git index — saving and staging
+      stay `Ctrl+S` and the Git panel.
 
 ### M10 — LSP to the end
 - Diagnostics navigation: next/prev error (`F8`/`Shift+F8`), an inline

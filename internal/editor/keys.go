@@ -462,12 +462,29 @@ var editorBindings = map[string]binding{
 		}
 		return nil, true
 	},
+	"ctrl+shift+o": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		// On legacy terminals Ctrl+Shift+O arrives as Ctrl+O (both are the
+		// control byte), so this only fires where the terminal can tell them
+		// apart; the palette command "Merge: Take Ours" covers the rest.
+		m.resolveMergeConflict(conflictOurs)
+		return nil, true
+	},
+	"ctrl+shift+t": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		// Same caveat as Ctrl+Shift+O; the colliding Ctrl+T opens a file prompt.
+		m.resolveMergeConflict(conflictTheirs)
+		return nil, true
+	},
+	"ctrl+shift+b": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		// Same caveat as Ctrl+Shift+O; the colliding Ctrl+B shows the tree.
+		m.resolveMergeConflict(conflictBoth)
+		return nil, true
+	},
 	"alt+[": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
-		m.jumpHunk(-1)
+		m.jumpChange(-1)
 		return nil, true
 	},
 	"alt+]": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
-		m.jumpHunk(1)
+		m.jumpChange(1)
 		return nil, true
 	},
 	"ctrl+\\": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
@@ -928,7 +945,9 @@ func (m *Model) handleTailBindings(s string, msg tea.KeyPressMsg) (tea.Cmd, bool
 	return nil, false
 }
 
-// handleConflict drives the merge-conflict reload prompt.
+// handleConflict drives the external-change reload prompt: the watched file
+// changed on disk while its buffer was dirty. Merge conflicts are a different
+// thing and are resolved in the buffer itself (see mergeconflict.go).
 func (m *Model) handleConflict(s string) tea.Cmd {
 	switch s {
 	case "r", "R":
