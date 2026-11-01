@@ -279,8 +279,7 @@ Worth knowing before you file a bug:
 - **The default AI provider is a public keyless service (Pollinations).** Prompts and code leave the machine out of the box; prefer local by picking `Ollama (local)` in `Ctrl+P → AI: Preferences...`, and/or set `free_fallback = false`. The free tier is rate-limited (roughly one request per 15 s).
 - **`web_search` is off by default** — it is the only tool that reaches outside the workspace; enable it deliberately and watch the budget.
 - **Small local models pick tools worse as the list grows.** Trim the surface with `tools_enabled` (whitelist) or `tools_disabled` (blacklist); the names accept common aliases (`read_file`, `grep`, `run_command`, `write_file`, `edit_file`).
-- There is no automated TUI test — the editor is verified by hand for interactive flows; the core (buffer, rope, applier, providers, git, debug clients) is unit-tested.
-- **`php-test/`** is a manual fixture for Xdebug debugging, not used by automated tests — see [php-test/README.md](php-test/README.md).
+- There is no automated TUI test — the editor is verified by hand for interactive flows; the core (buffer, rope, applier, providers, git, debug clients) is unit-tested. The real-interpreter debug tests (`TestRealXdebugSession`, real Delve) skip when the engine is absent and generate their own scripts in `t.TempDir()`.
 
 ## Architecture
 

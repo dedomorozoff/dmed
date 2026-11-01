@@ -1,59 +1,58 @@
-# dmed — расширенный набор инструментов AI
+# dmed — the extended AI tool set
 
-План доведения tool-calling до уровня «как у пацанов»: навигация по
-проекту, план-режим с задачами, диалог с пользователем, делегирование
-вложенному агенту и веб-поиск.
+A plan to bring tool-calling up to a proper level: project navigation, a
+plan mode with a task list, a dialog with the user, delegation to a nested
+agent, and web search.
 
-Контекст плана — [IMPROVEMENT-PLAN.md](IMPROVEMENT-PLAN.md) (пункты 9 и 10
-оттуда закрываются этим же заходом: новые тулы — это новый код в
-`internal/editor`, и разделение `editor.go` идёт в той же связке).
+The plan's context is the 2026-10-01 audit ([AUDIT-2026-10-01.md](AUDIT-2026-10-01.md);
+one of its open items — splitting `editor.go` — closes in the same effort:
+new tools are new code in `internal/editor`, and the split goes with it).
 
 ---
 
-## 0. Что есть сейчас
+## 0. What exists now
 
-Пять нативных function-calling тулов, `internal/editor/tools.go:63`
-(`chatToolDefs`) и `internal/editor/tools.go:125` (`execChatTool`):
+Five native function-calling tools, `internal/editor/tools.go:63`
+(`chatToolDefs`) and `internal/editor/tools.go:125` (`execChatTool`):
 
-| Туул | Что делает | Гейт |
+| Tool | What it does | Gate |
 |---|---|---|
-| `READ` | весь файл | `restrict_to_root` |
-| `SEARCH` | `path:line:content`, `regex:true` = RE2 | только чтение |
-| `RUN` | shell в корне проекта, 30с, кап 8КБ | `allow_run = never/ask/always` |
-| `REPLACE` | точечная замена уникального блока | → `agent.Change` → diff-review |
-| `EDIT` | перезапись файла целиком / создание | → `agent.Change` → diff-review |
+| `READ` | whole file | `restrict_to_root` |
+| `SEARCH` | `path:line:content`, `regex:true` = RE2 | read-only |
+| `RUN` | shell in the project root, 30 s, 8 KiB cap | `allow_run = never/ask/always` |
+| `REPLACE` | targeted replacement of a unique block | → `agent.Change` → diff review |
+| `EDIT` | whole-file rewrite / creation | → `agent.Change` → diff review |
 
-Петля тулов: `chat.go:504` `handleChatToolsDone`, глубина
-`[ai] tool_rounds` (дефолт 6), `allow_run=ask` паркует петлю через
-`runConfirmMarker` (`tools.go:230`) и ждёт y/n.
+The tool loop: `chat.go:504` `handleChatToolsDone`, depth
+`[ai] tool_rounds` (default 6); `allow_run=ask` parks the loop via
+`runConfirmMarker` (`tools.go:230`) and waits for a y/n.
 
-Чего нет: `list_dir`, `glob`, `web_search`, `todo_*`, `ask_user`,
-`sub_agent`, `switch_mode`, режимов plan/act. Ни в коде, ни в истории
-веток (`main`, `dev`) — проверено 2026-10-01.
+What is missing: `list_dir`, `glob`, `web_search`, `todo_*`, `ask_user`,
+`sub_agent`, `switch_mode`, plan/act modes. In neither the code nor the
+branch history (`main`, `dev`) — verified 2026-10-01.
 
-**Инвариант, который нельзя ломать ни одним пунктом этого плана:** всё, что
-пишет в файлы, идёт как `agent.Change` через
-`internal/agent.Applier` (валидация `Orig` + атомарная запись). Это
-касается и новых `EDIT`/`REPLACE`, и `sub_agent` — вложенный агент не
-получает права писать напрямую.
+**The invariant no item of this plan may break:** everything that writes
+files goes as an `agent.Change` through `internal/agent.Applier`
+(`Orig` validation + atomic write). This applies to the new `EDIT`/`REPLACE`
+and to `sub_agent` alike — the nested agent gets no direct write access.
 
 ---
 
-## 1. Общие решения (принять до начала кода)
+## 1. Common decisions (settled before any code)
 
-> Статус: **1.1, 1.2, 1.4 сделаны** (2026-10-01), остальное в силе.
+> Status: **1.1, 1.2, 1.4 done** (2026-10-01); the rest is in force.
 
-**1.1 Имена тулов.** Существующие `READ/SEARCH/RUN/REPLACE/EDIT` не
-переименовываем: модели уже привыкли, а переименование ломает любые
-сохранённые чат-треды (см. `chat.go:883`, где исторические `ToolCalls`
-переигрываются). Новые тулы называем в snake_case — так и сделано:
-`LIST_DIR`/`GLOB` (uppercase, как остальные) плюс таблица алиасов
-`legacyToolName` (`read_file→READ`, `write_file→EDIT`, `edit_file→REPLACE`,
-`grep→SEARCH`, `run_command→RUN`, `list_dir→LIST_DIR`, `glob→GLOB`).
-Открытый вопрос про смешение имён снят: алиасы покрывают обе стороны,
-`toolKey` сравнивает имена без учёта регистра.
+**1.1 Tool names.** The existing `READ/SEARCH/RUN/REPLACE/EDIT` are not
+renamed: the models are used to them, and a rename breaks every saved chat
+thread (see `chat.go:883`, where historical `ToolCalls` are replayed). New
+tools are named in snake_case — done as follows: `LIST_DIR`/`GLOB`
+(uppercase, like the rest) plus the `legacyToolName` alias table
+(`read_file→READ`, `write_file→EDIT`, `edit_file→REPLACE`, `grep→SEARCH`,
+`run_command→RUN`, `list_dir→LIST_DIR`, `glob→GLOB`). The open question
+about mixed naming is settled: aliases cover both sides, and `toolKey`
+compares names case-insensitively.
 
-**1.2 Бюджет внимания модели.** Сделано: секции в конфиге
+**1.2 The model's attention budget.** Done: config sections
 
 ```ini
 [ai]
@@ -61,276 +60,286 @@ tools_enabled = read,search,run,replace,edit,list_dir,glob
 tools_disabled = web_search,sub_agent
 ```
 
-`activeChatToolDefs()` фильтрует реестр по этим двум полям (`AIConfig` +
-`parseList`), дефолт — полный набор. `WriteAI` эти ключи не пишет: список
-ручной, визард его не должен затирать.
+`activeChatToolDefs()` filters the registry by these two fields
+(`AIConfig` + `parseList`); the default is the full set. `WriteAI` does not
+write these keys: the list is hand-curated and the wizard must not clobber it.
 
-**1.3 История разговора.** Результат каждого нового тула — обычное
-`ai.Message{Role: "tool"}`, поэтому `trimChatHistory` (`chat.go:448`)
-работает без правок. Ограничения: `READ` кап по `ContextMax`, `SEARCH`
-кап 24 хита, `glob`/`list_dir` кап 200 записей, `web_search` — топ-8
-результатов со сниппетом, `todo_read` — весь список (обычно < 1КБ).
+**1.3 Conversation history.** Every new tool's result is a plain
+`ai.Message{Role: "tool"}`, so `trimChatHistory` (`chat.go:448`) works
+unchanged. Caps: `READ` capped at `ContextMax`, `SEARCH` at 24 hits,
+`glob`/`list_dir` at 200 entries, `web_search` top-8 results with a snippet,
+`todo_read` the whole list (usually < 1 KiB).
 
-**1.4 Общий тул-раннер.** Сделано: `execChatTool` возвращает одну
-`ToolResult` (`Text` + `Change` + `Park`) вместо пары `(string, *Change)`.
-Двоичный маркер `runConfirmMarker` удалён — вместо него `Park` и очередь
-`chatParks`/`chatPark` с читаемым плейсхолдером, который заменяется
-реальным исходом в `resolveParkedResult`. Виды парковки добавляются
-в `ParkKind` вместе с соответствующим тулом (сейчас один —
-`ParkRunConfirm`); общая точка одна — `startNextPark` плюс
+**1.4 One common tool runner.** Done: `execChatTool` returns a single
+`ToolResult` (`Text` + `Change` + `Park`) instead of the
+`(string, *Change)` pair. The binary `runConfirmMarker` was removed — in its
+place is `Park` and the `chatParks`/`chatPark` queue with a readable
+placeholder that `resolveParkedResult` swaps for the real outcome. Park
+kinds are added to `ParkKind` together with the corresponding tool (one so
+far — `ParkRunConfirm`); the common entry points are `startNextPark` plus
 `handleChatParkKey`.
 
-**1.5 Единственный инструмент за пределами воркспейса** — `web_search`.
-Поэтому он: (а) выключен по умолчанию; (б) не имеет доступа к `RUN`/`EDIT`
-ни у себя, ни у вызванной им модели; (в) пишет в транскрипт строку
-`[web_search] <query> → <n> results` рядом с каждым результатом;
-(г) имеет лимит запросов на сессию (`[ai] web_search_budget`, дефолт 20).
+**1.5 The single tool outside the workspace** is `web_search`. Therefore it:
+(a) is off by default; (b) gets no `RUN`/`EDIT` access — neither on its own
+nor for the model it invokes; (c) writes a
+`[web_search] <query> → <n> results` line next to every result in the
+transcript; (d) has a per-session request cap (`[ai] web_search_budget`,
+default 20).
 
-**1.6 Делегирование не должно обходить ревью.** `sub_agent` возвращает
-в вызывающий тул не текст, а `[]agent.Change` — они попадают в общий
-`m.chatPendingChanges` и уходят в тот же diff-review. Никакого отдельного
-«применить сразу» не делаем.
-
----
-
-## 2. Пункт 1 — `LIST_DIR` и `GLOB` (3–4 часа, риск низкий) — ✅ сделано
-
-Самый дешёвый пункт и самая заметная польза: сейчас модели, чтобы узнать
-структуру проекта, зовёт `RUN ls` (шумно, требует подтверждения при
-`allow_run=ask`) или `SEARCH` по всему дереву (дорого).
-
-- `LIST_DIR(path)` — записи каталога: имя + `dir|file` + размер;
-  сортировка «каталоги первыми», кап 200, пропуск `skipped_dirs` и
-  dot-файлов. Сделано: `chatListDir`, `tools_fs.go`.
-- `GLOB(pattern)` — пути, совпавшие с паттерном, с поддержкой `**`
-  («ноль и более сегментов») поверх `path.Match`; обход с консервативным
-  прореживанием `globMayContain` (ложное «не может содержать» скрыло бы файл
-  от модели, поэтому `false` только когда паттерн доказуемо не подходит).
-  Каталоги тоже попадают в результат. Сделано: `chatGlob`, `matchGlob`.
-- Общий обход вынесен в `internal/editor/tools_fs.go`:
-  `walkProject` + `newProjectSkip` используются и SEARCH, и LIST_DIR, и GLOB;
-  `.git`/`.dmed` пропускаются всегда, даже если конфиг не загружен.
-- Тесты: `internal/editor/tools_fs_test.go` — фильтр тул-конфига, алиасы,
-  формат вывода LIST_DIR, GLOB (включая `**` вложенные паттерны, корень,
-  пропуск игнорируемых деревьев, битый паттерн, абсолютный путь),
-  `matchGlob` таблицей, `globMayContain` на «никогда не прореживать лишнего»,
-  `walkProject` с `skipped_dirs`.
-
-Приёмка (сделано): `LIST_DIR`/`GLOB` не требуют подтверждения при
-`allow_run=ask`; `authPath` применяется к обоим; `**/*.go` не заходит
-в `.git`/`node_modules`.
+**1.6 Delegation must not bypass review.** `sub_agent` returns not text but
+`[]agent.Change` to the calling tool — they land in the common
+`m.chatPendingChanges` and go through the same diff review. No separate
+"apply at once" path is provided.
 
 ---
 
-## 3. Пункт 2 — план-режим и `internal/todo` (1 день, риск низкий) — ✅ сделано
+## 2. Item 1 — `LIST_DIR` and `GLOB` (3–4 h, low risk) — ✅ done
 
-Три инструмента: `todo_write` (заменить список), `todo_set` (добавить
-пункты), `todo_read` (прочитать). Хранилище — чистые данные без TUI,
-как требует разделение пакетов.
+The cheapest item and the most visible benefit: today, to learn the project
+layout, the model either calls `RUN ls` (noisy, needs confirmation under
+`allow_run=ask`) or `SEARCH`es the whole tree (expensive).
 
-- `internal/todo/todo.go`: `Item{Text, Done}`, `List` с `Replace`/`Merge`/
-  `Complete`/`Items`/`Render`, потокобезопасно и с копиями на выходе
-  (тот же инвариант, что у `agent.Queue`), кап 50 пунктов и 200 рун на пункт.
-- Поле `todo *todo.List` в `Model` (`New` инициализирует; `todoList()`
-  создаёт лениво, потому что тесты собирают `Model` литералом), блок плана
-  рендерится последним в чате — `todoBlock` в `tools_plan.go`, стили
+- `LIST_DIR(path)` — directory entries: name + `dir|file` + size; sorted
+  directories-first, cap 200, `skipped_dirs` and dot-files skipped.
+  Done: `chatListDir`, `tools_fs.go`.
+- `GLOB(pattern)` — paths matching the pattern, with `**` support
+  ("zero or more path segments") on top of `path.Match`; the walk prunes
+  conservatively via `globMayContain` (a false "cannot contain" would hide
+  a file from the model, so `false` only when the pattern provably cannot
+  match). Directories are included too. Done: `chatGlob`, `matchGlob`.
+- The shared walk lives in `internal/editor/tools_fs.go`:
+  `walkProject` + `newProjectSkip` are used by SEARCH, LIST_DIR and GLOB
+  alike; `.git`/`.dmed` are always skipped, even without a loaded config.
+- Tests: `internal/editor/tools_fs_test.go` — the tool-config filter,
+  aliases, the LIST_DIR output format, GLOB (including nested `**`
+  patterns, the root, skipping ignored trees, a broken pattern, an absolute
+  path), `matchGlob` as a table, `globMayContain` on "never prune too much",
+  `walkProject` with `skipped_dirs`.
+
+Acceptance (done): `LIST_DIR`/`GLOB` need no confirmation under
+`allow_run=ask`; `authPath` applies to both; `**/*.go` never enters
+`.git`/`node_modules`.
+
+---
+
+## 3. Item 2 — plan mode and `internal/todo` (1 day, low risk) — ✅ done
+
+Three tools: `todo_write` (replace the list), `todo_set` (append items),
+`todo_read` (read it). The store is pure data without TUI, as the package
+separation requires.
+
+- `internal/todo/todo.go`: `Item{Text, Done}`, `List` with `Replace`/`Merge`/
+  `Complete`/`Items`/`Render`, thread-safe with copies on the way out
+  (the same invariant as `agent.Queue`), caps of 50 items and 200 runes
+  per item.
+- A `todo *todo.List` field on `Model` (`New` initializes; `todoList()`
+  creates it lazily, because tests assemble `Model` as a literal); the plan
+  block renders last in the chat — `todoBlock` in `tools_plan.go`, styles
   `label-todo`/`todo`/`todo-done`.
-- Результат `TODO_*` — компактный текст `[1] done  read README.md`;
-  он же уходит модели, и он же рисуется (один источник правды).
-- i18n: `chat.todo` в en/ru синхронно.
-- `resetChatConversation` чистит план и снимает висящие вопросы — иначе
-  они пережили бы смену треда.
+- The `TODO_*` result is a compact `[1] done  read README.md` text; the same
+  text goes to the model and is drawn (one source of truth).
+- i18n: `chat.todo` in en/ru in sync.
+- `resetChatConversation` clears the plan and drops pending questions —
+  otherwise they would survive changing the thread.
 
-Приёмка (сделано): тесты на `todo.List` (капы, трим, Merge не дублирует,
-копии на выходе, `-race` на конкурентный доступ) и на рендер блока в чате.
+Acceptance (done): tests on `todo.List` (caps, trimming, `Merge` does not
+duplicate, copies on the way out, `-race` on concurrent access) and on the
+chat block's rendering.
 
 ---
 
-## 4. Пункт 3 — `ask_user` / `internal/ask` (0.5 дня, риск средний) — ✅ сделано
+## 4. Item 3 — `ask_user` / `internal/ask` (0.5 d, medium risk) — ✅ done
 
-Модель задаёт вопрос и ждёт ответа — единственный тул, требующий
-настоящего диалога, а не строки в транскрипте.
+The model asks a question and waits for the answer — the only tool that
+requires a real dialog rather than a line in the transcript.
 
 - `internal/ask/ask.go`: `Request{ID, Question, Choices, Asked}` + `Queue`
-  (`Next`/`Answer`/`Cancel`/`Pending`), без TUI, потокобезопасно.
+  (`Next`/`Answer`/`Cancel`/`Pending`), no TUI, thread-safe.
 - `ask_user(question, choices?)` → `ToolResult{Text: placeholder, Park:
-  {Kind: ParkAskUser, Ask: *Request}}` — тот же механизм парковки, что у RUN.
-- Оверлей: вопрос + варианты (`↑↓` выбор, `Enter` ответить выбранным,
-  `Tab` — положить вариант в поле для правки, `Esc` — пропустить) и строка
-  ответа; чат открывается сам (`startAsk`), иначе вопрос невидим и это
-  висящий вызов, а не решение.
-- Клавиатура перехватывается глобально (`editor.go`: `askReq != nil` раньше
-  всех остальных обработчиков) — единственный курсор стоит на вопросе.
-- Высота оверлея учитывается в `viewHeight`/`contextBottomExtraRows`,
-  рисунок — в `View`, строка подсказки — в `statusIconsVisible`.
-- Ответ подставляется вместо плейсхолдера; Esc пишет модели
-  «cancelled — continue without it».
+  {Kind: ParkAskUser, Ask: *Request}}` — the same parking mechanism as RUN.
+- The overlay: the question + choices (`↑↓` to select, `Enter` to answer
+  with the selection, `Tab` puts the choice into the input field for
+  editing, `Esc` skips) and an answer line; the chat opens by itself
+  (`startAsk`), otherwise the question is invisible and it hangs as a
+  pending call, not a decision.
+- The keyboard is intercepted globally (`editor.go`: `askReq != nil` before
+  every other handler) — the only cursor sits on the question.
+- The overlay's height is counted in `viewHeight`/`contextBottomExtraRows`,
+  the drawing lives in `View`, the hint line in `statusIconsVisible`.
+- The answer replaces the placeholder; `Esc` tells the model
+  "cancelled — continue without it".
 
-Приёмка (сделано): тест на парковку и подстановку ответа, на выбор варианта,
-на Esc, на очередь из RUN+ASK_USER в одном раунде, на высоту оверлея
-(`askExtraRows` == отрисованные строки + 1) и на сброс при новом треде.
-Ручная проверка раскладки в реальном терминале — по caveats из AGENTS.md
-winpty не годится.
-
----
-
-## 5. Пункт 4 — `web_search` через DuckDuckGo (0.5 дня, риск средний) — ✅ сделано
-
-Единственный тул, выходящий за границу воркспейса (1.5).
-
-- Новый пакет `internal/websearch`: `Client.Search(ctx, q)`, `Result`,
-  `Parse` (чистая — тестируется на фикстуре), `Format`. Без новых зависимостей:
-  `net/http` + разбор HTML `html.duckduckgo.com/html/?q=…`.
-- Клиент с собственными таймаутами (10с connect / 20с header / 30с на весь
-  обмен), тело кап 1 МиБ, `User-Agent` обязателен (без него страница
-  приходит огрызком).
-- Тул `WEB_SEARCH` появляется в списке только при `web_search = true`; бюджет
-  `web_search_budget` (дефолт 20) на сессию, при исчерпании тул **выводится из
-  списка**, а не только отклоняется (маленькая модель не должна долбить
-  заведомо отказной вызов).
-- Результат в транскрипте печатается как `[web_search q] N result(s)`; ошибка
-  сети возвращается модели текстом (`lookup failed: …`) и тоже тратит бюджет.
-- Тесты: `internal/websearch` (парсер на фикстуре, «прощающий» режим на битых
-  страницах, кап, отмена контекста, ошибка HTTP) и `tools_web_test.go`
-  (opt-in, бюджет + отсутствие запроса в сеть после его исчерпания, ошибка
-  видна модели). Сетевой доступ — только через `m.webSearchOverride`.
-
-Приёмка (сделано): без `web_search` в конфиге сеть не трогается вообще;
-`go test ./internal/websearch` зелёный без интернета.
+Acceptance (done): tests on parking and substituting the answer, on choosing
+a selection, on `Esc`, on a RUN+ASK_USER queue within one round, on the
+overlay height (`askExtraRows` == rendered rows + 1) and on the reset at a
+new thread. The layout is verified by hand in a real terminal — per the
+AGENTS.md caveats winpty does not fit.
 
 ---
 
-## 6. Пункт 5 — режимы plan/act и `switch_mode` (1–1.5 дня, риск средний) — ✅ сделано
+## 5. Item 4 — `web_search` via DuckDuckGo (0.5 d, medium risk) — ✅ done
 
-- `AIConfig.Mode_` (`act` | `plan`, дефолт `act`) + `AgentMode()`, которая
-  относит неизвестное значение к `act`: опечатка не должна тихо превратить
-  модель в читателя. Команда в палитре: `AI: Toggle Plan/Act Mode`.
-- В режиме `plan` из запроса **выключаются** `RUN`, `EDIT`, `REPLACE`,
-  `SWITCH_MODE` (`readOnlyToolDefs`) — модель может только читать и вести план.
-  Это не «запрет на запись», а отсутствие тула: нечего вызвать.
-- `modeNotice()` добавляется в системное сообщение на каждом ходу, иначе модель
-  продолжала бы пробовать правки и жаловаться.
-- `SWITCH_MODE(mode)` доступен **только в plan-режиме**, паркует петлю
-  (`ParkSwitchMode`) и ждёт y/n в статус-баре. При `n` модель получает
-  «switch_mode denied … keep investigating», а не молчание.
-- `act → plan` переключает только человек (палитра), никогда модель.
-- Индикатор `PLAN` в заголовке чата.
+The only tool crossing the workspace boundary (1.5).
 
-Приёмка (сделано): тест «в plan ушедший запрос не содержит EDIT/RUN/REPLACE/
-SWITCH_MODE», тест на y (переключение + модель узнаёт), на n (остаётся план +
-модель узнаёт), на вызов из act-режима (без парковки, с внятной ошибкой) и на
-некорректный аргумент.
+- A new package `internal/websearch`: `Client.Search(ctx, q)`, `Result`,
+  `Parse` (pure — tested against a fixture), `Format`. No new dependencies:
+  `net/http` + parsing the HTML of `html.duckduckgo.com/html/?q=…`.
+- A client with its own timeouts (10 s connect / 20 s header / 30 s for the
+  whole exchange), a 1 MiB body cap, a mandatory `User-Agent` (without one
+  the page arrives truncated).
+- The `WEB_SEARCH` tool enters the list only when `web_search = true`; the
+  budget `web_search_budget` (default 20) is per session, and once it is
+  spent the tool is **withdrawn from the list**, not merely rejected (a
+  small model should not keep hammering a call that refuses anyway).
+- The result is printed in the transcript as `[web_search q] N result(s)`;
+  a network error is returned to the model as text (`lookup failed: …`)
+  and also spends budget.
+- Tests: `internal/websearch` (the parser against a fixture, a forgiving
+  mode on broken pages, the cap, context cancellation, an HTTP error) and
+  `tools_web_test.go` (opt-in, budget + no network request once it is
+  spent, the error visible to the model). Network access only via
+  `m.webSearchOverride`.
+
+Acceptance (done): with `web_search` absent from the config the network is
+never touched; `go test ./internal/websearch` is green without internet.
 
 ---
 
-## 7. Пункт 6 — `sub_agent` (2–3 дня, риск высокий) — ✅ сделано
+## 6. Item 5 — plan/act modes and `switch_mode` (1–1.5 d, medium risk) — ✅ done
 
-Самый дорогой и самый рискованный; делать последним, когда 1–5 уже
-покрыты тестами.
+- `AIConfig.Mode_` (`act` | `plan`, default `act`) + `AgentMode()`, which
+  maps an unknown value to `act`: a typo must not silently turn the model
+  into a mere reader. A palette command: `AI: Toggle Plan/Act Mode`.
+- In `plan` mode `RUN`, `EDIT`, `REPLACE`, `SWITCH_MODE` are **removed from
+  the request** (`readOnlyToolDefs`) — the model can only read and manage
+  the plan. This is not "a write ban" but the *absence* of the tool: there
+  is nothing to call.
+- `modeNotice()` is appended to the system message on every turn, otherwise
+  the model keeps attempting edits and complaining.
+- `SWITCH_MODE(mode)` is available **only in plan mode**, parks the loop
+  (`ParkSwitchMode`) and waits for a y/n in the status bar. On `n` the model
+  gets "switch_mode denied … keep investigating", not silence.
+- `act → plan` is switched by the human only (the palette), never the model.
+- A `PLAN` indicator in the chat header.
 
-- `internal/agent/subagent.go`: цикл `Subagent.Run` — провайдер, набор
-  инструментов через интерфейс `ToolExecutor`, кап раундов (6) и таймаут
-  (180с). Пакет остаётся без TUI.
-- `Task.Kind` (`KindAgent` | `KindSubagent`) + `Queue.EnqueueSub`: делегация
-  идёт через **ту же очередь**, поэтому задача видна в панели агентов с
-  меткой `[sub]` и проходит **тот же** diff-review → `Applier` → коммит.
-- Инструменты под-агента — положительный список (`READ`, `SEARCH`, `LIST_DIR`,
-  `GLOB`, `REPLACE`, `EDIT`). `RUN` не даётся: его подтверждение это парк, а
-  фоновой задаче отвечать некому. `ASK_USER` — по той же причине, `SUB_AGENT` —
-  чтобы глубина оставалась 1.
-- Отдельный промпт (`[agent] subagent_prompt`) и кап раундов
+Acceptance (done): a test that a request prepared in plan mode contains no
+EDIT/RUN/REPLACE/SWITCH_MODE; tests on y (the switch + the model learns
+about it), on n (stays in plan + the model learns about it), on a call from
+act mode (no parking, a sensible error) and on a bad argument.
+
+---
+
+## 7. Item 6 — `sub_agent` (2–3 d, high risk) — ✅ done
+
+The most expensive and the riskiest; done last, once 1–5 are test-covered.
+
+- `internal/agent/subagent.go`: the `Subagent.Run` loop — a provider, a tool
+  set through the `ToolExecutor` interface, a round cap (6) and a timeout
+  (180 s). The package stays TUI-free.
+- `Task.Kind` (`KindAgent` | `KindSubagent`) + `Queue.EnqueueSub`: delegation
+  goes through **the same queue**, so the task is visible in the agent panel
+  with a `[sub]` label and passes **the same** diff review → `Applier` →
+  commit.
+- The sub-agent's tools are a positive list (`READ`, `SEARCH`, `LIST_DIR`,
+  `GLOB`, `REPLACE`, `EDIT`). `RUN` is withheld: its confirmation is a park,
+  and a background task has nobody to answer. `ASK_USER` for the same
+  reason, `SUB_AGENT` to keep the depth 1.
+- A separate prompt (`[agent] subagent_prompt`) and a round cap
   (`[agent] subagent_rounds`).
-- Ключевой момент реализации: инструменты вынесены в `toolEnv`
-  (`tools_core.go`) — те же функции, что у чата, но без `Model`. Под-агент
-  работает в горутине воркера и не должен касаться состояния редактора;
-  дублировать логику тулов было бы хуже.
-- Чат **паркуется** на время делегации (`ParkSubAgent`), а не ждёт блокирующе:
-  петля тулов крутится в UI-потоке, синхронное ожидание заморозило бы редактор.
-  Прогресс идёт в панели, `Esc` отменяет, `pollSubAgentPark` (по событию
-  очереди, в update-цикле) будит разговор и подставляет модели отчёт.
-- Повторные правки одного файла сливаются (последняя побеждает) — ревьюер не
-  получает три конфликтующих диффа.
+- The key implementation point: the tools moved into `toolEnv`
+  (`tools_core.go`) — the same functions the chat uses, but without a
+  `Model`. The sub-agent runs in the worker goroutine and must not touch the
+  editor's state; duplicating the tool logic would be worse.
+- The chat **parks** for the duration of the delegation (`ParkSubAgent`)
+  instead of waiting blockingly: the tool loop spins on the UI thread, and a
+  synchronous wait would freeze the editor. Progress goes to the panel,
+  `Esc` cancels, `pollSubAgentPark` (on a queue event, inside the update
+  loop) wakes the conversation and hands the report to the model.
+- Repeated edits of one file are merged (the last wins) — the reviewer does
+  not get three conflicting diffs.
 
-Приёмка (сделано): тесты `internal/agent/subagent_test.go` (предложения → review,
-без изменений → done, один дифф на путь, потолок раундов, таймаут не оставляет
-задачу в `running`, ошибка провайдера видна, без провайдера/инструментов падает)
-и `internal/editor/tools_subagent_test.go` (тул появляется только при живой
-очереди и не в plan-режиме, набор инструментов, общий с чатом код и
-`restrict_to_root`, парковка, отчёт с числом файлов и указанием на панель,
-ошибка/отмена/«ничего не предложил», пустая задача).
+Acceptance (done): tests in `internal/agent/subagent_test.go` (proposals →
+review, no changes → done, one diff per path, the round ceiling, a timeout
+leaves no task in `running`, a provider error is visible, no provider/tools
+fails) and `internal/editor/tools_subagent_test.go` (the tool appears only
+when the queue is live and not in plan mode, the tool set, the code shared
+with the chat, `restrict_to_root`, parking, a report with the file count and
+a pointer at the panel, error/cancel/"proposed nothing", an empty task).
 
 ---
 
-## 8. Порядок и оценки
+## 8. Order and estimates
 
-| # | Пункт | Оценка | Риск | Статус | Блокирует |
+| # | Item | Estimate | Risk | Status | Blocks |
 |---|---|---|---|---|---|
-| 0 | Рефакторинг тул-раннера на `ToolResult`/`Park` (1.4) | 3–4 ч | низкий | ✅ | п. 3–6 |
-| 1 | `tools_enabled`/`tools_disabled` (1.2) | 2 ч | низкий | ✅ | п. 1–6 |
-| 2 | `LIST_DIR` + `GLOB` | 3–4 ч | низкий | ✅ | — |
-| 3 | `todo` + `internal/todo` | 1 день | низкий | ✅ | — |
-| 4 | `ask_user` + `internal/ask` | 0.5 дня | средний | ✅ | — |
-| 5 | `web_search` + `internal/websearch` | 0.5 дня | средний | ✅ | — |
-| 6 | plan/act + `switch_mode` | 1–1.5 дня | средний | ✅ | — |
-| 7 | `sub_agent` + `internal/agent/subagent.go` | 2–3 дня | высокий | ✅ | — |
+| 0 | Tool-runner refactor onto `ToolResult`/`Park` (1.4) | 3–4 h | low | ✅ | 3–6 |
+| 1 | `tools_enabled`/`tools_disabled` (1.2) | 2 h | low | ✅ | 1–6 |
+| 2 | `LIST_DIR` + `GLOB` | 3–4 h | low | ✅ | — |
+| 3 | `todo` + `internal/todo` | 1 d | low | ✅ | — |
+| 4 | `ask_user` + `internal/ask` | 0.5 d | medium | ✅ | — |
+| 5 | `web_search` + `internal/websearch` | 0.5 d | medium | ✅ | — |
+| 6 | plan/act + `switch_mode` | 1–1.5 d | medium | ✅ | — |
+| 7 | `sub_agent` + `internal/agent/subagent.go` | 2–3 d | high | ✅ | — |
 
-**План закрыт полностью** (2026-10-01): 7–9 дней работы, 8 инструментов для
-модели (READ, SEARCH, LIST_DIR, GLOB, RUN, REPLACE, EDIT, TODO_*, ASK_USER,
-SWITCH_MODE, WEB_SEARCH, SUB_AGENT), два новых пакета (`internal/todo`,
-`internal/ask`, `internal/websearch`) и один расширенный (`internal/agent`).
-Открытым остаётся только п. 3 из раздела 10 (синхронный `sub_agent` против
-`agent.Queue`) — он закрыт в пользу очереди: блокировать UI нельзя.
+**The plan is fully closed** (2026-10-01): 7–9 days of work, eight tools
+for the model (READ, SEARCH, LIST_DIR, GLOB, RUN, REPLACE, EDIT, TODO_*,
+ASK_USER, SWITCH_MODE, WEB_SEARCH, SUB_AGENT), three new packages
+(`internal/todo`, `internal/ask`, `internal/websearch`) and one extended
+(`internal/agent`). Only item 3 of section 10 (a synchronous `sub_agent`
+versus the `agent.Queue`) was left open — it is settled in favor of the
+queue: the UI must not block.
 
 ---
 
-## 9. Проверка перед завершением
+## 9. Verification before finishing
 
 ```sh
 make build && make vet && make test && make race && make fmt-check
 ```
 
-Обязательно: тест на фильтр тул-конфига в `config_test.go`, новые ключи
-en/ru синхронно (`TestCatalogsHaveSameKeys`), `README.md` — раздел про
-`web_search` («делает запросы в интернет, по умолчанию выключен») и
-`AGENTS.md` — описание новых пакетов в разделе Architecture.
-`ROADMAP.md` — завести M8 с этими чекбоксами.
+Mandatory: a test on the tool-config filter in `config_test.go`, the new
+en/ru keys in sync (`TestCatalogsHaveSameKeys`), `README.md` — a section on
+`web_search` ("makes requests to the internet, off by default") and
+`AGENTS.md` — the new packages described under Architecture.
+`ROADMAP.md` — start an M8 with these checkboxes.
 
 ---
 
-## 10. Открытые вопросы (решить до п. 4)
+## 10. Open questions (settled before item 4)
 
-1. ~~Синтаксис `glob`~~ — решён: свой матчер с `**` поверх `path.Match`
-   (`matchGlob`), п. 2 сделан.
-2. ~~`web_search`: html DuckDuckGo или Instant Answer API~~ — решено: html
-   DuckDuckGo с разбором по `result__a`/`result__snippet`, `Parse` чистая и
-   покрыта фикстурой (пп. 5).
-3. `sub_agent`: синхронно внутри петли тулов или через `agent.Queue`?
-   Влияет на отзывчивость чата.
-4. ~~Имена тулов~~ — решено: смешанные регистры плюс алиасы в обе стороны.
+1. ~~The `glob` syntax~~ — settled: a matcher with `**` over `path.Match`
+   (`matchGlob`); item 2 is done.
+2. ~~`web_search`: html DuckDuckGo or the Instant Answer API~~ — settled:
+   html DuckDuckGo parsed by `result__a`/`result__snippet`, `Parse` is pure
+   and covered by a fixture (item 5).
+3. `sub_agent`: synchronously inside the tool loop, or via `agent.Queue`?
+   Affects the chat's responsiveness.
+4. ~~Tool names~~ — settled: mixed case plus aliases in both directions.
 
-## 11. Бонус: ключевой провайдер по умолчанию (сделано)
+## 11. Bonus: a key provider as the fallback default (done)
 
-`internal/ai` больше не предполагает, что «OpenAI-совместимый» = `/v1`:
-`Config.APIPath`/`ModelsPath` позволяют подключить Pollinations, который
-отдаёт тот же протокол под `/openai`, а модели — по `/models`. Пресет
-`Pollinations (free, no key)` стоит вторым в визарде, ключ у него не
-запрашивается, `setup-ai` печатает предупреждение про публичный сервис, а
-`WriteAI` сохраняет префиксы (иначе перезапуск дал бы 404 вместо ответа).
+`internal/ai` no longer assumes "OpenAI-compatible" = `/v1`:
+`Config.APIPath`/`ModelsPath` allow attaching Pollinations, which serves the
+same protocol under `/openai` and lists models at `/models`. The
+`Pollinations (free, no key)` preset stands second in the wizard, asks for
+no key; `setup-ai` prints a warning about the public service, and `WriteAI`
+saves the prefixes (otherwise a restart would 404 instead of answering).
 
-Отдельное проектное решение: если пользователь **ничего не настраивал** и
-локальный провайдер не отвечает, сессия переключается на Pollinations
-(`free_fallback`, дефолт `true`). Условия узкие и намеренные:
+A separate design decision: if the user **configured nothing** and the local
+provider is unreachable, the session switches to Pollinations
+(`free_fallback`, default `true`). The conditions are narrow and deliberate:
 
-- `config.AIConfig.Unconfigured()` — пустая модель, пустой ключ, дефолтный
-  Ollama. Любой выбор пользователя (модель, ключ, свой сервер, явный пресет)
-  отключает фолбэк навсегда;
-- срабатывает один раз за сессию и только если ключевой сервис ответил на
-  пробу (иначе пользователь видит исходную ошибку, а не тишину);
-- бейдж `CLOUD` в заголовке чата и уведомление в транскрипте: «запросы, файлы
-  и результаты инструментов теперь уходят с этой машины», плюс ключ конфига,
-  который это отключает;
-- `free_fallback = false` выключает совсем; выбор провайдера в `Ctrl+P` →
-  `AI: Preferences...` тоже снимает состояние фолбэка и уведомление.
+- `config.AIConfig.Unconfigured()` — an empty model, an empty key, the
+  default Ollama. Any user choice (a model, a key, one's own server, an
+  explicit preset) turns the fallback off for good;
+- it fires once per session and only if the key service answered the probe
+  (otherwise the user sees the original error, not silence);
+- a `CLOUD` badge in the chat header and a notice in the transcript:
+  "prompts, files and tool results now leave this machine", plus the config
+  key that turns it off;
+- `free_fallback = false` disables it entirely; picking a provider in
+  `Ctrl+P` → `AI: Preferences...` also clears the fallback state and the
+  notice.
 
-Анонимный тариф Pollinations ограничен примерно одним запросом в 15 секунд,
-поэтому это фолбэк, а не дефолт: на батче он бесполезен.
+Pollinations' anonymous tier is rate-limited to roughly one request per
+15 seconds, so this is a fallback, not a default: useless on a batch.
