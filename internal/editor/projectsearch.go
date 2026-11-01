@@ -347,11 +347,11 @@ func searchProject(base string, skip projectSkip, sm *searchMatcher, visit func(
 	return stop
 }
 
-func (m *Model) handleProjSearch(msg tea.KeyPressMsg) tea.Cmd {
+func (m *Model) handleProjSearch(s string, msg tea.KeyPressMsg) tea.Cmd {
 	if m.projSearchInput {
-		return m.handleProjSearchInput(msg)
+		return m.handleProjSearchInput(s, msg)
 	}
-	switch msg.String() {
+	switch s {
 	case "esc", "ctrl+c":
 		m.stopProjectSearch()
 	case "up", "k", "ctrl+p":
@@ -380,8 +380,8 @@ func (m *Model) handleProjSearch(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-func (m *Model) handleProjSearchInput(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleProjSearchInput(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "esc":
 		m.stopProjectSearch()
 	case "tab":

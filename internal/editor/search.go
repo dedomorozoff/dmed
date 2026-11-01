@@ -22,8 +22,8 @@ func (m *Model) startReplace() {
 	}
 }
 
-func (m *Model) handleSearch(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleSearch(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "esc":
 		m.searchOpen = false
 		m.replaceOpen = false
@@ -57,8 +57,8 @@ func (m *Model) handleSearch(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-func (m *Model) handleReplace(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleReplace(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "esc":
 		m.searchOpen = false
 		m.replaceOpen = false

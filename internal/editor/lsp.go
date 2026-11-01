@@ -591,8 +591,8 @@ func (m *Model) startLspActions() tea.Cmd {
 	return m.startLspActionsCmd()
 }
 
-func (m *Model) handleLspRename(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleLspRename(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "esc", "ctrl+c":
 		m.lspRenameOpen = false
 		m.msg = ""
@@ -612,8 +612,8 @@ func (m *Model) handleLspRename(msg tea.KeyPressMsg) tea.Cmd {
 
 // handleLspActions drives the quick-fix list overlay: plain cursor keys,
 // Enter applies the edit of the selected action, Esc closes.
-func (m *Model) handleLspActions(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleLspActions(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "esc", "ctrl+c":
 		m.lspActionsOpen = false
 		m.msg = ""

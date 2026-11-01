@@ -61,8 +61,8 @@ func (m *Model) startFixRequest() {
 
 // handleFixRequest handles keys while the fix prompt is active (before the AI
 // has responded).
-func (m *Model) handleFixRequest(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleFixRequest(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "esc":
 		m.aiFixOpen = false
 		m.aiFixBusy = false
@@ -214,8 +214,8 @@ func (m *Model) startFixReview() {
 }
 
 // handleFixReview handles keys while the AI fix diff is shown.
-func (m *Model) handleFixReview(msg tea.KeyPressMsg) tea.Cmd {
-	switch gitKeyName(msg) {
+func (m *Model) handleFixReview(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "y", "enter":
 		m.applyFixProposal()
 		m.aiFixReviewMode = false

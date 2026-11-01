@@ -114,8 +114,8 @@ func (m *Model) folderUse() {
 }
 
 // handleFolderBrowser routes keys while the built-in folder picker is open.
-func (m *Model) handleFolderBrowser(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleFolderBrowser(s string) tea.Cmd {
+	switch s {
 	case "esc":
 		m.folderOpen = false
 	case "enter", "right":

@@ -1013,8 +1013,8 @@ func (m *Model) pasteInput(text string) {
 	m.msg = m.t("msg.pasted")
 }
 
-func (m *Model) handleFinder(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleFinder(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "esc":
 		m.finderOpen = false
 	case "enter":
@@ -1047,8 +1047,8 @@ func (m *Model) handleFinder(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-func (m *Model) handleHelp(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleHelp(s string) tea.Cmd {
+	switch s {
 	case "esc", "f1", "ctrl+e", "q":
 		m.helpOpen = false
 	case "j", "down", "pgdown":
@@ -1404,12 +1404,15 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.KeyPressMsg:
+		// The debug flag exists to show the chord the bindings actually
+		// matched, not the bytes the terminal sent.
+		_, kn := keyOf(msg)
 		if debugKeys {
-			fmt.Fprintf(os.Stderr, "dmed: key %q\n", msg.String())
+			fmt.Fprintf(os.Stderr, "dmed: key %q\n", kn)
 		}
 		cmd := m.handleKey(msg)
 		if debugKeys {
-			m.msg = "k:" + msg.String()
+			m.msg = "k:" + kn
 		}
 		if cmd != nil {
 			return m, cmd
@@ -1742,9 +1745,9 @@ func (m *Model) openLangChooser() {
 }
 
 // handleLangChooser handles keys while the language chooser is open.
-func (m *Model) handleLangChooser(msg tea.KeyPressMsg) tea.Cmd {
+func (m *Model) handleLangChooser(s string) tea.Cmd {
 	langs := i18n.Supported()
-	switch msg.String() {
+	switch s {
 	case "esc":
 		m.langChooserOpen = false
 	case "enter":

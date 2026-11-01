@@ -426,14 +426,16 @@ func (m *Model) clickLeftRail(x, y int) tea.Cmd {
 // activatePanelItem runs the same action as pressing Enter in the currently
 // focused left-rail panel, so a double click selects and activates an item.
 func (m *Model) activatePanelItem() {
-	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	// The same translator the keyboard uses: these handlers match on the
+	// normalized name, so a synthesized Enter has to arrive named too.
+	enter, enterName := keyOf(tea.KeyPressMsg{Code: tea.KeyEnter})
 	switch {
 	case m.agentOpen:
-		m.handleAgent(enter)
+		m.handleAgent(enterName, enter)
 	case m.gitOpen:
 		switch m.gitMode {
 		case gitModeStatus:
-			m.handleGitStatus(enter)
+			m.handleGitStatus(enterName, enter)
 		case gitModeLog:
 			// There is no Enter binding here; a double click focuses the commit
 			// diff so the wheel can scroll it.
@@ -442,10 +444,10 @@ func (m *Model) activatePanelItem() {
 				m.clampDiffScroll(m.viewHeight())
 			}
 		case gitModeBranch:
-			m.handleGitBranch(enter)
+			m.handleGitBranch(enterName, enter)
 		}
 	case m.sidebarOn():
-		m.handleTree(enter)
+		m.handleTree(enterName, enter)
 	}
 }
 

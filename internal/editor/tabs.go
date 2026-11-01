@@ -142,10 +142,10 @@ func (m Model) hasDirty() bool {
 	return false
 }
 
-func (m *Model) handleQuitConfirm(msg tea.KeyPressMsg) tea.Cmd {
-	// gitKeyName maps the physical Y/N keys to y/n in any keyboard layout, so
-	// the confirmation works in Cyrillic too (н/т are the Y/N keys there).
-	switch gitKeyName(msg) {
+func (m *Model) handleQuitConfirm(s string, msg tea.KeyPressMsg) tea.Cmd {
+	// keyOf names the physical key, so the y/n answer works in any keyboard
+	// layout (н/т are the Y/N keys on ЙЦУКЕН).
+	switch s {
 	case "esc":
 		m.quitConfirm = false
 		m.pendingQuit = false

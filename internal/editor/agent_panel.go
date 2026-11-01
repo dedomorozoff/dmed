@@ -195,8 +195,8 @@ func (m *Model) startAgentTaskPrompt() tea.Cmd {
 }
 
 // handleAgentPrompt handles text entry for a new task prompt.
-func (m *Model) handleAgentPrompt(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleAgentPrompt(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "esc":
 		m.agentPrompt = false
 		m.agentPromptIn = nil
@@ -223,8 +223,8 @@ func (m *Model) handleAgentPrompt(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 // handleAgent handles keys while the agent panel is focused.
-func (m *Model) handleAgent(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleAgent(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "esc":
 		m.agentOpen = false
 		m.agentFocus = false
@@ -483,10 +483,10 @@ func (m *Model) loadAgentChange(idx int) {
 }
 
 // handleAgentReview handles keys while the agent diff review is shown.
-func (m *Model) handleAgentReview(msg tea.KeyPressMsg) tea.Cmd {
+func (m *Model) handleAgentReview(s string, msg tea.KeyPressMsg) tea.Cmd {
 	task, _ := m.agentQueue.Find(m.agentReviewTaskID)
 	n := len(task.Changes)
-	switch gitKeyName(msg) {
+	switch s {
 	case "y", "enter", "a":
 		m.acceptAgentReview()
 	case "n", "esc", "r":

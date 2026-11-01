@@ -55,8 +55,8 @@ func (m *Model) startSavePrompt() {
 	m.promptSaveIn = nil
 }
 
-func (m *Model) handlePrompt(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handlePrompt(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "esc":
 		m.promptOpen = false
 		m.promptNewFile = false
@@ -104,8 +104,8 @@ func (m *Model) handlePrompt(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-func (m *Model) handleSavePrompt(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleSavePrompt(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "esc":
 		m.promptSave = false
 		m.pendingQuit = false
@@ -157,8 +157,8 @@ func (m *Model) startGotoPrompt() {
 
 // handleGoto handles input in the "Go to Line" prompt. Accepts absolute
 // (N, or N:C) and relative (+N/-N, or +N:C/-N:C) line specs.
-func (m *Model) handleGoto(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleGoto(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "esc":
 		m.gotoOpen = false
 		m.msg = ""

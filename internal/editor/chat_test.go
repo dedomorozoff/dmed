@@ -218,20 +218,20 @@ func TestHandleChatTypingAndSubmitGuard(t *testing.T) {
 	m := newChatModel()
 	m.toggleChat()
 	for _, r := range "hi there" {
-		m.handleChat(tea.KeyPressMsg{Text: string(r)})
+		m.handleChat(keyPair(tea.KeyPressMsg{Text: string(r)}))
 	}
 	if string(m.chatIn) != "hi there" {
 		t.Fatalf("input = %q", string(m.chatIn))
 	}
 	m.chatBusy = true // stream running: enter must not submit
 	m.chatIn = []rune("second")
-	m.handleChat(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleChat(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if len(m.chatMsgs) != 0 || m.chatIn == nil {
 		t.Fatalf("busy submit must be ignored; msgs=%d input=%v", len(m.chatMsgs), m.chatIn)
 	}
 	m.chatBusy = false
 	m.chatModel = "test-model" // pretend ollama resolved a model
-	m.handleChat(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleChat(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if len(m.chatMsgs) != 1 || m.chatMsgs[0].Role != "user" || m.chatMsgs[0].Content != "second" {
 		t.Fatalf("msgs = %+v", m.chatMsgs)
 	}
@@ -247,19 +247,19 @@ func TestChatPromptHistoryNavigation(t *testing.T) {
 	m.chatPrompts = []string{"second prompt", "first prompt"}
 
 	m.chatIn = []rune("draft being ty")
-	m.handleChat(tea.KeyPressMsg{Code: tea.KeyUp})
+	m.handleChat(keyPair(tea.KeyPressMsg{Code: tea.KeyUp}))
 	if got := string(m.chatIn); got != "second prompt" {
 		t.Fatalf("Up must recall the most recent prompt, got %q", got)
 	}
-	m.handleChat(tea.KeyPressMsg{Code: tea.KeyUp})
+	m.handleChat(keyPair(tea.KeyPressMsg{Code: tea.KeyUp}))
 	if got := string(m.chatIn); got != "first prompt" {
 		t.Fatalf("Up again must recall the older prompt, got %q", got)
 	}
-	m.handleChat(tea.KeyPressMsg{Code: tea.KeyDown})
+	m.handleChat(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
 	if got := string(m.chatIn); got != "second prompt" {
 		t.Fatalf("Down must return to the newer prompt, got %q", got)
 	}
-	m.handleChat(tea.KeyPressMsg{Code: tea.KeyDown})
+	m.handleChat(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
 	if got := string(m.chatIn); got != "draft being ty" {
 		t.Fatalf("Down past the newest prompt must restore the draft, got %q", got)
 	}
@@ -308,11 +308,11 @@ func TestChatThreadSwitchAndPersist(t *testing.T) {
 	if len(m2.chatMsgs) != 2 || m2.chatMsgs[0].Content != "what is rope?\n" {
 		t.Fatalf("switchChatThread(+1) must switch to the older thread: %+v", m2.chatMsgs)
 	}
-	m2.handleChat(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
+	m2.handleChat(keyPair(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl}))
 	if len(m2.chatMsgs) != 1 || m2.chatMsgs[0].Content != "hello there" {
 		t.Fatalf("Ctrl+N must switch back to the newer thread: %+v", m2.chatMsgs)
 	}
-	m2.handleChat(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
+	m2.handleChat(keyPair(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl}))
 	if len(m2.chatMsgs) != 0 || m2.chatThreadPos != -1 {
 		t.Fatalf("Ctrl+N past the newest must open a new thread")
 	}
@@ -423,7 +423,7 @@ func TestChatNewThreadClearsConversation(t *testing.T) {
 	canceled := false
 	m.chatCancel = func() { canceled = true }
 
-	m.handleChat(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	m.handleChat(keyPair(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}))
 
 	if m.chatBusy || len(m.chatMsgs) != 0 || m.chatReply != "" || m.chatErr != "" || m.chatToolRound != 0 || m.chatIn != nil {
 		t.Fatalf("thread must be fully reset: busy=%v msgs=%d reply=%q err=%q round=%d in=%v",

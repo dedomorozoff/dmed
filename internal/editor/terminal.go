@@ -168,12 +168,20 @@ func (m *Model) killTerminal() {
 	m.termOpen = false
 }
 
-func terminalKeyBytes(msg tea.KeyPressMsg) []byte {
-	s := msg.String()
+func terminalKeyBytes(s string, msg tea.KeyPressMsg) []byte {
 	if msg.Mod&tea.ModCtrl != 0 {
 		key := msg.Code
 		if len(msg.Text) > 0 {
 			key = []rune(msg.Text)[0]
+		}
+		if key < 'a' || key > 'z' {
+			if key < 'A' || key > 'Z' {
+				// The layout gave us a non-Latin letter (or none); the
+				// translator already resolved which key was held down.
+				if rest := strings.TrimPrefix(s, "ctrl+"); len(rest) == 1 && rest[0] >= 'a' && rest[0] <= 'z' {
+					key = rune(rest[0])
+				}
+			}
 		}
 		if key >= 'a' && key <= 'z' {
 			return []byte{byte(key - 'a' + 1)}
@@ -189,7 +197,7 @@ func terminalKeyBytes(msg tea.KeyPressMsg) []byte {
 		return []byte{'\t'}
 	case "backspace":
 		return []byte{0x7f}
-	case "escape":
+	case "esc":
 		return []byte{0x1b}
 	case "up":
 		return []byte("\x1b[A")
@@ -268,8 +276,8 @@ func (m *Model) forwardTerminalMouseEvent(button, x, y int, final byte) {
 	_, _ = fmt.Fprintf(m.termSession, "\x1b[<%d;%d;%d%c", button, x+1, y+1, final)
 }
 
-func (m *Model) handleTerm(msg tea.KeyPressMsg) tea.Cmd {
-	if data := terminalKeyBytes(msg); len(data) > 0 && m.termSession != nil {
+func (m *Model) handleTerm(s string, msg tea.KeyPressMsg) tea.Cmd {
+	if data := terminalKeyBytes(s, msg); len(data) > 0 && m.termSession != nil {
 		if _, err := m.termSession.Write(data); err != nil {
 			m.msg = m.t("term.error", err.Error())
 		}

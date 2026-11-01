@@ -29,7 +29,7 @@ func TestInlineReviewCyrillicKeys(t *testing.T) {
 	}
 
 	// «т» (physical N) must discard.
-	m.handleInlineReview(tea.KeyPressMsg{Text: "т"})
+	m.handleInlineReview(keyPair(tea.KeyPressMsg{Text: "т"}))
 	if m.aiReviewMode {
 		t.Fatal("«т» must close the review")
 	}
@@ -40,7 +40,7 @@ func TestInlineReviewCyrillicKeys(t *testing.T) {
 	// «н» (physical Y) must accept and apply.
 	m.aiInlineProposal = "hello brave world"
 	m.startInlineReview()
-	m.handleInlineReview(tea.KeyPressMsg{Text: "н"})
+	m.handleInlineReview(keyPair(tea.KeyPressMsg{Text: "н"}))
 	if m.aiReviewMode {
 		t.Fatal("«н» must close the review")
 	}
@@ -601,7 +601,7 @@ func TestAIFixReviewCyrillicKeys(t *testing.T) {
 	}
 
 	// «т» (physical N) must discard.
-	m.handleFixReview(tea.KeyPressMsg{Text: "т"})
+	m.handleFixReview(keyPair(tea.KeyPressMsg{Text: "т"}))
 	if m.aiFixReviewMode {
 		t.Fatal("«т» must close the review")
 	}
@@ -612,7 +612,7 @@ func TestAIFixReviewCyrillicKeys(t *testing.T) {
 	// «н» (physical Y) must accept and apply.
 	m.aiFixProposal = "hello brave world"
 	m.startFixReview()
-	m.handleFixReview(tea.KeyPressMsg{Text: "н"})
+	m.handleFixReview(keyPair(tea.KeyPressMsg{Text: "н"}))
 	if m.aiFixReviewMode {
 		t.Fatal("«н» must close the review")
 	}
@@ -633,16 +633,16 @@ func TestAIFixPromptTyping(t *testing.T) {
 		t.Fatal("fix prompt should be open")
 	}
 	for _, r := range "fix bugs" {
-		m.handleFixRequest(tea.KeyPressMsg{Text: string(r)})
+		m.handleFixRequest(keyPair(tea.KeyPressMsg{Text: string(r)}))
 	}
 	if string(m.aiFixInput) != "fix bugs" {
 		t.Fatalf("input = %q", string(m.aiFixInput))
 	}
-	m.handleFixRequest(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	m.handleFixRequest(keyPair(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}))
 	if m.aiFixInput != nil {
 		t.Fatal("Ctrl+U must clear the input")
 	}
-	m.handleFixRequest(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m.handleFixRequest(keyPair(tea.KeyPressMsg{Code: tea.KeyEsc}))
 	if m.aiFixOpen {
 		t.Fatal("Esc must close the prompt")
 	}

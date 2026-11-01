@@ -99,6 +99,40 @@ func TestKeyOfNormalization(t *testing.T) {
 			wantKey:  "shift+down",
 			wantText: "",
 		},
+		{
+			// Terminals put the raw control byte in Text for these and
+			// String() prints it verbatim: a name no binding could ever match.
+			name:     "enter is named from the code when Text carries CR",
+			msg:      tea.KeyPressMsg{Code: tea.KeyEnter, Text: "\r"},
+			wantKey:  "enter",
+			wantText: "\r",
+		},
+		{
+			name:     "esc is named from the code when Text carries ESC",
+			msg:      tea.KeyPressMsg{Code: tea.KeyEsc, Text: "\x1b"},
+			wantKey:  "esc",
+			wantText: "\x1b",
+		},
+		{
+			name:     "tab is named from the code when Text carries HT",
+			msg:      tea.KeyPressMsg{Code: tea.KeyTab, Text: "\t"},
+			wantKey:  "tab",
+			wantText: "\t",
+		},
+		{
+			name:     "backspace is named from the code when Text carries DEL",
+			msg:      tea.KeyPressMsg{Code: tea.KeyBackspace, Text: "\x7f"},
+			wantKey:  "backspace",
+			wantText: "\x7f",
+		},
+		{
+			// ruToEn knows ЙЦУКЕН only; any other Cyrillic-based layout is
+			// still identifiable by the physical key under the finger.
+			name:     "an unmapped layout falls back to the physical key",
+			msg:      tea.KeyPressMsg{Code: 'і', Text: "і", BaseCode: 't'},
+			wantKey:  "t",
+			wantText: "і",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -306,6 +340,55 @@ func TestEditorBindingsFire(t *testing.T) {
 	}
 }
 
+// The panes used to translate keys themselves — msg.String() in ~39 places
+// plus a private gitKeyName — so a Russian layout silently broke their letter
+// commands, and a terminal that puts the control byte in Text broke Enter and
+// Escape. All of them now match on the single name keyOf produces.
+func TestPaneHandlersUseTheOneTranslator(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "a.txt", "one\n")
+
+	t.Run("letter command in a cyrillic layout", func(t *testing.T) {
+		m := New(f)
+		m.width, m.height = 80, 24
+		m.diffViewOpen = true
+		m = press(m, tea.KeyPressMsg{Code: 'й', Text: "й"}) // the q key on ЙЦУКЕН
+		if m.diffViewOpen {
+			t.Fatal("'й' is the physical q: the diff view should have closed")
+		}
+	})
+
+	t.Run("typing keeps the character, not the key name", func(t *testing.T) {
+		m := New(f)
+		m.width, m.height = 80, 24
+		m.startSearch()
+		m = press(m, tea.KeyPressMsg{Code: 'ф', Text: "ф"}) // named 'a', typed 'ф'
+		if got := string(m.searchQuery); got != "ф" {
+			t.Fatalf("search query = %q, want %q — a text pane must keep what was typed", got, "ф")
+		}
+	})
+
+	t.Run("enter with CR in text commits", func(t *testing.T) {
+		m := New(f)
+		m.width, m.height = 80, 24
+		m.finderOpen = true
+		m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter, Text: "\r"})
+		if m.finderOpen {
+			t.Fatal(`Enter arriving as {"\r"} should still be named "enter"`)
+		}
+	})
+
+	t.Run("esc with ESC in text closes", func(t *testing.T) {
+		m := New(f)
+		m.width, m.height = 80, 24
+		m.finderOpen = true
+		m = press(m, tea.KeyPressMsg{Code: tea.KeyEsc, Text: "\x1b"})
+		if m.finderOpen {
+			t.Fatal(`Escape arriving as {"\x1b"} should still be named "esc"`)
+		}
+	})
+}
+
 func TestUnboundChordIsSilentAndTypesNothing(t *testing.T) {
 	dir := t.TempDir()
 	f := writeTemp(t, dir, "a.txt", "one\n")
@@ -325,6 +408,20 @@ func TestUnknownRuneGoesToTheBuffer(t *testing.T) {
 	if got := m.cur().buf.Text(); got != "zone\n" {
 		t.Fatalf("buffer after typing z = %q, want %q", got, "zone\n")
 	}
+}
+
+// keyPair is what dispatchPanes hands a pane handler: the name from the one
+// translator and the message text-entry reads. Tests call handlers through it
+// so a chord is named exactly as a real terminal key press would be named.
+func keyPair(msg tea.KeyPressMsg) (string, tea.KeyPressMsg) {
+	m, s := keyOf(msg)
+	return s, m
+}
+
+// keyName is the same name alone, for handlers that only ever match chords.
+func keyName(msg tea.KeyPressMsg) string {
+	_, s := keyOf(msg)
+	return s
 }
 
 // A buffer is the single source of truth, so the tests above assert on it.

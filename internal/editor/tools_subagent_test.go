@@ -184,7 +184,7 @@ func TestSubAgentFailureAndCancelReports(t *testing.T) {
 	m2 := subagentHarness(t)
 	m2.handleChatToolsDone("", []ai.ToolCall{{ID: "c1", Name: "SUB_AGENT", Args: `{"task":"y"}`}})
 	id2 := m2.chatPark.park.Text
-	m2.handleChatParkKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m2.handleChatParkKey(keyPair(tea.KeyPressMsg{Code: tea.KeyEsc}))
 	task, ok := m2.agentQueue.Find(id2)
 	if !ok {
 		t.Fatal("the task must still exist after a cancel")

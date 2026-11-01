@@ -165,7 +165,7 @@ func TestSwitchModeParksForApproval(t *testing.T) {
 		t.Fatal("the mode must not change before the user agrees")
 	}
 
-	m.handleChatParkKey(teaKeyY())
+	m.handleChatParkKey(keyPair(teaKeyY()))
 
 	if m.chatPark != nil {
 		t.Fatal("the park must be resolved")
@@ -189,7 +189,7 @@ func TestSwitchModeDeclineKeepsPlanning(t *testing.T) {
 	m.cfg.AI.Mode_ = string(config.ModePlan)
 	m.handleChatToolsDone("", []ai.ToolCall{{ID: "c1", Name: "SWITCH_MODE", Args: `{"mode":"act"}`}})
 
-	m.handleChatParkKey(teaKeyN())
+	m.handleChatParkKey(keyPair(teaKeyN()))
 
 	if m.cfg.AI.AgentMode() != config.ModePlan {
 		t.Fatal("n must keep the model in plan mode")

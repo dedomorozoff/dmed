@@ -857,9 +857,7 @@ func (m *Model) dapRelease() tea.Cmd {
 // dapFocus 0-2 select the threads/stack/variables lists; focus 3 is the
 // evaluator input row, reached only explicitly via Tab (typed characters stay
 // out of it so the panel never hijacks ordinary editing keys).
-func (m *Model) handleDap(msg tea.KeyPressMsg) tea.Cmd {
-	s := msg.String()
-
+func (m *Model) handleDap(s string, msg tea.KeyPressMsg) tea.Cmd {
 	if m.dapFocus == 3 {
 		switch s {
 		case "esc":

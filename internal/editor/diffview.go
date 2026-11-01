@@ -92,9 +92,9 @@ func (m *Model) clampDiffScroll(h int) {
 	}
 }
 
-func (m *Model) handleDiffView(msg tea.KeyPressMsg) tea.Cmd {
+func (m *Model) handleDiffView(s string) tea.Cmd {
 	h := m.viewHeight()
-	switch msg.String() {
+	switch s {
 	case "esc", "q", "d":
 		m.closeDiffView()
 	case "up", "k":

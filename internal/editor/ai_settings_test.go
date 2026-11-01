@@ -38,12 +38,12 @@ func pickAISelect(t *testing.T, m *Model, field int, name string) tea.Cmd {
 		if m.aiCfgSelItems[m.aiCfgSelIdx] == name {
 			break
 		}
-		m.handleAISelectKey(tea.KeyPressMsg{Code: tea.KeyDown})
+		m.handleAISelectKey(keyName(tea.KeyPressMsg{Code: tea.KeyDown}))
 	}
 	if got := m.aiCfgSelItems[m.aiCfgSelIdx]; got != name {
 		t.Fatalf("option %q is not in the list %v", name, m.aiCfgSelItems)
 	}
-	if handled, changed := m.handleAISelectKey(tea.KeyPressMsg{Code: tea.KeyEnter}); !handled {
+	if handled, changed := m.handleAISelectKey(keyName(tea.KeyPressMsg{Code: tea.KeyEnter})); !handled {
 		t.Fatal("Enter on the highlighted option must be handled by the list")
 	} else if changed {
 		return m.afterChoiceChange()
@@ -97,7 +97,7 @@ func TestAISettingsProviderSelect(t *testing.T) {
 
 	// Enter opens the list, with the current value highlighted.
 	m.aiCfgField = 0
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if !m.aiCfgSelOpen {
 		t.Fatal("Enter on the Provider row must open the list")
 	}
@@ -105,13 +105,13 @@ func TestAISettingsProviderSelect(t *testing.T) {
 		t.Fatalf("the current value must be highlighted, got %q", m.aiCfgSelItems[m.aiCfgSelIdx])
 	}
 	// Arrows must not silently change the value while the list is open.
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyDown})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
 	if m.cfg.AI.Provider != "Pollinations (free, no key)" {
 		t.Fatalf("the value changed before a pick: %q", m.cfg.AI.Provider)
 	}
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyUp}) // no-op at the top
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyDown})
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyUp})) // no-op at the top
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 
 	if m.aiCfgSelOpen {
 		t.Fatal("the list must close after a pick")
@@ -148,9 +148,9 @@ func TestAISettingsSelectEscapeChangesNothing(t *testing.T) {
 	before := m.cfg.AI.Provider
 
 	m.aiCfgField = 0
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyDown})
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEsc}))
 
 	if m.aiCfgSelOpen {
 		t.Fatal("Esc must close the list")
@@ -159,7 +159,7 @@ func TestAISettingsSelectEscapeChangesNothing(t *testing.T) {
 		t.Fatalf("Esc changed the provider: %q -> %q", before, m.cfg.AI.Provider)
 	}
 	// Esc on the row still closes the wizard.
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEsc}))
 	if m.aiCfgOpen {
 		t.Fatal("Esc must close the wizard")
 	}
@@ -175,7 +175,7 @@ func TestAISettingsModelSelectTypeManually(t *testing.T) {
 		Models: []string{"a-model", "b-model"}})
 
 	m.aiCfgField = 1
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if !m.aiCfgSelOpen {
 		t.Fatal("Enter on the Model row must open the list")
 	}
@@ -185,16 +185,16 @@ func TestAISettingsModelSelectTypeManually(t *testing.T) {
 
 	// Walk to the type-a-name entry and pick it.
 	for m.aiCfgSelItems[m.aiCfgSelIdx] != aiSelectTypeItem {
-		m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyDown})
+		m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
 	}
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if !m.aiCfgEdit {
 		t.Fatal("picking the type-a-name entry must open inline editing")
 	}
 	for _, r := range []rune("my-private-fork") {
-		m.handleAISettings(tea.KeyPressMsg{Code: r, Text: string(r)})
+		m.handleAISettings(keyPair(tea.KeyPressMsg{Code: r, Text: string(r)}))
 	}
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if m.cfg.AI.Model != "my-private-fork" {
 		t.Fatalf("model = %q, want the typed name", m.cfg.AI.Model)
 	}
@@ -269,14 +269,14 @@ func TestAISettingsNumericRowsCommit(t *testing.T) {
 	}
 	for _, r := range rows {
 		m.aiCfgField = r.field
-		m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+		m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 		if !m.aiCfgEdit {
 			t.Fatalf("row %d must open inline editing", r.field)
 		}
 		for _, ch := range strconv.Itoa(r.want) {
-			m.handleAISettings(tea.KeyPressMsg{Code: ch, Text: string(ch)})
+			m.handleAISettings(keyPair(tea.KeyPressMsg{Code: ch, Text: string(ch)}))
 		}
-		m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+		m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 		if got := r.get(); got != r.want {
 			t.Errorf("row %d = %d, want %d", r.field, got, r.want)
 		}
@@ -284,10 +284,10 @@ func TestAISettingsNumericRowsCommit(t *testing.T) {
 
 	// A non-numeric entry must not zero a working value.
 	m.aiCfgField = 5
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m.handleAISettings(tea.KeyPressMsg{Code: 'x', Text: "x"})
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyBackspace})
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: 'x', Text: "x"}))
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyBackspace}))
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if m.cfg.AI.Temperature != 8 {
 		t.Fatalf("a rejected entry changed the value: %d", m.cfg.AI.Temperature)
 	}
@@ -308,7 +308,7 @@ func TestAISettingsSelectRendersUnderRow(t *testing.T) {
 	m.aiCfgField = 1
 	m.openAISelect(1)
 	for i := 0; i < 12; i++ {
-		m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyDown})
+		m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
 	}
 	rows := m.aiSettingsPanel(30)
 	joined := strings.Join(rows, "\n")
@@ -324,7 +324,7 @@ func TestAISettingsSelectRendersUnderRow(t *testing.T) {
 	}
 	// Going down past the end stays put on the last entry.
 	for i := 0; i < 30; i++ {
-		m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyDown})
+		m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
 	}
 	if m.aiCfgSelItems[m.aiCfgSelIdx] != aiSelectTypeItem {
 		t.Fatalf("the selection ran past the end: %q", m.aiCfgSelItems[m.aiCfgSelIdx])
@@ -355,7 +355,7 @@ func TestAISettingsTestRowConnectionProbe(t *testing.T) {
 
 	// A 429 from the free tier must read as "wait a moment", not as raw JSON
 	// about queues and IP addresses.
-	m.handleAISettings(tea.KeyPressMsg{Code: 't'})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: 't'}))
 	m.handleAITestResult(AITestResultMsg{OK: false,
 		Status: `openai 429 Too Many Requests: {"error":"Queue full for IP: 1 requests already queued (max: 1)"}`,
 		Gen:    m.aiCfgGen})
@@ -364,7 +364,7 @@ func TestAISettingsTestRowConnectionProbe(t *testing.T) {
 	}
 
 	m.aiCfgField = len(aiSettingsFields) - 1 // Test row
-	cmd := m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	cmd := m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if cmd == nil || !m.aiCfgTest.running {
 		t.Fatal("Enter on the Test row must start a probe when none is running")
 	}
@@ -378,7 +378,7 @@ func TestAISettingsTestRowConnectionProbe(t *testing.T) {
 	}
 
 	m.aiCfgField = 0 // 't' works from any row
-	cmd = m.handleAISettings(tea.KeyPressMsg{Code: 't'})
+	cmd = m.handleAISettings(keyPair(tea.KeyPressMsg{Code: 't'}))
 	if cmd == nil {
 		t.Fatal("t should start a probe when none is running")
 	}
@@ -647,28 +647,28 @@ func TestAISettingsEditAndCommit(t *testing.T) {
 
 	// Move to Model row.
 	for i := 0; i < 1; i++ {
-		m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyDown})
+		m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
 	}
 	if m.aiCfgField != 1 {
 		t.Fatalf("field = %d, want 1", m.aiCfgField)
 	}
 
 	// Enter opens the list; typing a name by hand is the last entry in it.
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if !m.aiCfgSelOpen {
 		t.Fatal("Enter on the Model row must open the select")
 	}
 	for m.aiCfgSelItems[m.aiCfgSelIdx] != aiSelectTypeItem {
-		m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyDown})
+		m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
 	}
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if !m.aiCfgEdit {
 		t.Fatal("should be in edit mode after picking the type-a-name entry")
 	}
 	for _, r := range []rune("llama3.1") {
-		m.handleAISettings(tea.KeyPressMsg{Code: r, Text: string(r)})
+		m.handleAISettings(keyPair(tea.KeyPressMsg{Code: r, Text: string(r)}))
 	}
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 
 	if m.aiCfgEdit {
 		t.Fatal("edit mode should close after commit")
@@ -686,16 +686,16 @@ func TestAISettingsPaste(t *testing.T) {
 	m.startAISettings()
 
 	for i := 0; i < 1; i++ {
-		m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyDown})
+		m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
 	}
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if !m.aiCfgSelOpen {
 		t.Fatal("Enter on the Model row must open the select")
 	}
 	for m.aiCfgSelItems[m.aiCfgSelIdx] != aiSelectTypeItem {
-		m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyDown})
+		m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
 	}
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if !m.aiCfgEdit {
 		t.Fatal("should be in edit mode after picking the type-a-name entry")
 	}
@@ -706,7 +706,7 @@ func TestAISettingsPaste(t *testing.T) {
 	if !strings.HasSuffix(got, "deepseek-r1") {
 		t.Fatalf("field = %q, want pasted text appended", got)
 	}
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if !strings.HasSuffix(m.cfg.AI.Model, "deepseek-r1") {
 		t.Fatalf("model = %q, want pasted text committed", m.cfg.AI.Model)
 	}
@@ -717,7 +717,7 @@ func TestAISettingsEscCloses(t *testing.T) {
 	isolateHomeConfig(t)
 	m := New()
 	m.startAISettings()
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEsc}))
 	if m.aiCfgOpen {
 		t.Fatal("wizard should close on Esc")
 	}
@@ -733,21 +733,21 @@ func TestAISettingsSaveWritesConfig(t *testing.T) {
 
 	// Move to Context Max (field 4), edit, commit.
 	for i := 0; i < 4; i++ {
-		m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyDown})
+		m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
 	}
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	for i := 0; i < len("6000"); i++ {
-		m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyBackspace})
+		m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyBackspace}))
 	}
 	for _, r := range []rune("9999") {
-		m.handleAISettings(tea.KeyPressMsg{Code: r, Text: string(r)})
+		m.handleAISettings(keyPair(tea.KeyPressMsg{Code: r, Text: string(r)}))
 	}
-	m.handleAISettings(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if m.cfg.AI.ContextMax != 9999 {
 		t.Fatalf("context_max = %d, want 9999 (before save)", m.cfg.AI.ContextMax)
 	}
 
-	m.handleAISettings(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m.handleAISettings(keyPair(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}))
 
 	path := filepath.Join(dir, ".dmed.conf")
 	data, err := os.ReadFile(path)

@@ -23,9 +23,9 @@ func TestAgentPromptQueuesTask(t *testing.T) {
 
 	// type "fix the parser"
 	for _, r := range []rune("fix the parser") {
-		m.handleAgentPrompt(tea.KeyPressMsg{Code: r, Text: string(r)})
+		m.handleAgentPrompt(keyPair(tea.KeyPressMsg{Code: r, Text: string(r)}))
 	}
-	m.handleAgentPrompt(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAgentPrompt(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 
 	if m.agentPrompt {
 		t.Fatalf("prompt should close after submit")
@@ -46,8 +46,8 @@ func TestAgentPromptEscDiscards(t *testing.T) {
 	m := New()
 	m.agentQueue = agent.NewQueue(nil)
 	m.agentPrompt = true
-	m.handleAgentPrompt(tea.KeyPressMsg{Code: 'x', Text: "x"})
-	m.handleAgentPrompt(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m.handleAgentPrompt(keyPair(tea.KeyPressMsg{Code: 'x', Text: "x"}))
+	m.handleAgentPrompt(keyPair(tea.KeyPressMsg{Code: tea.KeyEsc}))
 	if m.agentPrompt {
 		t.Fatalf("prompt should close on esc")
 	}
@@ -200,7 +200,7 @@ func TestAgentReviewCyrillicKeys(t *testing.T) {
 	})
 	m.startAgentReview(task.ID)
 
-	m.handleAgentReview(tea.KeyPressMsg{Text: "н"}) // physical Y
+	m.handleAgentReview(keyPair(tea.KeyPressMsg{Text: "н"})) // physical Y
 	if m.agentReviewMode {
 		t.Fatal("«н» must accept the agent review")
 	}
@@ -215,7 +215,7 @@ func TestAgentReviewCyrillicKeys(t *testing.T) {
 		{Path: "a.go", Orig: "package new\n", New: "package x\n"},
 	})
 	m.startAgentReview(task2.ID)
-	m.handleAgentReview(tea.KeyPressMsg{Text: "т"})
+	m.handleAgentReview(keyPair(tea.KeyPressMsg{Text: "т"}))
 	if m.agentReviewMode {
 		t.Fatal("«т» must reject the agent review")
 	}

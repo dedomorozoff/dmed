@@ -231,7 +231,7 @@ func TestStartLspRenamePrefill(t *testing.T) {
 	}
 
 	// Esc closes without firing.
-	m.handleLspRename(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m.handleLspRename(keyPair(tea.KeyPressMsg{Code: tea.KeyEsc}))
 	if m.lspRenameOpen {
 		t.Fatal("Escape did not close the overlay")
 	}
@@ -265,15 +265,15 @@ func TestHandleLspRenameTyping(t *testing.T) {
 	m.lspRenameOpen = true
 	m.lspRenameIn = []rune("ab")
 
-	m.handleLspRename(tea.KeyPressMsg{Text: "c"})
+	m.handleLspRename(keyPair(tea.KeyPressMsg{Text: "c"}))
 	if got := string(m.lspRenameIn); got != "abc" {
 		t.Fatalf("after typing: %q", got)
 	}
-	m.handleLspRename(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	m.handleLspRename(keyPair(tea.KeyPressMsg{Code: tea.KeyBackspace}))
 	if got := string(m.lspRenameIn); got != "ab" {
 		t.Fatalf("after backspace: %q", got)
 	}
-	m.handleLspRename(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m.handleLspRename(keyPair(tea.KeyPressMsg{Code: tea.KeyEsc}))
 	if m.lspRenameOpen {
 		t.Fatal("Esc did not close the overlay")
 	}
@@ -296,7 +296,7 @@ func TestHandleLspActionsSelectAndApply(t *testing.T) {
 	}
 
 	// First action is command-only: Enter reports and closes.
-	m.handleLspActions(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleLspActions(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if m.lspActionsOpen {
 		t.Fatal("overlay stayed open after applying")
 	}
@@ -306,8 +306,8 @@ func TestHandleLspActionsSelectAndApply(t *testing.T) {
 
 	// Move down to the editable action and apply it: the buffer changes.
 	m.lspActionsOpen = true
-	m.handleLspActions(tea.KeyPressMsg{Code: tea.KeyDown}) // sel → 1
-	m.handleLspActions(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleLspActions(keyPair(tea.KeyPressMsg{Code: tea.KeyDown})) // sel → 1
+	m.handleLspActions(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	if got := m.cur().buf.Text(); got != "func beta() {}\n" {
 		t.Fatalf("edit not applied: %q", got)
 	}
@@ -318,7 +318,7 @@ func TestHandleLspActionsSelectAndApply(t *testing.T) {
 	// Escape closes the list without applying anything.
 	m.lspActionsOpen = true
 	m.lspActionsSel = 1
-	m.handleLspActions(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m.handleLspActions(keyPair(tea.KeyPressMsg{Code: tea.KeyEsc}))
 	if m.lspActionsOpen {
 		t.Fatal("Escape did not close the list")
 	}

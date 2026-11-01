@@ -298,7 +298,7 @@ func TestPaletteScrollKeepsSelectionVisible(t *testing.T) {
 
 	// Scroll all the way down; offset must clamp so the last item is visible.
 	for i := 0; i < total; i++ {
-		m.handlePalette(tea.KeyPressMsg{Code: tea.KeyDown})
+		m.handlePalette(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
 	}
 	if m.paletteSel != 0 {
 		t.Fatalf("selection should wrap to 0 after %d downs, got %d", total, m.paletteSel)
@@ -309,7 +309,7 @@ func TestPaletteScrollKeepsSelectionVisible(t *testing.T) {
 
 	// Now take total-1 downs: selection = last item, offset = total-8.
 	for i := 0; i < total-1; i++ {
-		m.handlePalette(tea.KeyPressMsg{Code: tea.KeyDown})
+		m.handlePalette(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
 	}
 	want := total - 1
 	if m.paletteSel != want {

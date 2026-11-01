@@ -296,12 +296,12 @@ func (m *Model) closeAISelect() {
 // handleAISelectKey handles keys while the option list is open. It reports
 // whether the key belonged to the list (so the caller stops there) and whether a
 // pick was made, which is what needs a fresh probe.
-func (m *Model) handleAISelectKey(msg tea.KeyPressMsg) (handled, changed bool) {
+func (m *Model) handleAISelectKey(s string) (handled, changed bool) {
 	if !m.aiCfgSelOpen {
 		return false, false
 	}
 	n := len(m.aiCfgSelItems)
-	switch msg.String() {
+	switch s {
 	case "esc":
 		m.closeAISelect()
 		return true, false
@@ -369,15 +369,15 @@ func (m *Model) afterChoiceChange() tea.Cmd {
 	return nil
 }
 
-func (m *Model) handleAISettings(msg tea.KeyPressMsg) tea.Cmd {
-	if handled, changed := m.handleAISelectKey(msg); handled {
+func (m *Model) handleAISettings(s string, msg tea.KeyPressMsg) tea.Cmd {
+	if handled, changed := m.handleAISelectKey(s); handled {
 		if changed {
 			return m.afterChoiceChange()
 		}
 		return nil
 	}
 	if m.aiCfgEdit {
-		switch msg.String() {
+		switch s {
 		case "esc":
 			m.aiCfgEdit = false
 			m.aiCfgIn = nil
@@ -397,7 +397,7 @@ func (m *Model) handleAISettings(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
-	switch msg.String() {
+	switch s {
 	case "esc":
 		m.aiCfgOpen = false
 		m.aiCfgIn = nil

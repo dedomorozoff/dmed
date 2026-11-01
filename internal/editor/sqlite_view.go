@@ -627,16 +627,16 @@ func (m Model) sqlFilterLine() string {
 }
 
 // handleSqlite owns every key while the browser is open.
-func (m *Model) handleSqlite(msg tea.KeyPressMsg) tea.Cmd {
+func (m *Model) handleSqlite(s string, msg tea.KeyPressMsg) tea.Cmd {
 	if m.sqlEdit != nil {
-		return m.handleSqliteEdit(msg)
+		return m.handleSqliteEdit(s, msg)
 	}
 	if m.sqlFilterIn {
-		return m.handleSqliteFilterInput(msg)
+		return m.handleSqliteFilterInput(s, msg)
 	}
 	if m.sqlSchema {
 		// The DDL view scrolls on its own; 's'/esc returns to the grid.
-		switch msg.String() {
+		switch s {
 		case "esc", "s", "q":
 			m.sqlSchema = false
 		case "up", "k":
@@ -654,7 +654,7 @@ func (m *Model) handleSqlite(msg tea.KeyPressMsg) tea.Cmd {
 		m.sqlSchemaOffY = min(max(0, m.sqlSchemaOffY), max(0, maxStart))
 		return nil
 	}
-	switch msg.String() {
+	switch s {
 	case "esc", "q":
 		m.closeSQLite()
 	case "up", "k":
@@ -700,8 +700,8 @@ func (m *Model) handleSqlite(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 // handleSqliteEdit drives the in-place cell editor.
-func (m *Model) handleSqliteEdit(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleSqliteEdit(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "enter":
 		m.commitSqliteCellEdit()
 	case "esc", "ctrl+c":
@@ -719,8 +719,8 @@ func (m *Model) handleSqliteEdit(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 // handleSqliteFilterInput drives the filter prompt.
-func (m *Model) handleSqliteFilterInput(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleSqliteFilterInput(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "enter":
 		m.sqlFilter = string(m.sqlFilterBuf)
 		m.sqlFilterIn = false

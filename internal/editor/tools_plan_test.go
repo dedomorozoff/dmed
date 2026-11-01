@@ -135,12 +135,12 @@ func TestAskUserParksAndAnswers(t *testing.T) {
 	}
 
 	// Typing replaces the highlighted suggestion, so the user can edit it.
-	m.handleAskKey(tea.KeyPressMsg{Code: 'p', Text: "p"})
-	m.handleAskKey(tea.KeyPressMsg{Code: 's', Text: "s"})
+	m.handleAskKey(keyPair(tea.KeyPressMsg{Code: 'p', Text: "p"}))
+	m.handleAskKey(keyPair(tea.KeyPressMsg{Code: 's', Text: "s"}))
 	if string(m.askIn) != "ps" {
 		t.Fatalf("input = %q, want typed characters to land in the answer", m.askIn)
 	}
-	m.handleAskKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAskKey(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 
 	if m.askReq != nil {
 		t.Fatal("the question must be closed once answered")
@@ -166,11 +166,11 @@ func TestAskUserChoiceSelection(t *testing.T) {
 	m.handleChatToolsDone("", []ai.ToolCall{{ID: "c1", Name: "ASK_USER",
 		Args: `{"question":"pick one","choices":["a","b","c"]}`}})
 
-	m.handleAskKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	m.handleAskKey(keyPair(tea.KeyPressMsg{Code: tea.KeyDown}))
 	if m.askSel != 1 {
 		t.Fatalf("selection = %d, want 1", m.askSel)
 	}
-	m.handleAskKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.handleAskKey(keyPair(tea.KeyPressMsg{Code: tea.KeyEnter}))
 
 	for _, msg := range m.chatMsgs {
 		if msg.Role == "tool" && strings.Contains(msg.Content, "[ask_user answered] b") {
@@ -184,7 +184,7 @@ func TestAskUserCancelTellsTheModel(t *testing.T) {
 	m := chatEditHarness(t, t.TempDir())
 	m.handleChatToolsDone("", []ai.ToolCall{{ID: "c1", Name: "ASK_USER", Args: `{"question":"pick"}`}})
 
-	m.handleAskKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m.handleAskKey(keyPair(tea.KeyPressMsg{Code: tea.KeyEsc}))
 
 	if m.askReq != nil {
 		t.Fatal("Esc must close the question")

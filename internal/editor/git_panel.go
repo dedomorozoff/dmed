@@ -11,118 +11,6 @@ import (
 	"dmed/internal/vcs"
 )
 
-// cyrToLat maps a Cyrillic (ЙЦУКЕН) letter to its QWERTY physical key. The
-// Russian layout is positionally identical to US QWERTY, so this lets letter
-// commands (c/a/r/l/d/b/i…) work under a Russian keyboard layout on any
-// terminal, even ones that don't populate Key.BaseCode (Kitty / Windows
-// Console API are the only backends that do). Returns 0 for non-Cyrillic.
-func cyrToLat(r rune) rune {
-	switch r {
-	case 'й', 'Й':
-		return 'q'
-	case 'ц', 'Ц':
-		return 'w'
-	case 'у', 'У':
-		return 'e'
-	case 'к', 'К':
-		return 'r'
-	case 'е', 'Е':
-		return 't'
-	case 'н', 'Н':
-		return 'y'
-	case 'г', 'Г':
-		return 'u'
-	case 'ш', 'Ш':
-		return 'i'
-	case 'щ', 'Щ':
-		return 'o'
-	case 'з', 'З':
-		return 'p'
-	case 'х', 'Х':
-		return '['
-	case 'ъ', 'Ъ':
-		return ']'
-	case 'ф', 'Ф':
-		return 'a'
-	case 'ы', 'Ы':
-		return 's'
-	case 'в', 'В':
-		return 'd'
-	case 'а', 'А':
-		return 'f'
-	case 'п', 'П':
-		return 'g'
-	case 'р', 'Р':
-		return 'h'
-	case 'о', 'О':
-		return 'j'
-	case 'л', 'Л':
-		return 'k'
-	case 'д', 'Д':
-		return 'l'
-	case 'ж', 'Ж':
-		return ';'
-	case 'э', 'Э':
-		return '\''
-	case 'я', 'Я':
-		return 'z'
-	case 'ч', 'Ч':
-		return 'x'
-	case 'с', 'С':
-		return 'c'
-	case 'м', 'М':
-		return 'v'
-	case 'и', 'И':
-		return 'b'
-	case 'т', 'Т':
-		return 'n'
-	case 'ь', 'Ь':
-		return 'm'
-	case 'б', 'Б':
-		return ','
-	case 'ю', 'Ю':
-		return '.'
-	}
-	return 0
-}
-
-// gitKeyName returns a layout-independent name for a key press so commands
-// like c/a/r/l/d/b/i work regardless of the active (e.g. Cyrillic) keyboard
-// layout. It tries, in order: the physical PC-101 key (BaseCode/ShiftedCode,
-// Windows Console API / Kitty), a Cyrillic→QWERTY lookup of the received
-// letter, then falls back to String(). Special keys (esc, arrows, tab,
-// enter) are identical in every layout and come through unchanged.
-func gitKeyName(msg tea.KeyPressMsg) string {
-	if msg.BaseCode >= 'a' && msg.BaseCode <= 'z' {
-		return string(msg.BaseCode)
-	}
-	if msg.ShiftedCode >= 'a' && msg.ShiftedCode <= 'z' {
-		return string(msg.ShiftedCode)
-	}
-	if c := cyrToLat(msg.Code); c >= 'a' && c <= 'z' {
-		return string(c)
-	}
-	for _, r := range msg.Text {
-		if c := cyrToLat(r); c >= 'a' && c <= 'z' {
-			return string(c)
-		}
-	}
-	// Special keys: match on Code directly because String() may return the
-	// raw control character (e.g. "\r") when Text is non-empty (Enter sends
-	// "\r" as text on most terminals).
-	switch msg.Code {
-	case tea.KeyEnter, tea.KeyKpEnter:
-		return "enter"
-	case tea.KeyEsc:
-		return "esc"
-	case tea.KeyBackspace:
-		return "backspace"
-	case tea.KeyTab:
-		return "tab"
-	}
-	return msg.String()
-}
-
 // gitPanelMode controls what the Git panel is showing.
 type gitPanelMode int
 
@@ -479,8 +367,8 @@ func (m *Model) branchPanel(h int) []string {
 	return rows
 }
 
-func (m *Model) handleGitBranch(msg tea.KeyPressMsg) tea.Cmd {
-	key := gitKeyName(msg)
+func (m *Model) handleGitBranch(s string, msg tea.KeyPressMsg) tea.Cmd {
+	key := s
 	keyL := strings.ToLower(key)
 	r := m.repoForCur()
 
@@ -571,8 +459,8 @@ func (m *Model) handleGitBranch(msg tea.KeyPressMsg) tea.Cmd {
 
 // --- Dispatch ---
 
-func (m *Model) handleGit(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleGit(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "ctrl+b", "f9":
 		m.gitOpen = false
 		m.gitFocus = false
@@ -582,21 +470,21 @@ func (m *Model) handleGit(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	switch m.gitMode {
 	case gitModeStatus:
-		return m.handleGitStatus(msg)
+		return m.handleGitStatus(s, msg)
 	case gitModeCommit:
-		return m.handleGitCommit(msg)
+		return m.handleGitCommit(s, msg)
 	case gitModeLog:
-		return m.handleGitLog(msg)
+		return m.handleGitLog(s, msg)
 	case gitModeBranch:
-		return m.handleGitBranch(msg)
+		return m.handleGitBranch(s, msg)
 	}
 	return nil
 }
 
 // --- Status mode ---
 
-func (m *Model) handleGitStatus(msg tea.KeyPressMsg) tea.Cmd {
-	key := gitKeyName(msg)
+func (m *Model) handleGitStatus(s string, msg tea.KeyPressMsg) tea.Cmd {
+	key := s
 	// Letter commands are case-insensitive so the "D:diff"-style hints work
 	// whether the user types 'd' or 'D'. The diff-focus block below still uses
 	// the raw key to keep 'g' (top) and 'G' (bottom) distinct.
@@ -858,9 +746,9 @@ func (m *Model) gitInit() {
 
 // --- Commit mode ---
 
-func (m *Model) handleGitCommit(msg tea.KeyPressMsg) tea.Cmd {
+func (m *Model) handleGitCommit(s string, msg tea.KeyPressMsg) tea.Cmd {
 	r := m.repoForCur()
-	key := gitKeyName(msg)
+	key := s
 	switch key {
 	case "esc":
 		m.gitMode = gitModeStatus
@@ -902,8 +790,8 @@ func (m *Model) handleGitCommit(msg tea.KeyPressMsg) tea.Cmd {
 
 // --- Log mode ---
 
-func (m *Model) handleGitLog(msg tea.KeyPressMsg) tea.Cmd {
-	key := gitKeyName(msg)
+func (m *Model) handleGitLog(s string, msg tea.KeyPressMsg) tea.Cmd {
+	key := s
 	keyL := strings.ToLower(key)
 
 	// Global keys

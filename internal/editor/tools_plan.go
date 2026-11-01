@@ -199,12 +199,12 @@ func resolveAsk(input string, cancelled bool) string {
 // handleAskKey handles keys while an ASK_USER question is on screen. The chat
 // input is parked, so typed characters go to the answer instead of the
 // conversation — there is exactly one cursor and it is on the question.
-func (m *Model) handleAskKey(msg tea.KeyPressMsg) tea.Cmd {
+func (m *Model) handleAskKey(s string, msg tea.KeyPressMsg) tea.Cmd {
 	req := m.askReq
 	if req == nil {
 		return nil
 	}
-	switch gitKeyName(msg) {
+	switch s {
 	case "esc":
 		return m.finishChatAsk("", true)
 	case "enter":

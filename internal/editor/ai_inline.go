@@ -57,8 +57,8 @@ func (m *Model) startInlineRequest() {
 
 // handleInlineRequest handles keys while the inline prompt is active (before
 // the AI has responded).
-func (m *Model) handleInlineRequest(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
+func (m *Model) handleInlineRequest(s string, msg tea.KeyPressMsg) tea.Cmd {
+	switch s {
 	case "esc":
 		if m.aiInlineCancel != nil {
 			m.aiInlineCancel()
@@ -214,10 +214,10 @@ func (m *Model) startInlineReview() {
 }
 
 // handleInlineReview handles keys while the AI diff preview is shown.
-func (m *Model) handleInlineReview(msg tea.KeyPressMsg) tea.Cmd {
-	// gitKeyName keeps the y/n prompts layout-independent (н or т in Cyrillic
+func (m *Model) handleInlineReview(s string, msg tea.KeyPressMsg) tea.Cmd {
+	// keyOf keeps the y/n prompts layout-independent (н or т in Cyrillic
 	// stand for the physical Y and N keys).
-	switch gitKeyName(msg) {
+	switch s {
 	case "y", "enter":
 		m.applyInlineProposal()
 		m.aiReviewMode = false

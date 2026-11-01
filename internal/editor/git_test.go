@@ -603,42 +603,6 @@ func TestEditorGitCommitPanelRealTerminalEnter(t *testing.T) {
 	}
 }
 
-func TestEditorGitKeyNameCyrillicLayout(t *testing.T) {
-	// 'и' is the Cyrillic letter that physically occupies the 'b' key (ЙЦУКЕН).
-	if got := gitKeyName(tea.KeyPressMsg{Text: "и"}); got != "b" {
-		t.Fatalf("Cyrillic 'и' must map to 'b', got %q", got)
-	}
-	if got := gitKeyName(tea.KeyPressMsg{Text: "И"}); got != "b" {
-		t.Fatalf("Cyrillic 'И' must map to 'b', got %q", got)
-	}
-	if got := gitKeyName(tea.KeyPressMsg{Code: 'и'}); got != "b" {
-		t.Fatalf("Cyrillic Code 'и' must map to 'b', got %q", got)
-	}
-	// Non-Cyrillic and special keys must come through unchanged.
-	if got := gitKeyName(tea.KeyPressMsg{Code: 'x'}); got != "x" {
-		t.Fatalf("Latin 'x' must stay 'x', got %q", got)
-	}
-	if got := gitKeyName(tea.KeyPressMsg{Code: tea.KeyEnter}); got != "enter" {
-		t.Fatalf("Enter must stay 'enter', got %q", got)
-	}
-	if got := gitKeyName(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "\r"}); got != "enter" {
-		t.Fatalf("Enter with Text CR must still be 'enter', got %q", got)
-	}
-	if got := gitKeyName(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "\n"}); got != "enter" {
-		t.Fatalf("Enter with Text LF must still be 'enter', got %q", got)
-	}
-	if got := gitKeyName(tea.KeyPressMsg{Code: tea.KeyEsc}); got != "esc" {
-		t.Fatalf("Esc must stay 'esc', got %q", got)
-	}
-	if got := gitKeyName(tea.KeyPressMsg{Code: tea.KeyBackspace}); got != "backspace" {
-		t.Fatalf("Backspace must stay 'backspace', got %q", got)
-	}
-	// BaseCode wins when present (Windows Console API).
-	if got := gitKeyName(tea.KeyPressMsg{Text: "и", BaseCode: 'b'}); got != "b" {
-		t.Fatalf("BaseCode 'b' must win, got %q", got)
-	}
-}
-
 func TestEditorGitInitThenCreateBranch(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "code.go")

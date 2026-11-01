@@ -234,9 +234,9 @@ func (m *Model) filterPalette() []commandItem {
 	return res
 }
 
-func (m *Model) handlePalette(msg tea.KeyPressMsg) tea.Cmd {
+func (m *Model) handlePalette(s string, msg tea.KeyPressMsg) tea.Cmd {
 	hits := m.filterPalette()
-	switch msg.String() {
+	switch s {
 	case "esc":
 		m.paletteOpen = false
 		m.paletteSel = 0

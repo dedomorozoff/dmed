@@ -180,11 +180,11 @@ func (m Model) clampedTreeOffset(h int) int {
 	return m.treeOffset
 }
 
-func (m *Model) handleTree(msg tea.KeyPressMsg) tea.Cmd {
+func (m *Model) handleTree(s string, msg tea.KeyPressMsg) tea.Cmd {
 	if m.treeConfirm != "" {
-		return m.handleTreeConfirm(msg)
+		return m.handleTreeConfirm(s, msg)
 	}
-	switch msg.String() {
+	switch s {
 	case "up":
 		if m.treeSel > 0 {
 			m.treeSel--
@@ -294,11 +294,11 @@ func (m *Model) handleTree(msg tea.KeyPressMsg) tea.Cmd {
 // handleTreeConfirm processes Y/N/Esc while a delete/trash confirmation is
 // pending on the selected tree entry. It is layout-independent (н/т are the
 // physical Y/N keys in the Cyrillic layout).
-func (m *Model) handleTreeConfirm(msg tea.KeyPressMsg) tea.Cmd {
+func (m *Model) handleTreeConfirm(s string, msg tea.KeyPressMsg) tea.Cmd {
 	rel := m.treeConfirmRel
 	full := normalizePath(m.baseDir(), rel)
 	confirm := m.treeConfirm
-	switch gitKeyName(msg) {
+	switch s {
 	case "y", "enter":
 		var err error
 		if confirm == "trash" {

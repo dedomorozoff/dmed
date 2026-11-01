@@ -122,9 +122,9 @@ func (m *Model) commitDAPField() {
 }
 
 // handleDAPCfg routes keys while the DAP settings wizard is open.
-func (m *Model) handleDAPCfg(msg tea.KeyPressMsg) tea.Cmd {
+func (m *Model) handleDAPCfg(s string, msg tea.KeyPressMsg) tea.Cmd {
 	if m.dapCfgEdit {
-		switch msg.String() {
+		switch s {
 		case "esc":
 			m.dapCfgEdit = false
 			m.dapCfgIn = nil
@@ -144,7 +144,7 @@ func (m *Model) handleDAPCfg(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
-	switch msg.String() {
+	switch s {
 	case "esc":
 		m.dapCfgOpen = false
 		m.dapCfgIn = nil

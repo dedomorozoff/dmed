@@ -50,12 +50,14 @@ func TestTerminalKeyEncoding(t *testing.T) {
 	}{
 		{tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}, "\x03"},
 		{tea.KeyPressMsg{Code: tea.KeyEnter}, "\r"},
+		{tea.KeyPressMsg{Code: tea.KeyEsc}, "\x1b"},
+		{tea.KeyPressMsg{Code: 'д', Text: "д", Mod: tea.ModCtrl}, "\x0c"}, // Ctrl+L on ЙЦУКЕН
 		{tea.KeyPressMsg{Code: tea.KeyUp}, "\x1b[A"},
 		{tea.KeyPressMsg{Text: "я"}, "я"},
 		{tea.KeyPressMsg{Text: "x", Mod: tea.ModAlt}, "\x1bx"},
 	}
 	for _, tt := range tests {
-		if got := string(terminalKeyBytes(tt.msg)); got != tt.want {
+		if got := string(terminalKeyBytes(keyPair(tt.msg))); got != tt.want {
 			t.Fatalf("key %v = %q, want %q", tt.msg, got, tt.want)
 		}
 	}

@@ -23,6 +23,24 @@ func normalizeKey(r rune) rune {
 	return r
 }
 
+// physicalLetter reports the Latin letter of the physical key a press arrived
+// with (BaseCode/ShiftedCode — the Windows Console API and the Kitty protocol
+// both fill them). ruToEn only knows the Russian ЙЦУКЕН layout; for any other
+// one the physical key is the only layout-independent name left, so keyOf
+// falls back to it rather than handing the binding tables a non-ASCII name
+// nothing can match.
+func physicalLetter(msg tea.KeyPressMsg) (rune, bool) {
+	for _, r := range []rune{msg.BaseCode, msg.ShiftedCode} {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r, true
+		case r >= 'A' && r <= 'Z':
+			return unicode.ToLower(r), true
+		}
+	}
+	return 0, false
+}
+
 // c0Special reports whether a C0 control code is really one of the control
 // keys that ultraviolet delivers as a special key code (Tab, Enter, Escape)
 // rather than a Ctrl+letter chord that needs re-encoding.
@@ -85,14 +103,34 @@ func keyOf(msg tea.KeyPressMsg) (tea.KeyPressMsg, string) {
 		for i, r := range src {
 			nr[i] = normalizeKey(r)
 		}
+		if nr[0] >= 0x80 {
+			if phys, ok := physicalLetter(msg); ok {
+				nr[0] = phys
+			}
+		}
+		// BaseCode/ShiftedCode stay out of here on purpose: Keystroke() prefers
+		// the physical fields, so carrying them would let the physical US key
+		// override a chord the layout already translated correctly. They only
+		// matter as the fallback above, for a layout ruToEn cannot translate.
 		msg = tea.KeyPressMsg{Code: nr[0], Text: string(nr), Mod: msg.Mod}
 	} else if msg.Code != 0 {
 		// Key combos (Ctrl/Alt+letter) arrive with empty Text on many
 		// terminals; map their Cyrillic code to the physical QWERTY key too so
 		// "ctrl+в" (Russian layout) still matches "ctrl+d".
 		msg.Code = normalizeKey(msg.Code)
+		if msg.Code >= 0x80 {
+			if phys, ok := physicalLetter(msg); ok {
+				msg.Code = phys
+			}
+		}
 	}
 	s := msg.String()
+	// String() prints Text verbatim, and terminals put the raw control byte
+	// there for Enter/Esc/Tab/Backspace ("\r", "\x1b", "\t", "\x7f") — names no
+	// binding can ever match. Name those from the key code instead.
+	if len(s) == 1 && (s[0] < 32 || s[0] == 0x7f) {
+		s = msg.Keystroke()
+	}
 	// Some terminal stacks bundle the letter as Text even for Ctrl/Alt chords
 	// (notably the Windows Console API on non-US keyboard layouts, where a
 	// pressed Ctrl+<physical key> arrives with the Cyrillic Code/Text). String()
@@ -669,7 +707,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		if m.termFocus {
-			return m.handleTerm(msg)
+			return m.handleTerm(s, msg)
 		}
 	}
 
@@ -720,104 +758,104 @@ func (m *Model) dispatchPanes(s string, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.handleConflict(s), true
 	}
 	if m.diffViewOpen {
-		return m.handleDiffView(msg), true
+		return m.handleDiffView(s), true
 	}
 	if m.sqlOpen {
-		return m.handleSqlite(msg), true
+		return m.handleSqlite(s, msg), true
 	}
 	if m.agentReviewMode {
-		return m.handleAgentReview(msg), true
+		return m.handleAgentReview(s, msg), true
 	}
 	if m.agentPrompt {
-		return m.handleAgentPrompt(msg), true
+		return m.handleAgentPrompt(s, msg), true
 	}
 	// A question from ASK_USER grabs the input wherever focus happens to be:
 	// the model is waiting for an answer and any other key would be swallowed
 	// by whatever pane happens to be focused.
 	if m.askReq != nil {
-		return m.handleAskKey(msg), true
+		return m.handleAskKey(s, msg), true
 	}
 	if m.agentOpen && m.agentFocus {
-		return m.handleAgent(msg), true
+		return m.handleAgent(s, msg), true
 	}
 	if m.chatReviewMode {
-		return m.handleChatReview(msg), true
+		return m.handleChatReview(s), true
 	}
 	if m.chatOpen && m.chatFocus {
-		return m.handleChat(msg), true
+		return m.handleChat(s, msg), true
 	}
 	if m.gitOpen && m.gitFocus {
-		return m.handleGit(msg), true
+		return m.handleGit(s, msg), true
 	}
 	if m.paletteOpen {
-		return m.handlePalette(msg), true
+		return m.handlePalette(s, msg), true
 	}
 	if m.folderOpen {
-		return m.handleFolderBrowser(msg), true
+		return m.handleFolderBrowser(s), true
 	}
 	if m.aiCfgOpen {
-		return m.handleAISettings(msg), true
+		return m.handleAISettings(s, msg), true
 	}
 	if m.dapCfgOpen {
-		return m.handleDAPCfg(msg), true
+		return m.handleDAPCfg(s, msg), true
 	}
 	if m.helpOpen {
-		return m.handleHelp(msg), true
+		return m.handleHelp(s), true
 	}
 	if m.langChooserOpen {
-		return m.handleLangChooser(msg), true
+		return m.handleLangChooser(s), true
 	}
 	if m.pluginStoreOpen {
-		return m.handlePluginStore(msg), true
+		return m.handlePluginStore(s), true
 	}
 	if m.promptOpen {
-		return m.handlePrompt(msg), true
+		return m.handlePrompt(s, msg), true
 	}
 	if m.promptSave {
-		return m.handleSavePrompt(msg), true
+		return m.handleSavePrompt(s, msg), true
 	}
 	if m.finderOpen {
-		return m.handleFinder(msg), true
+		return m.handleFinder(s, msg), true
 	}
 	if m.treeFocus {
-		return m.handleTree(msg), true
+		return m.handleTree(s, msg), true
 	}
 	// The LSP rename input and the quick-fix list own their keys (bottom
 	// overlays like the search prompt).
 	if m.lspRenameOpen {
-		return m.handleLspRename(msg), true
+		return m.handleLspRename(s, msg), true
 	}
 	if m.lspActionsOpen {
-		return m.handleLspActions(msg), true
+		return m.handleLspActions(s, msg), true
 	}
 	// Find in Project owns its keys first: it is a bottom overlay like the
 	// finder, and its Enter must not jump the file-search cursor underneath.
 	if m.projSearchOpen {
-		return m.handleProjSearch(msg), true
+		return m.handleProjSearch(s, msg), true
 	}
 	if m.dapOpen {
-		return m.handleDap(msg), true
+		return m.handleDap(s, msg), true
 	}
 	if m.searchOpen {
 		if m.replaceOpen {
-			return m.handleReplace(msg), true
+			return m.handleReplace(s, msg), true
 		}
-		return m.handleSearch(msg), true
+		return m.handleSearch(s, msg), true
 	}
 	if m.gotoOpen {
-		return m.handleGoto(msg), true
+		return m.handleGoto(s, msg), true
 	}
 	if m.aiReviewMode {
-		return m.handleInlineReview(msg), true
+		return m.handleInlineReview(s, msg), true
 	}
 	if m.aiFixReviewMode {
-		return m.handleFixReview(msg), true
+		return m.handleFixReview(s, msg), true
 	}
 	if m.aiFixOpen {
-		return m.handleFixRequest(msg), true
+		return m.handleFixRequest(s, msg), true
 	}
 	if m.aiInlineOpen {
-		return m.handleInlineRequest(msg), true
+		return m.handleInlineRequest(s, msg), true
 	}
 	// While the inline AI streams a rewrite, swallow all keys; Esc/Ctrl+C
 	// abort the request.
@@ -841,7 +879,7 @@ func (m *Model) dispatchPanes(s string, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 // confirmations and the overlays that sit above normal editing.
 func (m *Model) handleTailBindings(s string, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if m.quitConfirm {
-		return m.handleQuitConfirm(msg), true
+		return m.handleQuitConfirm(s, msg), true
 	}
 	if len(s) == 5 && strings.HasPrefix(s, "alt+") && s[4] >= '1' && s[4] <= '9' {
 		m.jumpTab(int(s[4] - '1'))

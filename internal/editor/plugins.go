@@ -108,9 +108,9 @@ func (m Model) pluginInstalled(file string) bool {
 }
 
 // handlePluginStore handles keys while the plugin store is open.
-func (m *Model) handlePluginStore(msg tea.KeyPressMsg) tea.Cmd {
+func (m *Model) handlePluginStore(s string) tea.Cmd {
 	items := m.storeItems
-	switch msg.String() {
+	switch s {
 	case "esc":
 		m.pluginStoreOpen = false
 	case "enter":

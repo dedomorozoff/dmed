@@ -132,14 +132,14 @@ func TestChatReviewCyrillicKeys(t *testing.T) {
 		t.Fatal("review must be active")
 	}
 	// Lowercase Cyrillic Te (т) = physical N -> reject.
-	m.handleChatReview(tea.KeyPressMsg{Code: 'т', Text: "т"})
+	m.handleChatReview(keyName(tea.KeyPressMsg{Code: 'т', Text: "т"}))
 	if m.chatReviewMode {
 		t.Fatal("Cyrillic т must reject the diff")
 	}
 	// Cyrillic En (н) = physical Y -> accept.
 	m.chatPendingChanges = []agent.Change{{Path: p, Orig: "old\n", New: "new2\n"}}
 	m.startChatReview()
-	m.handleChatReview(tea.KeyPressMsg{Code: 'н', Text: "н"})
+	m.handleChatReview(keyName(tea.KeyPressMsg{Code: 'н', Text: "н"}))
 	if m.chatReviewMode {
 		t.Fatal("Cyrillic н must accept the diff")
 	}
@@ -157,13 +157,13 @@ func TestChatCopyLastMessage(t *testing.T) {
 		{Role: "user", Content: "q"},
 		{Role: "assistant", Content: "the answer"},
 	}
-	m.handleChat(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl, Text: ""})
+	m.handleChat(keyPair(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl, Text: ""}))
 	if m.clipboard != "the answer" {
 		t.Fatalf("clipboard = %q, want last assistant message", m.clipboard)
 	}
 	m.chatErr = "boom: connection refused"
 	m.chatMsgs = nil
-	m.handleChat(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl, Text: ""})
+	m.handleChat(keyPair(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl, Text: ""}))
 	if m.clipboard != "boom: connection refused" {
 		t.Fatalf("clipboard = %q, want the chat error", m.clipboard)
 	}
@@ -180,7 +180,7 @@ func TestLiveChatTurn(t *testing.T) {
 	m.ai = ai.NewProvider(ai.Config{Type: "ollama", URL: "http://localhost:11434", Model: os.Getenv("DMED_MODEL")})
 	m.chatModel = os.Getenv("DMED_MODEL")
 	for _, r := range "create file index.html with a draft of a future site" {
-		m.handleChat(tea.KeyPressMsg{Code: r, Text: string(r)})
+		m.handleChat(keyPair(tea.KeyPressMsg{Code: r, Text: string(r)}))
 	}
 	cmd := m.chatSubmit()
 	if cmd == nil {

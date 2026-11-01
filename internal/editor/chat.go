@@ -186,13 +186,12 @@ func (m *Model) pickChatModel() {
 	}
 }
 
-func (m *Model) handleChat(msg tea.KeyPressMsg) tea.Cmd {
-	s := msg.String()
+func (m *Model) handleChat(s string, msg tea.KeyPressMsg) tea.Cmd {
 	// While a tool call is parked for a human decision (e.g. a RUN command with
 	// allow_run = ask) the input is parked too: the decision is fed back as the
 	// tool result and the loop continues.
 	if m.chatPark != nil {
-		return m.handleChatParkKey(msg)
+		return m.handleChatParkKey(s, msg)
 	}
 	switch s {
 	case "esc":
@@ -907,14 +906,14 @@ func (m *Model) openTouchedFiles(before map[string]fileState, results []ai.Messa
 // handleChatParkKey routes keys while the tool loop is parked. Every park kind
 // gets its own decision here, and keys the active decision does not understand
 // are ignored so a stray keystroke cannot approve anything.
-func (m *Model) handleChatParkKey(msg tea.KeyPressMsg) tea.Cmd {
+func (m *Model) handleChatParkKey(s string, msg tea.KeyPressMsg) tea.Cmd {
 	park := m.chatPark
 	if park == nil {
 		return nil
 	}
 	switch park.park.Kind {
 	case ParkRunConfirm:
-		switch gitKeyName(msg) {
+		switch s {
 		case "y", "enter":
 			return m.finishChatRunConfirm(true)
 		case "n", "esc", "r":
@@ -922,9 +921,9 @@ func (m *Model) handleChatParkKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil // ignore other keys while parked
 	case ParkAskUser:
-		return m.handleAskKey(msg)
+		return m.handleAskKey(s, msg)
 	case ParkSwitchMode:
-		switch gitKeyName(msg) {
+		switch s {
 		case "y", "enter":
 			return m.finishChatSwitchMode(true)
 		case "n", "esc", "r":
@@ -934,7 +933,7 @@ func (m *Model) handleChatParkKey(msg tea.KeyPressMsg) tea.Cmd {
 	case ParkSubAgent:
 		// Nothing to answer: the loop resumes by itself when the task ends.
 		// Esc is the escape hatch, or the wait could last minutes.
-		if gitKeyName(msg) == "esc" {
+		if s == "esc" {
 			m.cancelParkedSubAgent()
 		}
 		return nil
@@ -998,9 +997,9 @@ func (m *Model) loadChatChange(idx int) {
 
 // handleChatReview handles keys while a chat EDIT diff is shown. y accepts,
 // n rejects; Tab cycles between multiple pending files.
-func (m *Model) handleChatReview(msg tea.KeyPressMsg) tea.Cmd {
+func (m *Model) handleChatReview(s string) tea.Cmd {
 	n := len(m.chatPendingChanges)
-	switch gitKeyName(msg) {
+	switch s {
 	case "y", "enter":
 		return m.acceptChatReview(true) // apply only the current file
 	case "a":
