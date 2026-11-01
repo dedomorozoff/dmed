@@ -72,11 +72,16 @@ The code is split into focused internal packages:
   (`beginChange`/`breakGroup`).
 - `internal/editor/` — Bubbletea model and UI. `editor.go` holds the model;
   key handling is in `keys.go`: `keyOf` produces the one normalized key name
-  bindings are matched on (control-byte re-encoding, Cyrillic→QWERTY, bundled
-  Text chords), then `globalBindings` (chords that always answer first: quit,
-  copy, panels, debugging) → `dispatchPanes` (the pane/overlay that owns the
-  keyboard) → `editorBindings` (the text pane) → `typingFallback`. A new
-  binding is a table entry, not a `case` in a switch; a chord that means
+  bindings are matched on (control-byte re-encoding, Cyrillic→QWERTY, the
+  physical key for layouts that table cannot translate, special keys named
+  from the code when `Text` carries a raw control byte, bundled Text chords),
+  then `globalBindings` (chords that always answer first: quit, copy, panels,
+  debugging) → `dispatchPanes` (the pane/overlay that owns the keyboard) →
+  `editorBindings` (the text pane) → `typingFallback`. Every pane handler takes
+  that name as `handleX(s string, msg tea.KeyPressMsg)` and matches on `s`,
+  never on `msg.String()`; text entry reads `msg.Text`, which `keyOf` hands
+  back unrestored, so a typed character is never replaced by its binding name.
+  A new binding is a table entry, not a `case` in a switch; a chord that means
   different things in different states returns `handled == false` to fall
   through to the next stage. The rest is split by concern: `view.go`
   (rendering), `tabs.go` (open/close/switch/save/quit confirmation),

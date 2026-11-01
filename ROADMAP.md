@@ -617,10 +617,11 @@ cross-build. The cheap part first:
 
 ### M13 — configuration and experience
 - Rebindable keys: a `[keys]` section of `action = key`. The lookup is a table
-  now (`globalBindings` / `editorBindings` in `keys.go`), so the work left is
-  naming each action and letting the config re-key the tables at startup —
-  plus generating the F1 cheatsheet from the same source so help cannot drift
-  from the bindings.
+  now (`globalBindings` / `editorBindings` in `keys.go`) and every pane handler
+  matches on the very same `keyOf` name, so re-keying the tables re-keys the
+  overlays in one go — the work left is naming each action and letting the
+  config rewrite the tables at startup, plus generating the F1 cheatsheet from
+  the same source so help cannot drift from the bindings.
 - Themes: user palettes for syntax_theme in `.dmed.conf` or a separate
   file, live preview in the wizard.
 - `.editorconfig`: indent_style/size, trim trailing whitespace, final newline.
@@ -655,12 +656,21 @@ reread.
       lines). The mechanical move was verified line-exact against `HEAD`, and
       `keys_binding_test.go` is the payoff: table well-formedness, the
       fall-through rules and ~30 chords asserted without a terminal.
-      Follow-up, deliberately not smuggled into a behavior-preserving move:
-      the pane handlers still translate keys themselves (`msg.String()` in ~39
-      places, `gitKeyName` in the git/agent/chat panels) — routing those
-      through `keyOf` is the remaining step toward one translator.
-- [x] **Test coverage baseline.** Measured and recorded: total 70.4%
-      (`make cover`), editor 68.7%, buffer 78.6%, agent 90.3%, ai 84.3%,
+      Follow-up, deliberately kept out of that behavior-preserving move, is
+      done too: the pane handlers no longer translate keys themselves. All 44
+      of them take the name `keyOf` produced (`dispatchPanes(s, msg)` →
+      `handleX(s, msg)`), `gitKeyName` and its duplicate ЙЦУКЕН table are gone,
+      and the ~39 `msg.String()` matches are gone with them. `keyOf` absorbed
+      what the private helper knew: the physical key as a fallback for layouts
+      `ruToEn` cannot translate, and names built from the key code when the
+      terminal put a raw control byte in `Text` — Enter/Esc/Tab/Backspace
+      arriving as `"\r"`/`"\x1b"`/`"\t"`/`"\x7f"` matched no binding anywhere,
+      and a letter command (`q` in the diff view, `s` in the SQLite schema,
+      `j`/`k` over search hits) was silently dead in a Cyrillic layout. Text
+      entry still reads `msg.Text`, so the character typed is the character
+      that lands in the query.
+- [x] **Test coverage baseline.** Measured and recorded: total 70.5%
+      (`make cover`), editor 68.9%, buffer 78.6%, agent 90.3%, ai 84.3%,
       config 75.1%, dap 43.3% (the real-adapter integration tests skip
       without Delve), and 0% for `main`, `internal/setup`, `internal/bundled`.
       `make cover-check` runs the suite and fails below baseline − 1; the CI
