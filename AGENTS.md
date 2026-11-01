@@ -47,13 +47,17 @@ directly; they emit `Change`s that land through `internal/agent.Applier`
 make build          # ./dmed binary
 make test           # go test ./...
 make vet            # go vet ./...
+make cover          # go test ./... with a coverage profile + total
+make cover-check    # the suite, then fail below COVERAGE_BASELINE - 1
 make run FILE=path  # build + run editor on a file
 ```
 
 Run `make build && make vet && make test` before considering any change done.
 
-CI (`make vet` + `make test` + native build + 8-platform cross-build) runs on
-every push to `main`/`master` and every PR; keep it green.
+CI (`make vet` + `make cover-check` + native build + 8-platform cross-build)
+runs on every push to `main`/`master` and every PR; keep it green.
+`COVERAGE_BASELINE` in the Makefile is the recorded total — raise it when
+coverage goes up, and only lower it deliberately.
 
 ## Architecture
 
@@ -66,10 +70,20 @@ The code is split into focused internal packages:
   in the corresponding `_test.go`. Undo grouping: consecutive inserts at
   adjacent positions form one undo step; any other operation breaks the group
   (`beginChange`/`breakGroup`).
-- `internal/editor/` — Bubbletea model and UI. `editor.go` holds the model
-  and key handling; the rest is split by concern: `view.go` (rendering),
+- `internal/editor/` — Bubbletea model and UI. `editor.go` holds the model;
+  key handling is in `keys.go`: `keyOf` produces the one normalized key name
+  bindings are matched on (control-byte re-encoding, Cyrillic→QWERTY, bundled
+  Text chords), then `globalBindings` (chords that always answer first: quit,
+  copy, panels, debugging) → `dispatchPanes` (the pane/overlay that owns the
+  keyboard) → `editorBindings` (the text pane) → `typingFallback`. A new
+  binding is a table entry, not a `case` in a switch; a chord that means
+  different things in different states returns `handled == false` to fall
+  through to the next stage. The rest is split by concern: `view.go`
+  (rendering), `tabs.go` (open/close/switch/save/quit confirmation),
+  `prompt.go` (bottom prompts, including go-to-line), `search.go` (in-file
+  find/replace), `session.go` (save/restore of the session),
   `finder.go` (fuzzy file finder), `split.go`, `tree.go`, `mouse.go`,
-  `completion.go`, `palette.go`, `session.go`, `terminal.go`, `chat.go`
+  `completion.go`, `palette.go`, `terminal.go`, `chat.go`
   (AI chat), `ai_inline.go` (inline rewrite → diff review), `ghost.go`
   (Copilot-style ghost text), `agent_panel.go` (agent task queue UI),
   `git_panel.go`, `diffview.go`, `sqlite_view.go` (SQLite browser: table

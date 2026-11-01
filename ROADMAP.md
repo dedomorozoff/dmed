@@ -356,7 +356,7 @@ plan with per-item estimates, design decisions and open questions lives in
       in one place for future async subsystems.
 
 ### Post-M8 — editor UX
-- [x] **Find in Project** (`Ctrl+Shift+F`, палитра "Edit: Find in Project..."):
+- [x] **Find in Project** (`Ctrl+Shift+F`, the palette "Edit: Find in Project..."):
       async full-text search shared with the AI tools' walk rules (`walkProject` +
       `newProjectSkip`), results streamed in batches with a generation guard,
       live hit list (`↑↓`/Enter opens the file at the match, panel stays open),
@@ -390,7 +390,7 @@ plan with per-item estimates, design decisions and open questions lives in
       stacks across restarts was considered and deliberately left out: an
       undo history that survives a file being reloaded is more confusing
       than useful.
-- [x] **LSP rename + code actions** (`Ctrl+Alt+R` / `Ctrl+Alt+Q`, палитра
+- [x] **LSP rename + code actions** (`Ctrl+Alt+R` / `Ctrl+Alt+Q`, the palette
       "Edit: Rename Symbol..." / "Edit: Code Actions..."): rename asks the
       server for the symbol under the cursor (`internal/lsp.Client.Rename`),
       shows an input pre-filled with the word, and applies the reply
@@ -548,6 +548,124 @@ plan with per-item estimates, design decisions and open questions lives in
       staged into its own `agent: revert <hash>` commit, so the undo is
       traceable in history rather than a silent tree rewrite. No external
       terminal needed.
+
+## M9–M13 — planned (not started)
+
+The list below is drawn from the aftermath of Post-M8: the "chroma →
+tree-sitter (later)" note in the stack, the plugins' "Remaining: more
+events/API", the hard-coded keybindings and gaps found in daily use.
+Order and contents will be refined as work proceeds.
+
+### M9 — editing: the last gaps
+- Bracket matching: highlight the pair under the cursor, `Ctrl+]` jump,
+  select inside brackets; pairs come from the fold scan (same indentation)
+  until there is an AST.
+- Column (rectangular) selection: `Alt+Shift+arrows`, drag with a modifier;
+  pasting a block unfolds it into one multi-cursor per line.
+- Selection transformations: upper/lower case, sort lines, trim,
+  align to a column, insert sequence numbering 1..N.
+- Macros: record/playback (`Alt+R`), respecting multi-cursor.
+- Navigation: jump list (back/forward, pushed on goto-definition),
+  MRU tab switching (`Ctrl+Tab`), "go to last edit position".
+- Replace in Project: the counterpart of Find in Project (`Ctrl+Shift+F`)
+  with a batched preview — through `internal/agent.Applier` with diff
+  review, never around it.
+- Merge conflicts: navigate the `<<<<<<<`/`=======`/`>>>>>>>` markers,
+  take ours/theirs/both under the cursor.
+
+### M10 — LSP to the end
+- Diagnostics navigation: next/prev error (`F8`/`Shift+F8`), an inline
+  hint on the error line, a summary diagnostics pool across all tabs.
+- Hover documentation (a popup like the completion window), signature
+  help while typing.
+- Outline: document symbols in the sidebar + workspace symbols in the
+  palette / search-everywhere.
+- References ("Find Usages", a panel like the code actions panel),
+  implementation.
+- The language table moves into the config: a command/args per filetype,
+  a health-check in the palette ("LSP: Status"), automatic restart of a
+  crashed server.
+- Honor `workspace/didChangeWatchedFiles` — the server learns about
+  files created outside the editor (the agent commits past the tabs).
+
+### M11 — highlighting: incremental
+Careful: go-tree-sitter pulls cgo and breaks the 8-platform no-CGO
+cross-build. The cheap part first:
+- Incremental highlighting on chroma: a token cache per line, only
+  invalid ranges re-tokenize (the same pattern as the wrap segments and
+  the fold scans), not the whole buffer.
+- Embedded languages (markdown code blocks, template strings) where
+  chroma can do it — composite lexers.
+- Tree-sitter stays a stretch goal, only if pure-Go bindings appear; then
+  folding and bracket matching move from heuristics to the AST.
+
+### M12 — AI v3: agents without stops
+- MCP client: attaching external tool servers (`[ai] mcp_servers`), their
+  tools join the same tool loop; their changes still go through the
+  Applier only. Transport: stdio first, HTTP/SSE later.
+- Agent tasks survive a restart: persist the task transcript, resume from
+  the panel, parallel agents in the queue.
+- Slash commands / prompt templates: `/refactor`, `/test`, user ones in
+  `.dmed/templates` (plain files or Lua).
+- Ghost completion → a fill-in-middle prompt for code models
+  (qwen-coder and kin can do it); the debounce follows typing speed.
+- Usage: token/cost cards in the chat and the agent panel, quick model
+  switching from the palette.
+- Park UI: the approval queue already works, but the different kinds
+  (file approval, ASK_USER question, waiting for a sub-agent) deserve to
+  be one predictable flow with a shared navigation stack.
+
+### M13 — configuration and experience
+- Rebindable keys: a `[keys]` section of `action = key`. The lookup is a table
+  now (`globalBindings` / `editorBindings` in `keys.go`), so the work left is
+  naming each action and letting the config re-key the tables at startup —
+  plus generating the F1 cheatsheet from the same source so help cannot drift
+  from the bindings.
+- Themes: user palettes for syntax_theme in `.dmed.conf` or a separate
+  file, live preview in the wizard.
+- `.editorconfig`: indent_style/size, trim trailing whitespace, final newline.
+- TUI regression harness in CI: ConPTY scripts (winpty is already on the
+  machine) drive smoke scenarios (typing, saving, panels, chords) on the
+  native Windows build; the same harness with a linux pty as the transport.
+- Plugins: the `buffer:modified`/`file:changed`/`agent:updated` events from
+  `internal/events` exposed to Lua, an async API (callbacks instead of
+  blocking), subprocess spawn with a timeout — the very
+  "Remaining: more events/API".
+
+## Tech debt left by the October audit
+
+The 2026-10-01 audit plan (`docs/IMPROVEMENT-PLAN.md`, v0.8.3, rev `1b0c9b3`)
+is closed; the file was removed (2026-11) after folding the last two items
+here, and the full historical breakdown lives in
+[docs/AUDIT-2026-10-01.md](docs/AUDIT-2026-10-01.md).
+
+- [x] **Split `editor.go` + a binding table.** `handleKey` was ~565 lines and
+      hundreds of `case`s. It is now `keys.go`: one `keyOf(msg)` that returns
+      the normalized key name (control-byte re-encoding, Cyrillic→QWERTY, the
+      bundled-Text chords that `String()` misreports on the Windows Console
+      API) plus two tables — `globalBindings` (chords that answer before any
+      pane: quit, copy, panels, debugging) and `editorBindings` (the text
+      pane) — with `dispatchPanes` for the focused pane and `typingFallback`
+      for the buffer. A binding returns `(cmd, handled)`, which is how F6/F7
+      stay step-over inside the debug panel and a split outside it. The rest
+      of the file split along the AGENTS.md boundaries: `tabs.go`,
+      `prompt.go`, `search.go`, `session.go` (editor.go went 3402 → 1935
+      lines). The mechanical move was verified line-exact against `HEAD`, and
+      `keys_binding_test.go` is the payoff: table well-formedness, the
+      fall-through rules and ~30 chords asserted without a terminal.
+      Follow-up, deliberately not smuggled into a behavior-preserving move:
+      the pane handlers still translate keys themselves (`msg.String()` in ~39
+      places, `gitKeyName` in the git/agent/chat panels) — routing those
+      through `keyOf` is the remaining step toward one translator.
+- [x] **Test coverage baseline.** Measured and recorded: total 70.4%
+      (`make cover`), editor 68.7%, buffer 78.6%, agent 90.3%, ai 84.3%,
+      config 75.1%, dap 43.3% (the real-adapter integration tests skip
+      without Delve), and 0% for `main`, `internal/setup`, `internal/bundled`.
+      `make cover-check` runs the suite and fails below baseline − 1; the CI
+      `vet + test` job now runs it in place of the plain `make test`. Pure
+      render/geometry functions got the first batch of the cheap-win tests
+      (`view_geometry_test.go`: `wrapLine`, `segRowForCol`, `expandTabs`,
+      `visCol`, `padTo`, `fitPath`, `blameLabel`, `relWhen`, `viewHeight`).
 
 ## Infrastructure: CI and releases
 

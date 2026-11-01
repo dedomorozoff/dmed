@@ -11,13 +11,19 @@ VERSION  ?= 0.9.7
 LDFLAGS  := -s -w -X main.version=$(VERSION)
 PREFIX   ?= /usr/local
 
+# Total coverage measured by `make cover`. Raise it when coverage goes up;
+# `make cover-check` fails when the total drops more than COVERAGE_SLACK
+# points below it, so a new untested file cannot silently pass CI.
+COVERAGE_BASELINE := 70.4
+COVERAGE_SLACK    := 1
+
 BUILD_TARGETS := build-linux-amd64 build-linux-arm64 build-freebsd-amd64 \
                  build-openbsd-amd64 build-netbsd-amd64 build-darwin-amd64 \
                  build-darwin-arm64 build-windows-amd64
 
 # help is the first rule, so it is the default target under both make flavors.
 .PHONY: help build test vet run clean dist install install-man
-.PHONY: fmt fmt-check race cover
+.PHONY: fmt fmt-check race cover cover-check
 .PHONY: deb rpm pkg termux win-zip freebsd-port
 .PHONY: $(BUILD_TARGETS)
 
@@ -56,6 +62,22 @@ race: ## Run the race detector over the concurrent packages
 cover: ## Run tests with a coverage profile (needs a working local toolchain)
 	$(GO) test -coverprofile=cover.out ./...
 	$(GO) tool cover -func=cover.out | tail -1
+
+cover-check: ## Run tests and fail if total coverage drops below the baseline
+	$(GO) test -coverprofile=cover.out ./...
+	@total=$$($(GO) tool cover -func=cover.out | \
+		awk '/^total:/ {gsub("%", "", $$3); print $$3}'); \
+	floor=$$(awk -v b=$(COVERAGE_BASELINE) -v s=$(COVERAGE_SLACK) \
+		'BEGIN {printf "%.2f", b - s}'); \
+	if [ -z "$$total" ]; then \
+		echo "cover-check: no coverage profile produced"; exit 1; \
+	fi; \
+	echo "coverage: $$total%, floor $$floor% (baseline $(COVERAGE_BASELINE)%)"; \
+	awk -v t="$$total" -v f="$$floor" 'BEGIN {exit (t + 0 >= f + 0) ? 0 : 1}' || { \
+		echo "coverage fell below the baseline - add tests, or raise"; \
+		echo "COVERAGE_BASELINE in the Makefile if the drop is deliberate"; \
+		exit 1; \
+	}
 
 vet: ## Run static analysis
 	$(GO) vet ./...

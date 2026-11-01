@@ -28,8 +28,8 @@ jobs:
       - name: Static analysis
         run: make vet
 
-      - name: Unit tests
-        run: make test
+      - name: Unit tests + coverage floor
+        run: make cover-check
 
       - name: Build (native)
         run: make build
