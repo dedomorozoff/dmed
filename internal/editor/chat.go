@@ -176,9 +176,9 @@ func (m *Model) pickChatModel() {
 			m.rebuildChatRows()
 			return
 		}
-		m.msg = "provider offline (" + err.Error() + ")"
+		m.msg = m.t("chat.provider_offline", err.Error())
 	case len(models) == 0:
-		m.msg = "no models available"
+		m.msg = m.t("chat.no_models")
 	default:
 		m.chatModel = models[0]
 		// Rebuild for the freshly picked model.
@@ -399,7 +399,7 @@ func (m Model) chatButtonsString() string {
 		b.WriteString(st.Render(" " + m.chatButtonGlyph(c.act) + " "))
 		pos += c.w
 	}
-	b.WriteString(strings.Repeat(" ", maxInt(0, w-pos)))
+	b.WriteString(strings.Repeat(" ", max(0, w-pos)))
 	return b.String()
 }
 
@@ -412,7 +412,7 @@ func (m Model) overlayChatTooltip(rows []string) []string {
 		return rows
 	}
 	switch {
-	case m.diffViewOpen, m.aiReviewMode, m.aiFixReviewMode, m.agentReviewMode,
+	case m.diffViewOpen, m.sqlOpen, m.aiReviewMode, m.aiFixReviewMode, m.agentReviewMode,
 		m.chatReviewMode, m.conflictOpen, m.aiCfgOpen, m.dapCfgOpen, m.helpOpen:
 		return rows
 	}
@@ -541,7 +541,7 @@ func (m *Model) chatStop() tea.Cmd {
 	if !m.chatBusy {
 		return nil
 	}
-	m.chatGen++
+	bumpGen(&m.chatGen)
 	if m.chatCancel != nil {
 		m.chatCancel()
 		m.chatCancel = nil
@@ -572,7 +572,7 @@ func (m *Model) startChatTurn() tea.Cmd {
 	if m.chatCancel != nil {
 		m.chatCancel()
 	}
-	m.chatGen++
+	bumpGen(&m.chatGen)
 	gen := m.chatGen
 	m.chatBusy = true
 	ctx, cancel := context.WithCancel(context.Background())
@@ -737,7 +737,14 @@ type toolPark struct {
 // for a side-by-side diff review. It returns a tea.Cmd that continues the
 // conversation, or nil when waiting on human review or a parked decision.
 func (m *Model) handleChatToolsDone(content string, tools []ai.ToolCall) tea.Cmd {
-	before := snapshotFiles(m.root)
+	// Detecting what a batch created or rewrote costs two full project walks
+	// (before + after). A batch of read-only tools (SEARCH, GLOB, TODO_*, ...)
+	// cannot touch a single file, so it walks nothing - on a large repository
+	// that was the stall between every AI iteration.
+	var before map[string]fileState
+	if toolBatchTouchesDisk(tools) {
+		before = snapshotFiles(m.root)
+	}
 	results := make([]ai.Message, 0, len(tools))
 	var pending []agent.Change
 	var tracks []chatEditTrack
@@ -757,7 +764,9 @@ func (m *Model) handleChatToolsDone(content string, tools []ai.ToolCall) tea.Cmd
 	// Open every file the tools created or rewrote (e.g. by RUN) in tabs and
 	// summarize them in the transcript. EDIT proposals are still pending human
 	// review, so they open when accepted (see acceptChatReview).
-	m.openTouchedFiles(before, results)
+	if before != nil {
+		m.openTouchedFiles(before, results)
+	}
 
 	m.chatPendingAssistant = ai.Message{Role: "assistant", Content: content, ToolCalls: tools}
 	m.chatPendingResults = results
@@ -1170,7 +1179,7 @@ func (m *Model) clampChatScroll() {
 		bodyH = 1
 	}
 	if maxBack := len(m.chatRows) - bodyH; m.chatScroll > maxBack {
-		m.chatScroll = maxInt(0, maxBack)
+		m.chatScroll = max(0, maxBack)
 	}
 	if m.chatScroll < 0 {
 		m.chatScroll = 0

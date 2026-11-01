@@ -447,16 +447,25 @@ func TestQuitCopySkipsConfirm(t *testing.T) {
 	}
 }
 
-func TestQuitCopyOnDirtyQuits(t *testing.T) {
+// TestCtrlCNeverQuits: Ctrl+C copies the selection when there is one and
+// never quits the editor — a terminal program that dies on the key used to
+// interrupt a process is a trap.
+func TestCtrlCNeverQuits(t *testing.T) {
 	dir := t.TempDir()
 	f1 := writeTemp(t, dir, "a.txt", "alpha\n")
 	m := New(f1)
 	m.width, m.height = 80, 24
-	typeStr(m, "X")
+	typeStr(m, "X") // dirty buffer
 	next, _ := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	nm := next.(Model)
-	if !nm.quitConfirm {
-		t.Fatal("ctrl+c on dirty without selection must confirm quit")
+	if nm.quitConfirm {
+		t.Fatal("ctrl+c must not ask to quit")
+	}
+	if nm.pendingQuit {
+		t.Fatal("ctrl+c must not quit")
+	}
+	if nm.msg == "" {
+		t.Fatal("ctrl+c should say how to quit")
 	}
 }
 
@@ -838,5 +847,48 @@ func TestDoubleShiftIgnoresHeldRepeat(t *testing.T) {
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyRightShift})
 	if !m.paletteOpen {
 		t.Fatal("double shift after held repeat must open the palette")
+	}
+}
+
+func TestDoubleShiftInterruptedByOtherKey(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "a.txt", "hi\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	// First shift tap
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyLeftShift})
+	if m.paletteOpen {
+		t.Fatal("single shift must not open the palette")
+	}
+
+	// Another key in between (e.g. typing or arrow) must reset the double-shift sequence
+	m = press(m, tea.KeyPressMsg{Code: 'a', Text: "a"})
+	if m.paletteOpen {
+		t.Fatal("letter must not open the palette")
+	}
+
+	// Shift after another key must not trigger the palette (treated as new first tap)
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyRightShift})
+	if m.paletteOpen {
+		t.Fatal("shift after another key must not trigger double-shift palette")
+	}
+}
+
+func TestDoubleShiftModShiftEvent(t *testing.T) {
+	dir := t.TempDir()
+	f := writeTemp(t, dir, "a.txt", "hi\n")
+	m := New(f)
+	m.width, m.height = 80, 24
+
+	// Bare Shift event delivered as Code: 0, Mod: ModShift
+	m = press(m, tea.KeyPressMsg{Code: 0, Text: "", Mod: tea.ModShift})
+	if m.paletteOpen {
+		t.Fatal("single bare shift event must not open palette")
+	}
+
+	m = press(m, tea.KeyPressMsg{Code: 0, Text: "", Mod: tea.ModShift})
+	if !m.paletteOpen {
+		t.Fatal("double bare shift event must open palette")
 	}
 }

@@ -1,13 +1,25 @@
 package editor
 
 import (
-	"strings"
+	"path/filepath"
+	"sort"
 
 	tea "charm.land/bubbletea/v2"
+
+	"dmed/internal/config"
+)
+
+// The kinds of things the palette can offer. The commands are the default;
+// the "search everywhere" mode adds the project files and the settings.
+const (
+	paletteKindCommand = ""
+	paletteKindFile    = "file"
+	paletteKindSetting = "setting"
 )
 
 type commandItem struct {
 	id     string
+	kind   string
 	title  string
 	desc   string
 	action func(m *Model) tea.Cmd
@@ -24,6 +36,10 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "new_folder", title: "cmd.new_folder_t", desc: "cmd.new_folder_d", action: func(m *Model) tea.Cmd { m.startNewFolderPrompt(); return nil }},
 		{id: "finder", title: "cmd.finder_t", desc: "cmd.finder_d", action: func(m *Model) tea.Cmd { m.startFinder(); return nil }},
 		{id: "search", title: "cmd.search_t", desc: "cmd.search_d", action: func(m *Model) tea.Cmd { m.startSearch(); return nil }},
+		{id: "proj_search", title: "cmd.proj_search_t", desc: "cmd.proj_search_d", action: func(m *Model) tea.Cmd { m.startProjectSearch(); return nil }},
+		{id: "lsp_rename", title: "cmd.lsp_rename_t", desc: "cmd.lsp_rename_d", action: func(m *Model) tea.Cmd { m.startLspRename(); return nil }},
+		{id: "lsp_actions", title: "cmd.lsp_actions_t", desc: "cmd.lsp_actions_d", action: func(m *Model) tea.Cmd { return m.startLspActions() }},
+		{id: "lsp_format", title: "cmd.lsp_format_t", desc: "cmd.lsp_format_d", action: func(m *Model) tea.Cmd { return m.lspFormatCmd() }}, // Ctrl+Alt+L (and the legacy Ctrl+Alt+F)
 		{id: "replace", title: "cmd.replace_t", desc: "cmd.replace_d", action: func(m *Model) tea.Cmd { m.startReplace(); return nil }},
 		{id: "goto_line", title: "cmd.goto_line_t", desc: "cmd.goto_line_d", action: func(m *Model) tea.Cmd { m.startGotoPrompt(); return nil }},
 		{id: "word_wrap", title: "cmd.word_wrap_t", desc: "cmd.word_wrap_d", action: func(m *Model) tea.Cmd { m.toggleWordWrap(); return nil }},
@@ -36,6 +52,8 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "move_line_down", title: "cmd.move_line_down_t", desc: "cmd.move_line_down_d", action: func(m *Model) tea.Cmd { m.cur().buf.MoveLineDown(); return nil }},
 		{id: "toggle_comment", title: "cmd.toggle_comment_t", desc: "cmd.toggle_comment_d", action: func(m *Model) tea.Cmd { m.toggleComment(); return nil }},
 		{id: "toggle_bookmark", title: "cmd.toggle_bookmark_t", desc: "cmd.toggle_bookmark_d", action: func(m *Model) tea.Cmd { m.toggleBookmarkAt(m.cur().buf.CurLine()); return nil }},
+		{id: "fold_toggle", title: "cmd.fold_toggle_t", desc: "cmd.fold_toggle_d", action: func(m *Model) tea.Cmd { m.toggleFoldAtCursor(); return nil }},
+		{id: "fold_all", title: "cmd.fold_all_t", desc: "cmd.fold_all_d", action: func(m *Model) tea.Cmd { m.toggleFoldAll(); return nil }},
 		{id: "toggle_breakpoint", title: "cmd.toggle_breakpoint_t", desc: "cmd.toggle_breakpoint_d", action: func(m *Model) tea.Cmd { return m.toggleDebugBreakpoint() }},
 		{id: "goto_definition", title: "cmd.goto_definition_t", desc: "cmd.goto_definition_d", action: func(m *Model) tea.Cmd { return m.gotoDefinition() }},
 		{id: "git_commit", title: "cmd.git_commit_t", desc: "cmd.git_commit_d", action: func(m *Model) tea.Cmd { m.openGitPanel(); return nil }},
@@ -89,7 +107,10 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "dap_settings", title: "cmd.dap_settings_t", desc: "cmd.dap_settings_d", action: func(m *Model) tea.Cmd { m.startDAPCfg(); return nil }},
 		{id: "agent_tasks", title: "cmd.agent_tasks_t", desc: "cmd.agent_tasks_d", action: func(m *Model) tea.Cmd { return m.openAgentPanel() }},
 		{id: "agent_new", title: "cmd.agent_new_t", desc: "cmd.agent_new_d", action: func(m *Model) tea.Cmd { return m.startAgentTaskPrompt() }},
+		{id: "agent_undo", title: "cmd.agent_undo_t", desc: "cmd.agent_undo_d", action: func(m *Model) tea.Cmd { m.undoLastAgentApply(); return nil }},
+		{id: "version", kind: "version", title: "Version", desc: "Show dmed version", action: func(m *Model) tea.Cmd { m.msg = "dmed " + m.Version; return nil }},
 		{id: "settings", title: "cmd.settings_t", desc: "cmd.settings_d", action: func(m *Model) tea.Cmd { m.openConfigFile(); return nil }},
+		{id: "search_everywhere", title: "cmd.search_everywhere_t", desc: "cmd.search_everywhere_d", action: func(m *Model) tea.Cmd { m.startSearchEverywhere(); return nil }},
 		{id: "help", title: "cmd.help_t", desc: "cmd.help_d", action: func(m *Model) tea.Cmd { m.helpOpen = true; m.helpScroll = 0; return nil }},
 		{id: "quit", title: "cmd.quit_t", desc: "cmd.quit_d", action: func(m *Model) tea.Cmd { return m.requestQuit() }},
 		{id: "lang_select", title: "cmd.lang_select_t", desc: "cmd.lang_select_d", action: func(m *Model) tea.Cmd { m.openLangChooser(); return nil }},
@@ -102,23 +123,113 @@ func (m *Model) getPaletteCommands() []commandItem {
 	return cmds
 }
 
-// cmdTitle returns the localized command title.
-func (m Model) cmdTitle(c commandItem) string { return m.t(c.title) }
+// cmdTitle returns the localized command title. Files and settings carry
+// their own text, so only the commands go through the translator.
+func (m Model) cmdTitle(c commandItem) string {
+	if c.kind == paletteKindCommand {
+		return m.t(c.title)
+	}
+	return c.title
+}
 
 // cmdDesc returns the localized command description.
-func (m Model) cmdDesc(c commandItem) string { return m.t(c.desc) }
+func (m Model) cmdDesc(c commandItem) string {
+	if c.kind == paletteKindCommand {
+		return m.t(c.desc)
+	}
+	return c.desc
+}
 
+// paletteItems returns everything the palette can offer: the commands, and in
+// the "search everywhere" mode the project files and the settings too.
+func (m *Model) paletteItems() []commandItem {
+	items := m.getPaletteCommands()
+	if !m.paletteAll {
+		return items
+	}
+	items = append(items, m.paletteFileItems()...)
+	items = append(items, m.paletteSettingItems()...)
+	return items
+}
+
+// paletteFileItems offers the project files, ready to be opened.
+func (m *Model) paletteFileItems() []commandItem {
+	base := m.baseDir()
+	out := make([]commandItem, 0, len(m.paletteFiles))
+	for _, rel := range m.paletteFiles {
+		rel := rel
+		out = append(out, commandItem{
+			id:    "file:" + rel,
+			kind:  paletteKindFile,
+			title: rel,
+			action: func(m *Model) tea.Cmd {
+				m.openPath(filepath.Join(base, filepath.FromSlash(rel)))
+				return nil
+			},
+		})
+	}
+	return out
+}
+
+// paletteSettingItems offers the configuration keys with their current
+// values; picking one opens the configuration file.
+func (m *Model) paletteSettingItems() []commandItem {
+	settings := config.Settings(m.cfg)
+	out := make([]commandItem, 0, len(settings))
+	for _, s := range settings {
+		s := s
+		out = append(out, commandItem{
+			id:    "setting:" + s.Section + "." + s.Key,
+			kind:  paletteKindSetting,
+			title: s.Section + "." + s.Key,
+			desc:  s.Value,
+			action: func(m *Model) tea.Cmd {
+				m.openConfigFile()
+				return nil
+			},
+		})
+	}
+	return out
+}
+
+// filterPalette ranks commands the fuzzy way, reusing the file finder's
+// scorer: the palette stays consistent with Ctrl+O and subsequence matches
+// ("nv f" finds "File: New File...") still work. A score of 0 from
+// strings.Contains is not comparable to subsequence priorities, so the title
+// and description are scored and the better hit wins.
 func (m *Model) filterPalette() []commandItem {
-	all := m.getPaletteCommands()
-	q := strings.ToLower(string(m.paletteQ))
-	if q == "" {
+	all := m.paletteItems()
+	if len(m.paletteQ) == 0 {
 		return all
 	}
-	var res []commandItem
+	q := string(m.paletteQ)
+	type hit struct {
+		item  commandItem
+		score int
+	}
+	hits := make([]hit, 0, len(all))
 	for _, c := range all {
-		if strings.Contains(strings.ToLower(m.cmdTitle(c)), q) || strings.Contains(strings.ToLower(m.cmdDesc(c)), q) {
-			res = append(res, c)
+		best := -1
+		// The title matters most: users name the command, not its tooltip.
+		if sc := fuzzyScore(q, m.cmdTitle(c)); sc >= 0 {
+			best = sc
 		}
+		if sc := fuzzyScore(q, m.cmdDesc(c)); sc > best {
+			best = sc
+		}
+		if best >= 0 {
+			hits = append(hits, hit{c, best})
+		}
+	}
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].score != hits[j].score {
+			return hits[i].score > hits[j].score
+		}
+		return m.cmdTitle(hits[i].item) < m.cmdTitle(hits[j].item)
+	})
+	res := make([]commandItem, 0, len(hits))
+	for _, h := range hits {
+		res = append(res, h.item)
 	}
 	return res
 }

@@ -10,13 +10,30 @@
 package plugin
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	lua "github.com/yuin/gopher-lua"
 )
+
+// defaultPluginTimeout bounds one Lua invocation and a plugin's load. A
+// runaway loop (`while true do end`) must not freeze the editor's main loop
+// forever; 3s is generous for the small strings/edits plugins do.
+const defaultPluginTimeout = 3 * time.Second
+
+// budget returns the effective timeout, tolerating a zero-valued Manager
+// (tests build bare structs).
+func (m *Manager) budget() time.Duration {
+	if m.timeout == 0 {
+		return defaultPluginTimeout
+	}
+	return m.timeout
+}
 
 // Host is the editor surface a plugin drives. It is implemented by the editor
 // model and provided to every plugin invocation.
@@ -56,11 +73,13 @@ type Plugin struct {
 type Manager struct {
 	plugins  []*Plugin
 	commands []*Command
+	// timeout bounds every Lua call and every plugin load; see budget().
+	timeout time.Duration
 }
 
 // New returns an empty manager.
 func New() *Manager {
-	return &Manager{}
+	return &Manager{timeout: defaultPluginTimeout}
 }
 
 // Load scans dir for *.lua files (sorted) and runs each one to let it register
@@ -112,6 +131,12 @@ func (m *Manager) build(path string) (*Plugin, error) {
 		eventHandlers: map[string][]lua.LValue{},
 	}
 	installRegAPI(p)
+	// The load itself gets the same budget as a call: a plugin whose top
+	// level spins would otherwise freeze the terminal at startup.
+	ctx, cancel := context.WithTimeout(context.Background(), m.budget())
+	defer cancel()
+	p.L.SetContext(ctx)
+	defer p.L.RemoveContext()
 	if err := p.L.DoString(string(src)); err != nil {
 		p.L.Close()
 		return nil, err
@@ -238,9 +263,21 @@ func (m *Manager) Remove(path string) {
 }
 
 // invoke runs a Lua function after binding the `dmed` API to the given host.
+// The call runs under the manager's wall-clock budget: SetContext makes the
+// VM check the deadline between instructions and RaiseError surfaces it as
+// the call's error (Protect: true), so a spinning handler stalls for the
+// budget and then reports, instead of hanging the editor for good.
 func (m *Manager) invoke(p *Plugin, host Host, fn lua.LValue) {
 	installHostAPI(p, host)
-	_ = p.L.CallByParam(lua.P{Fn: fn, NRet: 0, Protect: true})
+	ctx, cancel := context.WithTimeout(context.Background(), m.budget())
+	defer cancel()
+	p.L.SetContext(ctx)
+	defer p.L.RemoveContext()
+	if err := p.L.CallByParam(lua.P{Fn: fn, NRet: 0, Protect: true}); err != nil {
+		// Plugin errors used to vanish silently; the status bar is the one
+		// user-visible surface this package-side code has.
+		host.Status(fmt.Sprintf("plugin %s: %v", p.name, err))
+	}
 }
 
 // installRegAPI registers the host-independent plugin API: on_key, command, on.

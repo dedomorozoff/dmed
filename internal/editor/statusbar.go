@@ -6,8 +6,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-
-	"dmed/internal/syntax"
 )
 
 // Clickable status-bar icons. The bottom-left of the status bar carries a
@@ -50,7 +48,7 @@ var statusIconDefs = []statusIcon{
 func (m Model) statusIconsVisible() bool {
 	switch {
 	case m.promptOpen, m.promptSave, m.quitConfirm,
-		m.searchOpen, m.gotoOpen, m.conflictOpen, m.diffViewOpen,
+		m.searchOpen, m.gotoOpen, m.conflictOpen, m.diffViewOpen, m.sqlOpen,
 		m.finderOpen, m.paletteOpen, m.langChooserOpen, m.pluginStoreOpen,
 		m.aiInlineOpen, m.aiInlineBusy, m.aiFixOpen, m.aiFixBusy,
 		m.aiReviewMode, m.aiFixReviewMode, m.agentReviewMode, m.chatReviewMode,
@@ -294,13 +292,21 @@ func (m Model) paneStatusBar(paneIdx int) string {
 	active := paneIdx == m.activePane
 
 	mark := fmt.Sprintf("[%d] %s", paneIdx+1, t.name(m.baseDir()))
-	lncol := m.t("status.lncol", t.buf.CurLine()+1, t.buf.Col()+1)
+	// A picture gets its caption instead of "Ln 1, Col 1" — a cursor position
+	// under a rendered image describes a document that is not there, and an
+	// encoding badge on a PNG is a question nobody asked.
+	var lncol string
+	if t.img != nil {
+		lncol = t.img.caption("")
+	} else {
+		lncol = m.t("status.lncol", t.buf.CurLine()+1, t.buf.Col()+1)
+	}
 	fileInfo := ""
 	langTag := ""
-	if t.path != "" {
+	if t.img == nil && t.path != "" {
 		endings := map[string]string{"lf": "LF", "crlf": "CRLF"}
 		fileInfo = " " + endings[t.lineEnding] + "/" + strings.ToUpper(t.encoding)
-		if lang := syntax.Lang(t.path); lang != "" {
+		if lang := t.lang(); lang != "" {
 			langTag = " " + lang
 		}
 	}

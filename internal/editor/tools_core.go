@@ -105,7 +105,7 @@ func (e toolEnv) search(q string, regex bool) string {
 			return nil
 		}
 		rel := shortenPath(e.root, path)
-		lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+		lines := strings.Split(strings.ReplaceAll(strings.ReplaceAll(string(data), "\r\n", "\n"), "\r", "\n"), "\n")
 		for i, line := range lines {
 			if len(hits) >= maxHits {
 				return filepath.SkipAll

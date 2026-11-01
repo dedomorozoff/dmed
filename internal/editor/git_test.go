@@ -50,6 +50,28 @@ func initTestGitRepo(t *testing.T) (string, string) {
 	return dir, f
 }
 
+// waitForGitDiff drives the background diff pipeline like the editor does
+// and waits until the diff of the current buffer text has landed.
+func waitForGitDiff(t *testing.T, m Model) Model {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case msg := <-m.diffCh:
+			switch mm := msg.(type) {
+			case diffPassMsg:
+				m.runDiff(mm.tabIdx, m.tabs[mm.tabIdx].repoFor(m.repo))
+			case diffReadyMsg:
+				m.applyDiff(mm)
+			}
+			continue
+		default:
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return m
+}
+
 func TestEditorGitGutterAndHunkJump(t *testing.T) {
 	_, f := initTestGitRepo(t)
 
@@ -67,6 +89,9 @@ func TestEditorGitGutterAndHunkJump(t *testing.T) {
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnd})
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = typeStr(m, "// added comment")
+
+	// The diff against HEAD is computed in the background.
+	m = waitForGitDiff(t, m)
 
 	// View should render gutter diff marker '+'
 	v = m.View()
@@ -277,7 +302,7 @@ func TestQuitKeysWorkInAllModes(t *testing.T) {
 		t.Fatal("ctrl+q must quit while tree is focused")
 	}
 
-	// Git panel open (status mode): Ctrl+Q and Ctrl+C must quit
+	// Git panel open (status mode): Ctrl+Q must quit, Ctrl+C must not
 	m = New(f)
 	m.width, m.height = 80, 24
 	m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
@@ -287,8 +312,12 @@ func TestQuitKeysWorkInAllModes(t *testing.T) {
 	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl}); cmd == nil {
 		t.Fatal("ctrl+q must quit while git panel is open")
 	}
-	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}); cmd == nil {
-		t.Fatal("ctrl+c must quit while git panel is open")
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if cmd != nil {
+		t.Fatal("ctrl+c must not quit while git panel is open")
+	}
+	if next.(Model).quitConfirm {
+		t.Fatal("ctrl+c must not ask to quit")
 	}
 
 	// Git commit mode: typing 'q'/'c' still enters the message; Ctrl+Q quits
@@ -1007,7 +1036,9 @@ func TestEditorGitBlameToggle(t *testing.T) {
 		t.Fatal("expected blamed lines")
 	}
 
-	// The annotation renders into the view.
+	// The annotation renders into the view (the blame is only drawn on the
+	// lines the diff marks as changed, so the diff has to be there).
+	m = waitForGitDiff(t, m)
 	v := m.View()
 	plain := strings.Join(plainRows(v.Content), "\n")
 	if !strings.Contains(plain, "tester") {

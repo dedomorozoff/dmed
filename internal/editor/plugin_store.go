@@ -77,6 +77,19 @@ func parseRemotePluginList(body []byte) ([]storeItem, error) {
 	return out, nil
 }
 
+// storeHTTPTransport overrides the transport the plugin store fetches
+// through. It is nil in production; tests set it to a redirecting
+// RoundTripper backed by a local httptest server, so no unit test reaches
+// api.github.com or raw.githubusercontent.com (the same test seam shape as
+// aiFreeURLOverride and webSearchOverride).
+var storeHTTPTransport http.RoundTripper
+
+// storeClient is the shared client for both store fetches with the test seam
+// applied.
+func storeClient() *http.Client {
+	return &http.Client{Timeout: 10 * time.Second, Transport: storeHTTPTransport}
+}
+
 // fetchRemotePluginList lists *.lua files in a GitHub repo directory via the
 // contents API.
 func fetchRemotePluginList(repo, dir, branch string) ([]storeItem, error) {
@@ -87,8 +100,7 @@ func fetchRemotePluginList(repo, dir, branch string) ([]storeItem, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := storeClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -103,11 +115,15 @@ func fetchRemotePluginList(repo, dir, branch string) ([]storeItem, error) {
 	return parseRemotePluginList(body)
 }
 
-// fetchRemoteSource downloads a single plugin's .lua from a GitHub repo.
+// fetchRemoteSource downloads a single plugin's .lua from a GitHub repo. Like
+// fetchRemotePluginList it escapes every path component: a branch name or file
+// name containing a space or "?" must not smuggle an extra path segment or
+// query into the URL.
 func fetchRemoteSource(repo, dir, branch, file string) (string, error) {
-	u := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", repo, branch, dir+"/"+file)
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(u)
+	u := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s",
+		url.PathEscape(repo), url.PathEscape(branch),
+		url.PathEscape(strings.Join([]string{dir, file}, "/")))
+	resp, err := storeClient().Get(u)
 	if err != nil {
 		return "", err
 	}

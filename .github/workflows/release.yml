@@ -129,9 +129,17 @@ jobs:
         run: |
           # Delete any previous release for this tag so re-tagging rebuilds cleanly.
           gh release delete "$GITHUB_REF_NAME" --yes 2>/dev/null || true
+          # Notes come from the repo's docs/RELEASE-<tag>.md when it exists —
+          # --notes-from-tag does not reliably lay the annotated tag message
+          # down as the body. Fall back to the tag for tags without a file.
+          notes="docs/RELEASE-${GITHUB_REF_NAME}.md"
+          notes_args=(--notes-from-tag)
+          if [ -f "$notes" ]; then
+            notes_args=(--notes-file "$notes")
+          fi
           # Upload every file under dist/ (some packages land in nested dirs,
           # e.g. dist/rpm/RPMS/...), skipping directories.
           mapfile -t assets < <(find dist -type f)
           gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
             --title "$GITHUB_REF_NAME" \
-            --notes-from-tag
+            "${notes_args[@]}"

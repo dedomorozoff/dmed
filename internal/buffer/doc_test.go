@@ -31,6 +31,30 @@ func TestDocBasics(t *testing.T) {
 	}
 }
 
+// TestDocIndentWidth: the indentation width of a line, with tabs counting as
+// tabW columns and blank lines reported as -1.
+func TestDocIndentWidth(t *testing.T) {
+	d := newDoc(lines("a", "  b", "\tc", "\t\td", "   ", "", "\t e"))
+	cases := []struct {
+		line int
+		tabW int
+		want int
+	}{
+		{0, 4, 0},
+		{1, 4, 2},
+		{2, 4, 4},
+		{3, 4, 8},
+		{4, 4, -1},
+		{5, 4, -1},
+		{6, 4, 5},
+	}
+	for _, tc := range cases {
+		if got := d.indentWidth(tc.line, tc.tabW); got != tc.want {
+			t.Errorf("indentWidth(%d, %d) = %d, want %d", tc.line, tc.tabW, got, tc.want)
+		}
+	}
+}
+
 func TestDocSetInsertDelete(t *testing.T) {
 	d := newDoc(lines("a", "b", "c"))
 

@@ -7,9 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbletea/v2"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"dmed/internal/buffer"
 	"dmed/internal/config"
 	"dmed/internal/i18n"
 	"dmed/internal/lsp"
@@ -18,35 +19,37 @@ import (
 )
 
 var (
-	gutterStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	curGutterStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
-	cursorStyle     = lipgloss.NewStyle().Reverse(true)
-	statusStyle     = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("250"))
-	statusHiStyle   = lipgloss.NewStyle().Background(lipgloss.Color("61")).Foreground(lipgloss.Color("255")).Bold(true)
-	langStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
-	hintStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	activePaneStyle = lipgloss.NewStyle().Background(lipgloss.Color("235"))
-	matchStyle      = lipgloss.NewStyle().Background(lipgloss.Color("214")).Foreground(lipgloss.Color("0"))
-	curMatchStyle   = lipgloss.NewStyle().Background(lipgloss.Color("226")).Foreground(lipgloss.Color("0")).Bold(true)
-	gitAddStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
-	gitModStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-	gitDelStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
-	diagErrStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
-	diagWarnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-	diagInfoStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
-	bpStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
-	bpDimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	bmStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
-	stopStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-	dapLineStyle    = lipgloss.NewStyle().Background(lipgloss.Color("236"))
-	okTestStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
-	errTestStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	diffAddBg       = lipgloss.NewStyle().Background(lipgloss.Color("22"))
-	diffDelBg       = lipgloss.NewStyle().Background(lipgloss.Color("52"))
-	diffModBg       = lipgloss.NewStyle().Background(lipgloss.Color("58"))
-	selectionStyle  = lipgloss.NewStyle().Background(lipgloss.Color("60")).Foreground(lipgloss.Color("255"))
-	ghostStyle      = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("243"))
-	blameStyle      = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("244"))
+	gutterStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	curGutterStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	cursorStyle       = lipgloss.NewStyle().Reverse(true)
+	statusStyle       = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("250"))
+	statusHiStyle     = lipgloss.NewStyle().Background(lipgloss.Color("61")).Foreground(lipgloss.Color("255")).Bold(true)
+	langStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
+	hintStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	activePaneStyle   = lipgloss.NewStyle().Background(lipgloss.Color("235"))
+	matchStyle        = lipgloss.NewStyle().Background(lipgloss.Color("214")).Foreground(lipgloss.Color("0"))
+	curMatchStyle     = lipgloss.NewStyle().Background(lipgloss.Color("226")).Foreground(lipgloss.Color("0")).Bold(true)
+	gitAddStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
+	gitModStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	gitDelStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	diagErrStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	diagWarnStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	diagInfoStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
+	bpStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	bpDimStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	bmStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
+	stopStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	dapLineStyle      = lipgloss.NewStyle().Background(lipgloss.Color("236"))
+	okTestStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
+	errTestStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	diffAddBg         = lipgloss.NewStyle().Background(lipgloss.Color("22"))
+	diffDelBg         = lipgloss.NewStyle().Background(lipgloss.Color("52"))
+	diffModBg         = lipgloss.NewStyle().Background(lipgloss.Color("58"))
+	selectionStyle    = lipgloss.NewStyle().Background(lipgloss.Color("60")).Foreground(lipgloss.Color("255"))
+	ghostStyle        = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("243"))
+	blameStyle        = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("244"))
+	foldStyle         = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("110"))
+	bracketMatchStyle = lipgloss.NewStyle().Background(lipgloss.Color("239")).Foreground(lipgloss.Color("226")).Bold(true).Underline(true)
 )
 
 type helpEntry struct {
@@ -57,13 +60,16 @@ type helpEntry struct {
 var helpEntries = []helpEntry{
 	{"Ctrl+S", "help.save"},
 	{"", ""},
-	{"Ctrl+P / F2 / Shift+Shift", "help.palette"},
+	{"Ctrl+P / F2", "help.palette"},
+	{"Alt+P / Ctrl+Shift+P", "help.everywhere"},
 	{"Shift+Arrows", "help.select"},
 	{"Ctrl+C / Ctrl+X / Ctrl+V", "help.clipboard"},
 	{"", ""},
 	{"Ctrl+F", "help.search"},
+	{"Ctrl+Shift+F", "help.proj_search"},
 	{"Ctrl+H", "help.replace"},
 	{"Ctrl+L", "help.goto_line"},
+	{"Ctrl+Alt+L", "help.format"},
 	{"Alt+Z", "help.word_wrap"},
 	{"Alt+B", "help.blame"},
 	{"Ctrl+G", "help.git_panel"},
@@ -101,9 +107,10 @@ var helpEntries = []helpEntry{
 	{"Alt+Click", "help.multicursor_click"},
 	{"Esc", "help.multicursor_esc"},
 	{"Alt+↑ / Alt+↓", "help.move_line"},
+	{"Alt+C / Alt+O", "help.fold"},
 	{"", ""},
 	{"F1 or Ctrl+E", "help.toggle_help"},
-	{"Ctrl+Q / Ctrl+C", "help.quit"},
+	{"Ctrl+Q", "help.quit"},
 }
 
 func (m Model) finderExtraRows() int {
@@ -256,13 +263,14 @@ func (m Model) pluginStoreExtraRows() int {
 func (m Model) contextBottomExtraRows() int {
 	switch {
 	case m.diffViewOpen,
+		m.sqlOpen,
 		m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0,
 		m.aiReviewMode, m.agentReviewMode, m.chatReviewMode, m.agentPrompt,
 		m.askReq != nil,
 		m.aiInlineOpen, m.aiInlineBusy, m.aiFixOpen, m.aiFixBusy,
 		m.aiFixReviewMode, m.conflictOpen, m.treeConfirm != "", m.quitConfirm,
 		m.aiCfgOpen, m.gitOpen, m.promptSave, m.promptOpen,
-		m.searchOpen, m.gotoOpen:
+		m.searchOpen, m.gotoOpen, m.lspRenameOpen:
 		return 1
 	default:
 		return 0
@@ -270,7 +278,7 @@ func (m Model) contextBottomExtraRows() int {
 }
 
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.contextBottomExtraRows() - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows() - m.askExtraRows()
+	h := m.height - 2 - m.contextBottomExtraRows() - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows() - m.askExtraRows() - m.projSearchExtraRows() - m.lspActionsExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -280,6 +288,15 @@ func (m Model) viewHeight() int {
 func (m Model) contextBottomRow() string {
 	if m.diffViewOpen {
 		return m.diffBottom()
+	} else if m.sqlOpen {
+		switch {
+		case m.sqlEdit != nil:
+			return m.sqlEditLine()
+		case m.sqlFilterIn:
+			return m.sqlFilterLine()
+		default:
+			return m.sqlBottom()
+		}
 	} else if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0 {
 		return m.diffBottom()
 	} else if m.aiReviewMode {
@@ -340,10 +357,20 @@ func (m Model) contextBottomRow() string {
 }
 
 func (m Model) gutterWidthForTab(t *tab) int {
+	// A picture has no lines to number: numbering every row "1" of the empty
+	// buffer behind it describes a document that does not exist.
+	if t.img != nil {
+		return 0
+	}
 	// Line number + one shared marker column (breakpoint ● / bookmark ◆).
 	w := len(strconv.Itoa(t.buf.LineCount())) + 3
 	if w < 6 {
 		w = 6
+	}
+	// Folding code gains one chevron column (▾ open block / ▸ folded), click
+	// and it expands/collapses the block.
+	if t.hasFolds(m.cfg.Editor.TabWidth) {
+		w++
 	}
 	return w
 }
@@ -359,6 +386,8 @@ func (m Model) View() tea.View {
 	rows = append(rows, m.tabBar())
 	if m.diffViewOpen {
 		rows = append(rows, m.diffViewRows(h)...)
+	} else if m.sqlOpen {
+		rows = append(rows, m.sqliteViewRows(h)...)
 	} else if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0 {
 		// Inline diff preview: show side-by-side diff of selected file/commit
 		// in the editor area while the git panel is open.
@@ -402,6 +431,12 @@ func (m Model) View() tea.View {
 	if m.aiFixOpen {
 		rows = append(rows, m.aiFixInputRender()...)
 	}
+	if m.lspRenameOpen {
+		rows = append(rows, m.lspRenameInputRender())
+	}
+	if m.lspActionsOpen {
+		rows = append(rows, m.withDivider(m.lspActionsPanel())...)
+	}
 	if m.agentPrompt {
 		rows = append(rows, m.agentPromptInputRender()...)
 	}
@@ -416,6 +451,9 @@ func (m Model) View() tea.View {
 	}
 	if m.paletteOpen {
 		rows = append(rows, m.withDivider(m.palettePanel())...)
+	}
+	if m.projSearchOpen {
+		rows = append(rows, m.withDivider(m.projSearchPanel())...)
 	}
 	if m.langChooserOpen {
 		rows = append(rows, m.withDivider(m.langChooserPanel())...)
@@ -439,7 +477,13 @@ func (m Model) View() tea.View {
 	var v tea.View
 	v.SetContent(lipgloss.NewStyle().MaxWidth(m.width).Render(strings.Join(rows, "\n")))
 	v.AltScreen = true
-	v.WindowTitle = "dmed — " + m.activeTab().name(m.baseDir())
+	v.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
+	v.KeyboardEnhancements.ReportEventTypes = true
+	if t := m.activeTab(); t != nil {
+		v.WindowTitle = "dmed — " + t.name(m.baseDir())
+	} else {
+		v.WindowTitle = "dmed"
+	}
 	// All-motion mode is required so hover (no button held) reaches the app;
 	// this powers the status-bar icon callout. Terminals without any-event
 	// tracking simply never deliver hover.
@@ -557,7 +601,20 @@ func (m Model) composeSidebar(editor []string) []string {
 
 func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	p := &m.panes[paneIdx]
+	if p.tabIdx < 0 || p.tabIdx >= len(m.tabs) {
+		rows := make([]string, h)
+		for i := range rows {
+			rows[i] = strings.Repeat(" ", totalW)
+		}
+		return rows
+	}
 	t := &m.tabs[p.tabIdx]
+	// A picture replaces the buffer rows entirely: no gutter, no syntax, no
+	// cursor — the art and a caption line. Everything assembled below starts
+	// from the buffer, which a picture tab keeps deliberately empty.
+	if t.img != nil {
+		return m.imageRows(t, h, totalW)
+	}
 	gw := m.gutterWidthForTab(t)
 	contentW := totalW - gw
 	if contentW < 0 {
@@ -567,8 +624,14 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	active := paneIdx == m.activePane
 	rows := make([]string, h)
 
-	syntaxLines := t.getSyntaxLines(m.syn)
-	diff := t.getDiff(m.repo)
+	if active && !t.buf.HasSelection() {
+		t.delimMatch, t.hasDelimMatch = t.buf.MatchDelimiter(t.buf.CurLine(), t.buf.Col())
+	} else {
+		t.hasDelimMatch = false
+	}
+
+	syntaxLines := t.getSyntaxLines()
+	diff := t.getDiff()
 	diagPath, _ := filepath.Abs(t.path)
 	tabDiags := m.diags[diagPath]
 	bpSet := m.dapBreak[diagPath]
@@ -577,27 +640,40 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 	dapStoppedHere := m.dapRunState == dapStopped && m.dapCurPath == diagPath
 
 	wrap := p.wordWrap && contentW > 0
-	var segs []wrapSeg
-	if wrap {
-		segs = t.tabWrap(contentW, m.cfg.Editor.TabWidth)
+	disp := m.dispRows(paneIdx, contentW)
+	tabW := m.cfg.Editor.TabWidth
+	// The painted gutter must be exactly gw cells wide: the line number block
+	// (right-aligned before the markers), the three shared marker columns and
+	// the optional fold chevron. The number block has to give the chevron its
+	// cell back, otherwise the whole gutter is one cell wider than
+	// gutterWidthForTab reports and every click lands one column right of the
+	// glyph under the pointer (the fold chevron included).
+	foldW := 0
+	if t.hasFolds(tabW) {
+		foldW = 1
 	}
 
 	for row := 0; row < h; row++ {
-		ln := p.offsetY + row
-		segStart, segEnd := 0, 0
-		continuation := false
-		if wrap {
-			si := p.offsetY + row
-			if si >= len(segs) {
-				if gw > 0 {
-					rows[row] = strings.Repeat(" ", gw)
-				}
-				continue
+		var d dispRow
+		if di := p.offsetY + row; di >= 0 && di < len(disp) {
+			d = disp[di]
+		} else {
+			// Beyond the displayed content: a blank row.
+			if gw > 0 {
+				rows[row] = strings.Repeat(" ", gw)
 			}
-			ln = segs[si].line
-			segStart = segs[si].expStart
-			segEnd = segs[si].expEnd
-			continuation = segStart > 0
+			continue
+		}
+		ln, segStart, segEnd := d.ln, d.expStart, d.expEnd
+		continuation := !d.summary && segStart > 0
+
+		if d.summary {
+			// The line count summary of the folded block under it: an empty
+			// gutter with a folded chevron and the hint text. Expands on click.
+			blank := strings.Repeat(" ", gw-1)
+			gut := gutterStyle.Render(blank) + foldStyle.Render(m.g.expand)
+			rows[row] = gut + foldStyle.Render(m.g.ellipsis+" "+m.t("fold.hidden", d.hidden))
+			continue
 		}
 
 		if continuation {
@@ -669,7 +745,7 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 			markStyle = bmStyle
 		}
 
-		numPad := gw - 3 - len(num)
+		numPad := gw - 3 - foldW - len(num)
 		if numPad < 0 {
 			numPad = 0
 		}
@@ -688,6 +764,9 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 		gutStr += diagMarkStyle.Render(diagMark)
 		gutStr += gitMarkStyle.Render(gitMark)
 		gutStr += markStyle.Render(mark)
+		if chev, hasCol := m.foldChevron(t, ln, tabW); hasCol {
+			gutStr += foldStyle.Render(chev)
+		}
 
 		if active && !wrap && m.ghostVisible && len(m.ghostLines) > 1 && ln > m.ghostRow {
 			// Multi-line ghost: subsequent ghost lines appear on their own rows.
@@ -845,6 +924,11 @@ func (m Model) tabBar() string {
 	var parts []string
 	activeTab := m.activeTabIndex()
 	for i := range m.tabs {
+		// When a directory is opened, the placeholder untitled tab is not
+		// shown in the tab bar.
+		if m.root != "" && m.tabs[i].path == "" {
+			continue
+		}
 		name := m.tabLabel(i)
 		if i == activeTab {
 			parts = append(parts, statusHiStyle.Render(name))
@@ -873,56 +957,7 @@ func (m Model) treePanel(h int) []string {
 		i := off + row
 		var cell string
 		if i < len(m.treeRows) {
-			e := m.treeRows[i]
-			var plain strings.Builder
-			var styled strings.Builder
-			if e.depth > 1 {
-				for _, isLast := range e.anc {
-					seg := "    "
-					if !isLast {
-						seg = m.g.vline + "   "
-					}
-					plain.WriteString(seg)
-					styled.WriteString(treeConnStyle.Render(seg))
-				}
-				seg := m.g.tee + m.g.hline + m.g.hline + " "
-				if e.last {
-					seg = m.g.corner + m.g.hline + m.g.hline + " "
-				}
-				plain.WriteString(seg)
-				styled.WriteString(treeConnStyle.Render(seg))
-			}
-			if e.isDir {
-				icon := m.g.expand + " "
-				if m.expanded[e.rel] {
-					icon = m.g.collapse + " "
-				}
-				plain.WriteString(icon)
-				styled.WriteString(treeIconStyle.Render(icon))
-				plain.WriteString(e.name)
-				styled.WriteString(treeDirStyle.Render(e.name))
-			} else {
-				plain.WriteString(e.name)
-				styled.WriteString(treeFileStyle.Render(e.name))
-			}
-			line := styled.String()
-			plainS := plain.String()
-			pad := inner - lipgloss.Width(line)
-			if pad < 0 {
-				// Truncate to the available width.
-				runes := []rune(plainS)
-				plainS = string(runes[:maxInt(0, len(runes)+pad)])
-				line = plainS
-				pad = 0
-			}
-			fill := strings.Repeat(" ", pad)
-			if i == m.treeSel && m.treeFocus {
-				cell = statusHiStyle.Render(plainS + fill)
-			} else if i == m.treeSel {
-				cell = statusStyle.Render(plainS + fill)
-			} else {
-				cell = line + fill
-			}
+			cell = m.treeEntryRow(m.treeRows[i], i == m.treeSel)
 		} else {
 			cell = strings.Repeat(" ", inner)
 		}
@@ -931,19 +966,110 @@ func (m Model) treePanel(h int) []string {
 	return rows
 }
 
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
+// treeEntryRow renders one tree entry within the panel width (ready for the
+// trailing cell the panel appends to every row). Deep nesting must not eat the
+// file name: when the full ancestor gauge does not leave room for it, the
+// gauge collapses to an ellipsis before the connector, and only when even the
+// collapsed gauge is too wide is the name itself cut — from the head, so the
+// tail (with the extension) stays visible.
+func (m Model) treeEntryRow(e treeEntry, selected bool) string {
+	inner := m.cfg.UI.TreeWidth - 1
 
-// minInt is maxInt's counterpart, for the few places that need a lower bound.
-func minInt(a, b int) int {
-	if a < b {
-		return a
+	name := e.name
+	style := treeFileStyle
+	iconP, iconS := "", ""
+	if e.isDir {
+		iconP = m.g.expand + " "
+		if m.expanded[e.rel] {
+			iconP = m.g.collapse + " "
+		}
+		iconS = treeIconStyle.Render(iconP)
+		style = treeDirStyle
 	}
-	return b
+
+	gauge := func(full bool) (string, string) {
+		var plain, styled strings.Builder
+		if e.depth > 1 {
+			if full {
+				for _, isLast := range e.anc {
+					seg := "    "
+					if !isLast {
+						seg = m.g.vline + "   "
+					}
+					plain.WriteString(seg)
+					styled.WriteString(treeConnStyle.Render(seg))
+				}
+			} else {
+				// Collapsed ancestors: an ellipsis takes the place of the
+				// verticals, the final connector keeps its usual width so
+				// siblings stay aligned.
+				seg := m.g.ellipsis + "  "
+				plain.WriteString(seg)
+				styled.WriteString(treeConnStyle.Render(seg))
+			}
+			seg := m.g.tee + m.g.hline + m.g.hline + " "
+			if e.last {
+				seg = m.g.corner + m.g.hline + m.g.hline + " "
+			}
+			plain.WriteString(seg)
+			styled.WriteString(treeConnStyle.Render(seg))
+		}
+		return plain.String(), styled.String()
+	}
+
+	fits := func(gaugeP string) bool {
+		return inner-lipgloss.Width(gaugeP)-lipgloss.Width(iconP)-lipgloss.Width(name) >= 0
+	}
+	gaugeP, gaugeS := gauge(true)
+	if !fits(gaugeP) {
+		gaugeP, gaugeS = gauge(false)
+	}
+	if !fits(gaugeP) {
+		// Last resort: strip the head of the name, keeping the tail.
+		if avail := inner - lipgloss.Width(gaugeP) - lipgloss.Width(iconP) - 1; avail > 0 {
+			name = m.fitStatusTail(name, avail)
+		} else {
+			// Nothing left but the connector itself: drop the collapsed
+			// ancestors entirely rather than the whole name.
+			gaugeP = ""
+			gaugeS = ""
+			if e.depth > 1 {
+				seg := m.g.tee + m.g.hline + m.g.hline + " "
+				if e.last {
+					seg = m.g.corner + m.g.hline + m.g.hline + " "
+				}
+				gaugeP = seg
+				gaugeS = treeConnStyle.Render(seg)
+			}
+			if !fits(gaugeP) {
+				if avail := inner - lipgloss.Width(gaugeP) - lipgloss.Width(iconP) - 1; avail > 0 {
+					name = m.fitStatusTail(name, avail)
+				}
+			}
+		}
+	}
+
+	plainS := gaugeP + iconP + name
+	line := gaugeS + iconS + style.Render(name)
+	pad := inner - lipgloss.Width(line)
+	if pad < 0 {
+		// Safety net (e.g. names with double-width runes where rune counts
+		// are not cell widths): any row wider than the panel shifts the whole
+		// editor gutter, so it falls back to a plain trimmed row.
+		rs := []rune(plainS)
+		keep := min(max(inner-1, 1), len(rs))
+		plainS = string(rs[:keep]) + m.g.ellipsis
+		line = plainS
+		pad = max(0, inner-lipgloss.Width(line))
+	}
+	fill := strings.Repeat(" ", pad)
+	if selected && m.treeFocus {
+		return statusHiStyle.Render(plainS + fill)
+	}
+	if selected {
+		return statusStyle.Render(plainS + fill)
+	}
+	return line + fill
 }
 
 func padTo(s string, w int) string {
@@ -1242,13 +1368,13 @@ func (m Model) gitPanel(h int) []string {
 			cell = statusHiStyle.Render(line)
 		case fs.IsStaged():
 			styled := " " + gitAddStyle.Render(marker) + " " + path
-			cell = styled + strings.Repeat(" ", maxInt(0, gitPanelWidth-1-lipgloss.Width(styled)))
+			cell = styled + strings.Repeat(" ", max(0, gitPanelWidth-1-lipgloss.Width(styled)))
 		case fs.Worktree == vcs.StatusUntracked:
 			styled := " " + hintStyle.Render(marker) + " " + path
-			cell = styled + strings.Repeat(" ", maxInt(0, gitPanelWidth-1-lipgloss.Width(styled)))
+			cell = styled + strings.Repeat(" ", max(0, gitPanelWidth-1-lipgloss.Width(styled)))
 		default:
 			styled := " " + gitModStyle.Render(marker) + " " + path
-			cell = styled + strings.Repeat(" ", maxInt(0, gitPanelWidth-1-lipgloss.Width(styled)))
+			cell = styled + strings.Repeat(" ", max(0, gitPanelWidth-1-lipgloss.Width(styled)))
 		}
 		rows = append(rows, cell+" ")
 	}
@@ -1311,7 +1437,7 @@ func (m Model) diffViewRows(h int) []string {
 func (m Model) renderSideBySide(leftLines, rightLines []string, diffRows []vcs.DiffRow, offsetY, offsetX, w, h int, leftSyntax, rightSyntax []syntax.HighlightedLine) []string {
 	half := (w - 1) / 2
 
-	numW := len(strconv.Itoa(maxInt(len(leftLines), len(rightLines)))) + 1
+	numW := len(strconv.Itoa(max(len(leftLines), len(rightLines)))) + 1
 	if numW < 3 {
 		numW = 3
 	}
@@ -1336,8 +1462,8 @@ func (m Model) renderSideBySide(leftLines, rightLines []string, diffRows []vcs.D
 			if rightSyntax != nil && idx < len(rightSyntax) {
 				rs = rightSyntax[idx]
 			}
-			left = renderDiffCell(leftLines, dr.Left, dr.Type, false, numW, contentW, offsetX, ls)
-			right = renderDiffCell(rightLines, dr.Right, dr.Type, true, numW, contentW, offsetX, rs)
+			left = renderDiffCell(leftLines, dr.Left, dr.Type, false, numW, contentW, offsetX, ls, m.syn)
+			right = renderDiffCell(rightLines, dr.Right, dr.Type, true, numW, contentW, offsetX, rs, m.syn)
 		} else {
 			left = strings.Repeat(" ", half)
 			right = strings.Repeat(" ", half)
@@ -1347,7 +1473,7 @@ func (m Model) renderSideBySide(leftLines, rightLines []string, diffRows []vcs.D
 	return rows
 }
 
-func renderDiffCell(lines []string, lineIdx int, dt vcs.DiffType, rightSide bool, numW, contentW, offsetX int, syntaxLine syntax.HighlightedLine) string {
+func renderDiffCell(lines []string, lineIdx int, dt vcs.DiffType, rightSide bool, numW, contentW, offsetX int, syntaxLine syntax.HighlightedLine, syn *syntax.Highlighter) string {
 	half := numW + 2 + contentW
 	if lineIdx < 0 {
 		return strings.Repeat(" ", half)
@@ -1395,15 +1521,49 @@ func renderDiffCell(lines []string, lineIdx int, dt vcs.DiffType, rightSide bool
 	if syntaxLine != nil || bg != nil {
 		var out strings.Builder
 		out.WriteString(prefix)
-		for i := 0; i < len(runes) && i < needed; i++ {
+		// The tokens of a line come in runs: one style lookup and one lipgloss
+		// render per run instead of per character.
+		var lastToken syntax.Token
+		var lastStyle lipgloss.Style
+		haveLast := false
+		runStart := 0
+		runStyle := lipgloss.Style{}
+		runKey := 0
+		end := len(runes)
+		if needed < end {
+			end = needed
+		}
+		for i := 0; i < end; i++ {
 			var st lipgloss.Style
+			key := 1000
 			if syntaxLine != nil && i+offsetX < len(syntaxLine) {
-				st = syntaxLine[i+offsetX]
+				tok := syntaxLine[i+offsetX]
+				if !haveLast || tok != lastToken {
+					lastToken = tok
+					lastStyle = syn.StyleFor(tok)
+					haveLast = true
+				}
+				st = lastStyle
+				key = int(tok) + 1000
 			}
 			if bg != nil {
 				st = st.Background(bg.GetBackground())
+				key = -4
 			}
-			out.WriteString(st.Render(string(runes[i])))
+			if i == 0 {
+				runStyle = st
+				runKey = key
+				continue
+			}
+			if key != runKey {
+				out.WriteString(runStyle.Render(string(runes[runStart:i])))
+				runStart = i
+				runStyle = st
+				runKey = key
+			}
+		}
+		if end > 0 {
+			out.WriteString(runStyle.Render(string(runes[runStart:end])))
 		}
 		// Pad remaining space
 		visW := lipgloss.Width(out.String())
@@ -1604,10 +1764,10 @@ func (m Model) chatPanel(h int) []string {
 							chatUserBubbleStyle.Render(string(bubbleRunes[c1:]))
 					}
 				}
-				body = strings.Repeat(" ", maxInt(0, w-1-len(bubbleRunes))) + bubble
+				body = strings.Repeat(" ", max(0, w-1-len(bubbleRunes))) + bubble
 			} else {
 				body = strings.Repeat(" ", chatBodyPad) + line +
-					strings.Repeat(" ", maxInt(0, w-1-chatBodyPad-lipgloss.Width(line)))
+					strings.Repeat(" ", max(0, w-1-chatBodyPad-lipgloss.Width(line)))
 			}
 		}
 		rows = append(rows, body+sbCell(i-start))
@@ -1674,6 +1834,12 @@ func (m Model) conflictLine() string {
 
 func (m Model) searchLine() string {
 	line := statusHiStyle.Render(m.t("search.label")) + statusStyle.Render(string(m.searchQuery)) + cursorStyle.Render(" ")
+	if m.searchRegex {
+		line += hintStyle.Render(m.t("search.regex_on"))
+	}
+	if m.searchRegexBad() {
+		line += hintStyle.Render(m.t("search.bad_regex"))
+	}
 	if len(m.searchQuery) > 0 {
 		if m.searchTotalMatches > 0 {
 			line += hintStyle.Render(fmt.Sprintf(" [%d/%d]", m.searchMatchIdx+1, m.searchTotalMatches))
@@ -1935,6 +2101,119 @@ func (m Model) finderPanel() []string {
 	return rows
 }
 
+func (m Model) lspActionsExtraRows() int {
+	if !m.lspActionsOpen {
+		return 0
+	}
+	n := len(m.lspActions)
+	if n > lspActionsVisible {
+		n = lspActionsVisible
+	}
+	return n + 2 // divider + title
+}
+
+// lspRenameInputRender is the rename prompt line (Enter fires, Esc cancels).
+func (m Model) lspRenameInputRender() string {
+	line := statusHiStyle.Render(m.t("rename.prompt")) +
+		statusStyle.Render(string(m.lspRenameIn)) + cursorStyle.Render(" ") +
+		hintStyle.Render(m.t("rename.hint"))
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+// lspActionsPanel renders the code actions list: a title plus the visible
+// window of actions.
+func (m Model) lspActionsPanel() []string {
+	rows := make([]string, 0, len(m.lspActions)+1)
+	title := statusHiStyle.Render(" " + m.t("actions.title"))
+	fill := m.width - lipgloss.Width(title)
+	if fill > 0 {
+		title += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	rows = append(rows, title)
+	n := len(m.lspActions)
+	end := m.lspActionsOff + lspActionsVisible
+	for i := m.lspActionsOff; i < end && i < n; i++ {
+		label := padTo(" "+m.lspActions[i].Title+" ", m.width)
+		if i == m.lspActionsSel {
+			rows = append(rows, statusHiStyle.Render(label))
+		} else {
+			rows = append(rows, statusStyle.Render(label))
+		}
+	}
+	return rows
+}
+
+func (m Model) projSearchExtraRows() int {
+	if !m.projSearchOpen {
+		return 0
+	}
+	n := len(m.projSearchHits)
+	if n > projSearchVisible {
+		n = projSearchVisible
+	}
+	return n + 3 // divider + prompt row + hint row
+}
+
+func (m Model) projSearchPanel() []string {
+	rows := make([]string, 0, projSearchVisible+3)
+	n := len(m.projSearchHits)
+	if n > 0 {
+		end := m.projSearchOff + projSearchVisible
+		for i := m.projSearchOff; i < end && i < n; i++ {
+			rows = append(rows, m.projSearchRow(i))
+		}
+	} else if len(m.projSearchQ) > 0 {
+		rows = append(rows, statusStyle.Render(padTo(" "+m.projSearchStatus()+" ", m.width)))
+	}
+	rows = append(rows, m.projSearchPromptLine())
+	rows = append(rows, hintStyle.Render(padTo(m.projSearchHint(), m.width)))
+	return rows
+}
+
+func (m Model) projSearchPromptLine() string {
+	line := statusHiStyle.Render(m.t("psearch.prompt")) + statusStyle.Render(string(m.projSearchQ))
+	if m.projSearchInput {
+		line += cursorStyle.Render(" ")
+	} else {
+		line += statusStyle.Render(" ")
+	}
+	if m.projSearchRegex {
+		line += hintStyle.Render(m.t("search.regex_on"))
+	}
+	line += hintStyle.Render(m.projSearchStatus())
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+func (m Model) projSearchRow(i int) string {
+	h := m.projSearchHits[i]
+	prefix := fmt.Sprintf(" %s:%d: ", h.path, h.line+1)
+	avail := m.width - lipgloss.Width(prefix) - 1
+	runes := []rune(strings.TrimRight(h.text, "\r\n"))
+	if avail < 1 {
+		avail = 1
+	}
+	if lipgloss.Width(string(runes)) > avail {
+		// Rune-typed cut: the list is plain left-to-right text, and the
+		// prefix already accounts for its own double width.
+		for len(runes) > 0 && lipgloss.Width(string(runes)) > avail {
+			runes = runes[:len(runes)-1]
+		}
+	}
+	label := padTo(prefix+string(runes)+" ", m.width)
+	if i == m.projSearchSel {
+		return statusHiStyle.Render(label)
+	}
+	return statusStyle.Render(label)
+}
+
 // folderPanel renders the built-in folder picker: a path header, the
 // directory listing (row 0 is always the parent), and a hint line.
 func (m Model) folderPanel() []string {
@@ -1991,14 +2270,32 @@ func (m Model) folderPanel() []string {
 	return rows
 }
 
+// Run keys for the line painting. The syntax tokens are non-negative, the
+// overrides use negative keys, so a run of equal key always has one style.
+const (
+	matchStyleKey        = -1
+	selectionStyleKey    = -2
+	cursorStyleKey       = -3
+	bracketMatchStyleKey = -4
+)
+
+// styleKey returns the run key of an expanded position: the syntax token of
+// the character, shifted so it cannot collide with the override keys.
+func styleKey(tokens []syntax.Token, i int) int {
+	if i < len(tokens) {
+		return int(tokens[i]) + 1000
+	}
+	return 1000
+}
+
 func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLines []syntax.HighlightedLine) string {
 	if w <= 0 || ln >= t.buf.LineCount() {
 		return ""
 	}
 	raw := t.buf.LineAt(ln)
-	var rawStyles syntax.HighlightedLine
+	var rawTokens syntax.HighlightedLine
 	if ln < len(syntaxLines) {
-		rawStyles = syntaxLines[ln]
+		rawTokens = syntaxLines[ln]
 	}
 
 	// Highlight the line the debuggee is stopped on, so the execution point is
@@ -2009,22 +2306,41 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 	// Expand tabs
 	exp := make([]rune, 0, len(raw))
 	expStyles := make([]lipgloss.Style, 0, len(raw))
+	expTokens := make([]syntax.Token, 0, len(raw))
 	rawToExp := make([]int, len(raw)+1)
+
+	// The tokens of a line come in runs, so the style of a run is looked up
+	// once instead of once per character.
+	var lastToken syntax.Token
+	var lastStyle lipgloss.Style
+	haveLast := false
 
 	for i, r := range raw {
 		rawToExp[i] = len(exp)
+		if r == '\r' {
+			continue
+		}
 		var st lipgloss.Style
-		if i < len(rawStyles) {
-			st = rawStyles[i]
+		var tok syntax.Token
+		if i < len(rawTokens) {
+			tok = rawTokens[i]
+			if !haveLast || tok != lastToken {
+				lastToken = tok
+				lastStyle = m.syn.StyleFor(tok)
+				haveLast = true
+			}
+			st = lastStyle
 		}
 		if r == '\t' {
 			for k := 0; k < m.cfg.Editor.TabWidth; k++ {
 				exp = append(exp, ' ')
 				expStyles = append(expStyles, st)
+				expTokens = append(expTokens, tok)
 			}
 		} else {
 			exp = append(exp, r)
 			expStyles = append(expStyles, st)
+			expTokens = append(expTokens, tok)
 		}
 	}
 	rawToExp[len(raw)] = len(exp)
@@ -2045,12 +2361,13 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 	}
 	var matches []matchInfo
 	if len(m.searchQuery) > 0 {
-		qLen := len(m.searchQuery)
-		matchCols := findMatchesInRunes(raw, m.searchQuery)
-		for _, col := range matchCols {
-			expStart := rawToExp[col]
-			expEnd := rawToExp[col+qLen]
-			isCur := (ln == t.buf.CurLine() && col == t.buf.Col())
+		curCol := t.buf.Col()
+		for _, sm := range m.matchRanges(raw) {
+			expStart := rawToExp[sm.col]
+			expEnd := rawToExp[sm.col+sm.length]
+			// The current match is the one the cursor sits anywhere inside,
+			// not only at its first rune.
+			isCur := ln == t.buf.CurLine() && sm.col <= curCol && curCol < sm.col+sm.length
 			matches = append(matches, matchInfo{start: expStart, end: expEnd, isCur: isCur})
 		}
 	}
@@ -2117,10 +2434,25 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 		}
 	}
 
+	var bracketCols []int
+	if activePane && t.hasDelimMatch {
+		if ln == t.delimMatch.FromLine && t.delimMatch.FromCol < len(rawToExp) {
+			bracketCols = append(bracketCols, rawToExp[t.delimMatch.FromCol])
+		}
+		if ln == t.delimMatch.ToLine && t.delimMatch.ToCol < len(rawToExp) {
+			bracketCols = append(bracketCols, rawToExp[t.delimMatch.ToCol])
+		}
+	}
+
+	// Paint the line in runs of equal style: a lipgloss render per character
+	// costs thousands of calls per frame, a render per run a handful.
 	var out strings.Builder
+	runStart := start
+	runStyle := lipgloss.Style{}
+	runKey := 0
 	for i := start; i < end; i++ {
-		r := exp[i]
 		st := expStyles[i]
+		key := styleKey(expTokens, i)
 
 		for _, mi := range matches {
 			if i >= mi.start && i < mi.end {
@@ -2129,16 +2461,29 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 				} else {
 					st = matchStyle
 				}
+				key = matchStyleKey
+				break
+			}
+		}
+
+		isBracket := false
+		for _, bcol := range bracketCols {
+			if i == bcol {
+				st = bracketMatchStyle
+				key = bracketMatchStyleKey
+				isBracket = true
 				break
 			}
 		}
 
 		if selStart >= 0 && i >= selStart && i < selEnd {
 			st = selectionStyle
+			key = selectionStyleKey
 		} else {
 			for _, rng := range selRanges {
 				if i >= rng[0] && i < rng[1] {
 					st = selectionStyle
+					key = selectionStyleKey
 					break
 				}
 			}
@@ -2146,12 +2491,30 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 
 		for _, cc := range carets {
 			if i == cc {
-				st = cursorStyle
+				if isBracket {
+					st = bracketMatchStyle.Reverse(true)
+				} else {
+					st = cursorStyle
+				}
+				key = cursorStyleKey
 				break
 			}
 		}
 
-		out.WriteString(st.Render(string(r)))
+		if i == start {
+			runStyle = st
+			runKey = key
+			continue
+		}
+		if key != runKey {
+			out.WriteString(runStyle.Render(string(exp[runStart:i])))
+			runStart = i
+			runStyle = st
+			runKey = key
+		}
+	}
+	if end > start {
+		out.WriteString(runStyle.Render(string(exp[runStart:end])))
 	}
 
 	// Cursor(s) at end of line
@@ -2266,14 +2629,29 @@ func (m Model) palettePanel() []string {
 	}
 	rows := make([]string, 0, len(displayHits)+1)
 	for i, hit := range displayHits {
-		label := fmt.Sprintf(" %s — %s ", m.cmdTitle(hit), m.cmdDesc(hit))
+		title := m.cmdTitle(hit)
+		desc := m.cmdDesc(hit)
+		label := " " + title + " "
+		if desc != "" {
+			label = " " + title + " — " + desc + " "
+		}
+		switch hit.kind {
+		case paletteKindFile:
+			label = "[" + m.t("palette.file") + "] " + label
+		case paletteKindSetting:
+			label = "[" + m.t("palette.setting") + "] " + label
+		}
 		if m.paletteOffset+i == m.paletteSel {
 			rows = append(rows, statusHiStyle.Render(label))
 		} else {
 			rows = append(rows, statusStyle.Render(label))
 		}
 	}
-	line := statusHiStyle.Render(" > ") + statusStyle.Render(string(m.paletteQ)) + cursorStyle.Render(" ")
+	prompt := " > "
+	if m.paletteAll {
+		prompt = " " + m.t("palette.everywhere") + " > "
+	}
+	line := statusHiStyle.Render(prompt) + statusStyle.Render(string(m.paletteQ)) + cursorStyle.Render(" ")
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -2284,6 +2662,10 @@ func (m Model) palettePanel() []string {
 
 func (m Model) statusBar() string {
 	t := m.activeTab()
+	if t == nil {
+		// no open file (e.g. directory opened without an untitled tab)
+		t = &tab{buf: buffer.New(), lineEnding: "lf", encoding: "utf-8"}
+	}
 	// In a split each pane draws its own status line (name, Ln/Col, file
 	// format) at the bottom of its cell, so the app-wide line must not repeat
 	// that per-file state.
@@ -2308,14 +2690,14 @@ func (m Model) statusBar() string {
 	if !perPane && t.path != "" {
 		endings := map[string]string{"lf": "LF", "crlf": "CRLF"}
 		enc := strings.ToUpper(t.encoding)
-		fileInfo = endings[t.lineEnding] + " " + enc + " "
-		if lang := syntax.Lang(t.path); lang != "" {
-			langTag = lang + " "
+		fileInfo = " " + endings[t.lineEnding] + " " + enc + " "
+		if lang := t.lang(); lang != "" {
+			langTag = lang
 		}
 	}
 	hint := ""
-	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gotoOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
-		hint = m.t("status.f1_help")
+	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gotoOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !m.projSearchOpen && !m.lspRenameOpen && !m.lspActionsOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
+		hint = m.t("")
 		if m.layout != splitNone {
 			hint += m.t("status.f8_pane")
 		}

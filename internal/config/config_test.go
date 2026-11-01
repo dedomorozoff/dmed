@@ -499,6 +499,16 @@ func TestUnconfiguredGatesTheFreeFallback(t *testing.T) {
 	if aim.Unconfigured() {
 		t.Error("a hand-tuned endpoint must disable the fallback")
 	}
+	aim = Defaults().AI
+	aim.ModelsPath = "/v2"
+	if aim.Unconfigured() {
+		t.Error("a hand-tuned model list must disable the fallback")
+	}
+	aim = Defaults().AI
+	aim.SystemPrompt = "You are my private agent"
+	if aim.Unconfigured() {
+		t.Error("a custom prompt is a decision too")
+	}
 	if !Defaults().AI.FreeFallback {
 		t.Error("the fallback should be available out of the box")
 	}

@@ -2,7 +2,9 @@ package plugin
 
 import (
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"dmed/internal/bundled"
 )
@@ -269,5 +271,64 @@ func TestBundledStoreComplete(t *testing.T) {
 		if src := bundled.Source(p.File); src == "" {
 			t.Errorf("bundled plugin %q has no embedded source", p.File)
 		}
+	}
+}
+
+// TestManagerInvokeTimeout: a handler with an infinite loop returns after the
+// budget instead of hanging the editor forever, and the status bar explains.
+func TestManagerInvokeTimeout(t *testing.T) {
+	dir := t.TempDir()
+	writePlug(t, dir, "spin.lua", `
+dmed.on_key("ctrl+s", function()
+  while true do end
+end)
+`)
+	m := New()
+	m.timeout = 300 * time.Millisecond
+	if errs := m.Load(dir); len(errs) > 0 {
+		t.Fatalf("load errors: %v", errs)
+	}
+	h := &fakeHost{}
+	start := time.Now()
+	_ = m.RunBinding(h, "ctrl+s")
+	if el := time.Since(start); el > 5*time.Second {
+		t.Fatalf("the spinning handler did not stop in time: %v", el)
+	}
+	if !strings.Contains(h.status, "deadline exceeded") {
+		t.Fatalf("status = %q, want a timeout notice", h.status)
+	}
+	// The VM stays usable after an aborted call: the next handler runs.
+	writePlug(t, dir, "after.lua", `
+dmed.on_key("ctrl+s", function()
+  dmed.set_text("still alive")
+end)
+`)
+	if errs := m.Load(dir); len(errs) > 0 {
+		t.Fatalf("reload errors: %v", errs)
+	}
+	m.RunBinding(h, "ctrl+s")
+	want := "still alive"
+	if h.text != want {
+		t.Fatalf("after timeout the VM ran no next handler: %q", h.text)
+	}
+}
+
+// TestManagerLoadTimeout: a plugin whose top level spins fails to load
+// instead of freezing startup.
+func TestManagerLoadTimeout(t *testing.T) {
+	dir := t.TempDir()
+	writePlug(t, dir, "spin.lua", "while true do end")
+	m := New()
+	m.timeout = 300 * time.Millisecond
+	start := time.Now()
+	errs := m.Load(dir)
+	if len(errs) == 0 {
+		t.Fatal("expected a load error for the spinning plugin")
+	}
+	if el := time.Since(start); el > 5*time.Second {
+		t.Fatalf("loading did not stop in time: %v", el)
+	}
+	if len(m.Names()) != 0 {
+		t.Fatalf("the timed-out plugin must not load: %v", m.Names())
 	}
 }

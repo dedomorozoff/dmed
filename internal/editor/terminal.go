@@ -82,11 +82,10 @@ func (m *Model) ensureShell() {
 		Width: width, Height: height,
 	})
 	if err != nil {
-		m.msg = "terminal: " + err.Error()
+		m.msg = m.t("term.error", err.Error())
 		return
 	}
-	m.termGen++
-	gen := m.termGen
+	gen := bumpGen(&m.termGen)
 	m.termSession = term
 	m.termVT = vt10x.New(vt10x.WithSize(width, height))
 	m.termCh = make(chan terminalOutputMsg, 64)
@@ -158,7 +157,7 @@ func (m *Model) toggleTerminal() tea.Cmd {
 }
 
 func (m *Model) killTerminal() {
-	m.termGen++
+	bumpGen(&m.termGen)
 	if m.termSession != nil {
 		_ = m.termSession.Close()
 	}
@@ -272,7 +271,7 @@ func (m *Model) forwardTerminalMouseEvent(button, x, y int, final byte) {
 func (m *Model) handleTerm(msg tea.KeyPressMsg) tea.Cmd {
 	if data := terminalKeyBytes(msg); len(data) > 0 && m.termSession != nil {
 		if _, err := m.termSession.Write(data); err != nil {
-			m.msg = "terminal: " + err.Error()
+			m.msg = m.t("term.error", err.Error())
 		}
 	}
 	return nil

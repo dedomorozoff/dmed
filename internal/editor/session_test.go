@@ -77,6 +77,61 @@ func TestSessionCursorSaveAndRestore(t *testing.T) {
 	}
 }
 
+func TestSkipFileHidesSessionState(t *testing.T) {
+	dir := t.TempDir()
+	writeTemp(t, dir, ".dmed_session.json", `{"files":["a"]}`)
+	writeTemp(t, dir, "a.txt", "needle\n")
+
+	skip := newProjectSkipFor(nil)
+	if !skip.skipFile(filepath.Join(dir, ".dmed_session.json"), 10) {
+		t.Fatal("the session file must be skipped from project walks")
+	}
+	sm := newSearchMatcher([]rune("needle"), false)
+	var hits int
+	_ = searchProject(dir, skip, sm, func(rel string, ln int, line []rune, ms []searchMatch) bool {
+		hits += len(ms)
+		return true
+	})
+	if hits != 1 {
+		t.Fatalf("want exactly the a.txt hit, got %d", hits)
+	}
+}
+
+func TestSessionBookmarksSaveAndRestore(t *testing.T) {
+	dir := t.TempDir()
+	f1 := writeTemp(t, dir, "doc1.txt", "one\ntwo\nthree\n")
+	absF1, _ := filepath.Abs(f1)
+
+	// First run: bookmark lines 1 and 3 (1-based), save.
+	m := New(f1)
+	m.root = dir
+	m.toggleBookmarkAt(0)
+	m.toggleBookmarkAt(2)
+	m.saveSession()
+
+	loaded, err := session.Load(session.DefaultPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bm := loaded.Bookmarks[absF1]
+	if len(bm) != 2 || bm[0] != 1 || bm[1] != 3 {
+		t.Fatalf("saved bookmarks: %+v", loaded.Bookmarks)
+	}
+
+	// Second run: opening the project directory restores the bookmarks.
+	m2 := New(dir)
+	set := m2.bookmarks[absF1]
+	if len(set) != 2 || !set[1] || !set[3] {
+		t.Fatalf("restored bookmarks: %+v", set)
+	}
+	// Jumping still works on the restored set.
+	m2.cur().buf.SetCursor(2, 0)
+	m2.jumpBookmark(-1)
+	if got := m2.cur().buf.CurLine() + 1; got != 1 {
+		t.Fatalf("jump after restore landed on line %d, want 1", got)
+	}
+}
+
 func TestSessionRestoresOnProjectOpen(t *testing.T) {
 	dir := t.TempDir()
 	f1 := writeTemp(t, dir, "doc1.txt", "a\nb\nc\n")

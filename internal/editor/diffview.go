@@ -53,7 +53,7 @@ func (m *Model) openDiffView() {
 	if t := m.tabByPath(abs); t != nil {
 		right = t.buf.Text()
 	} else if data, rerr := os.ReadFile(abs); rerr == nil {
-		right = strings.ReplaceAll(string(data), "\r\n", "\n")
+		right = strings.ReplaceAll(strings.ReplaceAll(string(data), "\r\n", "\n"), "\r", "\n")
 	} else {
 		m.msg = "cannot read: " + fs.Path
 		return

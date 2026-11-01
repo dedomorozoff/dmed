@@ -14,7 +14,6 @@ import (
 	"dmed/internal/config"
 	"dmed/internal/dap"
 	"dmed/internal/dbgp"
-	"dmed/internal/syntax"
 )
 
 // debugBackend is the transport surface the debug panel needs: DAP adapters
@@ -215,7 +214,7 @@ func (m Model) dapLangPreset() (config.DebugConfig, bool) {
 	if t == nil || t.path == "" {
 		return config.DebugConfig{}, false
 	}
-	preset, ok := dapLangPresets[syntax.Lang(t.path)]
+	preset, ok := dapLangPresets[t.lang()]
 	if !ok {
 		return config.DebugConfig{}, false
 	}
@@ -530,7 +529,7 @@ func (m Model) dapProgram() string {
 		if filepath.Ext(t.path) == ".php" {
 			return t.path
 		}
-		switch syntax.Lang(t.path) {
+		switch t.lang() {
 		case "js", "jsx", "ts":
 			// Node runs an entry file, not a package directory; only
 			// fall back to the directory when the tab is a folder.
@@ -805,7 +804,7 @@ func (m *Model) startDebugging() tea.Cmd {
 	if m.dapBusy || (m.dapClient != nil && m.dapRunState != dapEnded) {
 		return nil // already launching/running
 	}
-	m.dapGen++
+	bumpGen(&m.dapGen)
 	m.dapRunState = dapLaunch
 	m.dapBusy = true
 	if dc, ok := m.dapLangPreset(); ok {
@@ -822,7 +821,7 @@ func (m *Model) startDebugging() tea.Cmd {
 
 // stopDebugging disconnects the session and tears the adapter down. Shift+F5.
 func (m *Model) stopDebugging() tea.Cmd {
-	m.dapGen++
+	bumpGen(&m.dapGen)
 	m.dapRunState = dapIdle
 	m.dapBusy = false
 	return m.dapRelease()
@@ -1020,7 +1019,7 @@ func (m *Model) dapSetSel(i int) {
 	if total == 0 {
 		i = 0
 	} else {
-		i = maxInt(i, 0)
+		i = max(i, 0)
 		if i > total-1 {
 			i = total - 1
 		}
@@ -1039,7 +1038,7 @@ func (m *Model) dapSetSel(i int) {
 // the ends.
 func (m *Model) dapMoveSelCmd(d int) tea.Cmd {
 	idx, total := m.dapSelList()
-	return m.dapSetSelCmd((idx + d + total) % maxInt(total, 1))
+	return m.dapSetSelCmd((idx + d + total) % max(total, 1))
 }
 
 // dapMoveSelPageCmd jumps one screenful of the focused list. Unlike a one-step

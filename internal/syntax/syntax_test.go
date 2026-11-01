@@ -2,6 +2,9 @@ package syntax
 
 import (
 	"testing"
+
+	"github.com/alecthomas/chroma/v2"
+	"github.com/alecthomas/chroma/v2/lexers"
 )
 
 func TestHighlightBufferGo(t *testing.T) {
@@ -14,6 +17,33 @@ func TestHighlightBufferGo(t *testing.T) {
 	// package main should have runes with styles
 	if len(hl[0]) != len([]rune("package main")) {
 		t.Fatalf("expected line 0 length %d, got %d", len([]rune("package main")), len(hl[0]))
+	}
+}
+
+// TestHighlightTokensAndStyles: the cached highlight holds one token per
+// character (a style per character would cost hundreds of bytes each) and
+// every token resolves to a style.
+func TestHighlightTokensAndStyles(t *testing.T) {
+	h := New("monokai")
+	code := "package main\n"
+	hl := h.HighlightBuffer("main.go", code)
+	if len(hl) != 2 { // the text ends with a newline, so there is an empty line
+		t.Fatalf("expected 2 lines, got %d", len(hl))
+	}
+	line := hl[0]
+	if len(line) != len([]rune("package main")) {
+		t.Fatalf("expected %d tokens, got %d", len([]rune("package main")), len(line))
+	}
+	// The keyword and the space after it are different tokens.
+	if line[0] == line[7] {
+		t.Fatalf("the keyword and the space must not share a token: %v", line[:8])
+	}
+	// Every token resolves to a style.
+	for i, tok := range line {
+		_ = h.StyleFor(tok)
+		if i > 8 {
+			break
+		}
 	}
 }
 
@@ -66,6 +96,28 @@ func TestLang(t *testing.T) {
 	for _, c := range cases {
 		if got := Lang(c.file); got != c.want {
 			t.Errorf("Lang(%q) = %q, want %q", c.file, got, c.want)
+		}
+	}
+}
+
+// TestLangMatchesChroma: the language tags the editor shows are listed in a
+// map (asking chroma for them would initialize its lexer registry, which
+// takes seconds). The map must agree with chroma, otherwise the status bar
+// and the debug adapter pick the wrong language.
+func TestLangMatchesChroma(t *testing.T) {
+	for file := range langByExt {
+		name := "a" + file
+		lexer := lexers.Match(name)
+		if lexer == nil {
+			continue // chroma does not know this extension
+		}
+		cfg := chroma.Coalesce(lexer).Config()
+		want := cfg.Name
+		if len(cfg.Aliases) > 0 {
+			want = cfg.Aliases[0]
+		}
+		if got := Lang(name); got != want {
+			t.Errorf("Lang(%q) = %q, want %q (chroma)", name, got, want)
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/hinshun/vt10x"
 
 	"dmed/internal/agent"
@@ -20,12 +22,14 @@ import (
 	"dmed/internal/buffer"
 	"dmed/internal/config"
 	"dmed/internal/dap"
+	"dmed/internal/debug"
 	"dmed/internal/events"
 	"dmed/internal/i18n"
 	"dmed/internal/lsp"
 	"dmed/internal/plugin"
 	"dmed/internal/ptyterm"
 	"dmed/internal/session"
+	"dmed/internal/sqlitedb"
 	"dmed/internal/syntax"
 	"dmed/internal/todo"
 	"dmed/internal/vcs"
@@ -34,19 +38,35 @@ import (
 )
 
 type tab struct {
-	buf          *buffer.Buffer
-	path         string
-	syntaxCached []syntax.HighlightedLine
-	syntaxText   string
-	diffCached   vcs.FileDiff
-	diffText     string
-	blame        []vcs.BlameLine // git blame of HEAD lines; nil = not computed
-	lineEnding   string          // "lf" or "crlf"
-	encoding     string          // "utf-8", "utf-16le", "utf-16be", "latin-1"
-	wrapSegs     []wrapSeg
-	wrapW        int
-	wrapTabW     int
-	wrapText     string
+	buf            *buffer.Buffer
+	path           string
+	syntaxCached   []syntax.HighlightedLine
+	syntaxText     string
+	syntaxWant     string // text the pending pass was started for
+	syntaxPending  bool   // a highlighting pass is scheduled or running
+	syntaxComplete bool   // the cached highlight covers the whole text
+	langTag        string // cached syntax language of the file
+	langKnown      bool
+	repo           *vcs.Repo // cached repository of the file's directory
+	repoTried      bool
+	diffCached     vcs.FileDiff
+	diffText       string
+	diffWant       string          // text the pending diff was started for
+	diffPending    bool            // a diff pass is scheduled or running
+	blame          []vcs.BlameLine // git blame of HEAD lines; nil = not computed
+	lineEnding     string          // "lf" or "crlf"
+	encoding       string          // "utf-8", "utf-16le", "utf-16be", "latin-1"
+	wrapSegs       []wrapSeg
+	wrapW          int
+	wrapTabW       int
+	wrapText       string
+	foldCached     []foldRange // indentation fold blocks, cached like wrapSegs
+	foldText       string
+	foldTabW       int
+	folds          map[int]bool // folded block start lines; nil = nothing folded
+	img            *imageView   // a picture tab: decoded frames, nil = plain text
+	delimMatch     buffer.DelimiterMatch
+	hasDelimMatch  bool
 }
 
 // wrapSeg describes one screen row of a wrapped (or plain) buffer line: the
@@ -82,12 +102,17 @@ func detectFileInfo(data []byte) (lineEnding, encoding string) {
 		data = data[2:]
 	}
 
-	// Detect CRLF
-	for _, b := range data {
-		if b == '\r' {
-			lineEnding = "crlf"
+	// Detect CRLF: only treat \r\n sequences as CRLF, not lone \r
+	// (old Mac line endings or stray carriage returns).
+	hasCRLF := false
+	for i := 0; i+1 < len(data); i++ {
+		if data[i] == '\r' && data[i+1] == '\n' {
+			hasCRLF = true
 			break
 		}
+	}
+	if hasCRLF {
+		lineEnding = "crlf"
 	}
 
 	// Check for non-ASCII bytes that aren't valid UTF-8
@@ -127,16 +152,10 @@ func detectFileInfo(data []byte) (lineEnding, encoding string) {
 	return
 }
 
-// getSyntaxLines returns the highlighted lines for the tab, cached against the
-// buffer text. h comes from the model so the theme is owned by the editor
-// rather than by package-level state in internal/syntax.
-func (t *tab) getSyntaxLines(h *syntax.Highlighter) []syntax.HighlightedLine {
-	text := t.buf.Text()
-	if t.syntaxCached != nil && t.syntaxText == text {
-		return t.syntaxCached
-	}
-	t.syntaxText = text
-	t.syntaxCached = h.HighlightBuffer(t.path, text)
+// getSyntaxLines returns the highlighted lines the tab currently knows about.
+// The highlighting itself runs in the background (see syntax.go): the UI
+// thread must never wait for a whole-file re-tokenisation.
+func (t *tab) getSyntaxLines() []syntax.HighlightedLine {
 	return t.syntaxCached
 }
 
@@ -234,25 +253,42 @@ func segRowForCol(segs []wrapSeg, line, expCol int) (row, expStart int) {
 	return 0, 0
 }
 
-func (t *tab) getDiff(repo *vcs.Repo) vcs.FileDiff {
-	if t.path == "" {
-		return vcs.FileDiff{}
+// lang returns the syntax language of the tab. The name of the file does not
+// change, so the lookup (which asks chroma and touches the filesystem) must
+// not run on every frame.
+func (t *tab) lang() string {
+	if !t.langKnown {
+		t.langTag = syntax.Lang(t.path)
+		t.langKnown = true
 	}
-	r := repo
-	if r == nil || !strings.HasPrefix(t.path, r.Root) {
+	return t.langTag
+}
+
+// repoFor returns the git repository the tab belongs to: the one of the
+// editor when it covers the file, otherwise the repository of the file's
+// directory. The lookup is cached — opening a repository means touching the
+// filesystem, and the gutter asks for it on every frame.
+func (t *tab) repoFor(repo *vcs.Repo) *vcs.Repo {
+	if repo != nil && strings.HasPrefix(t.path, repo.Root) {
+		return repo
+	}
+	if !t.repoTried {
+		t.repoTried = true
 		if found, err := vcs.Open(filepath.Dir(t.path)); err == nil {
-			r = found
+			t.repo = found
 		}
 	}
-	if r == nil {
+	return t.repo
+}
+
+// getDiff returns the diff of the buffer against HEAD. The diff itself is
+// computed in the background (see gdiff.go) — it is a whole-file job and
+// would cost tens of milliseconds per keystroke on the UI thread — so this
+// only hands out the result of the last pass.
+func (t *tab) getDiff() vcs.FileDiff {
+	if t.path == "" || t.diffCached.Lines == nil {
 		return vcs.FileDiff{}
 	}
-	text := t.buf.Text()
-	if t.diffCached.Lines != nil && t.diffText == text {
-		return t.diffCached
-	}
-	t.diffText = text
-	t.diffCached = r.DiffBuffer(t.path, text)
 	return t.diffCached
 }
 
@@ -276,6 +312,14 @@ type Model struct {
 	width      int
 	height     int
 	msg        string
+	Version    string
+
+	// imgPending keeps the animation-tick chain single: every message asks for
+	// a tick and without it each of them would start another chain.
+	imgPending bool
+	// profile is the terminal's colour answer (tea.ColorProfileMsg); the picture
+	// renderer must convert to it rather than ship escapes it cannot read.
+	profile colorprofile.Profile
 
 	promptOpen      bool
 	promptIn        []rune
@@ -338,9 +382,35 @@ type Model struct {
 	searchQuery        []rune
 	searchMatchIdx     int
 	searchTotalMatches int
-	replaceOpen        bool
-	replaceWith        []rune
-	replaceFocusFind   bool
+	// searchRegex toggles regex mode (Tab in the search prompt); the compiled
+	// pattern is memoized so rendering does not recompile it per line.
+	searchRegex      bool
+	searchRe         *regexp.Regexp
+	searchReQuery    string
+	replaceOpen      bool
+	replaceWith      []rune
+	replaceFocusFind bool
+
+	// Find in project (Ctrl+Shift+F): async full-text search across the tree.
+	projSearchOpen  bool
+	projSearchInput bool // prompt mode (true) vs results navigation
+	projSearchQ     []rune
+	projSearchRegex bool
+	projSearchHits  []projHit
+	projSearchSel   int
+	projSearchOff   int
+	projSearchGen   int
+	projSearchScan  bool // a background walk is in flight
+	projSearchCh    chan projSearchMsg
+
+	// LSP rename (Ctrl+Alt+R), code actions (Ctrl+Alt+Q) and reformat
+	// (Ctrl+Alt+L, legacy fallback Ctrl+Alt+F).
+	lspRenameOpen  bool
+	lspRenameIn    []rune
+	lspActionsOpen bool
+	lspActionsSel  int
+	lspActionsOff  int
+	lspActions     []lsp.CodeAction
 
 	// Go to line
 	gotoOpen bool
@@ -393,6 +463,32 @@ type Model struct {
 	diffOffsetY     int
 	diffOffsetX     int
 
+	// SQLite browser (fullscreen view opened for a .db file)
+	sqlOpen       bool
+	sqlPath       string
+	sqlDB         *sqlitedb.DB
+	sqlTables     []sqlitedb.Entry
+	sqlTbl        int // index into sqlTables
+	sqlCols       []sqlitedb.Column
+	sqlHasRid     bool // current table has rowid → editable
+	sqlRows       [][]sqlitedb.Value
+	sqlRids       []string
+	sqlTotal      int
+	sqlOff        int // first loaded row
+	sqlLim        int // page size
+	sqlRow        int // cursor row within the page
+	sqlCol        int // cursor column within sqlCols
+	sqlOffX       int // horizontal scroll in characters
+	sqlOrder      int // order-by column index, -1 = none
+	sqlDesc       bool
+	sqlFilter     string
+	sqlFilterIn   bool // filter input active on the bottom line
+	sqlFilterBuf  []rune
+	sqlEdit       *sqlCellEdit // active cell editor, nil otherwise
+	sqlSchema     bool         // DDL view shown instead of the grid
+	sqlSchemaOffY int
+	sqlSchemaText string
+
 	// Bottom terminal panel (real PTY + ANSI screen state)
 	termOpen     bool
 	termRows     []terminalRow
@@ -425,6 +521,8 @@ type Model struct {
 	dapBreak              map[string]map[int]bool // abs path → line → true
 	dapBPVerif            map[string]map[int]bool // adapter-verified breakpoints
 	bookmarks             map[string]map[int]bool // abs path → line (1-based) → true
+	syntaxCh              chan tea.Msg            // messages of the highlighting pipeline
+	diffCh                chan tea.Msg            // messages of the git diff pipeline
 	dapCurPath            string
 	dapCurLine            int
 	dapBusy               bool
@@ -447,6 +545,8 @@ type Model struct {
 	paletteQ      []rune
 	paletteSel    int
 	paletteOffset int
+	paletteAll    bool     // "search everywhere": commands, files and settings
+	paletteFiles  []string // the project files the palette can offer
 	clipboard     string
 
 	// Language chooser
@@ -696,6 +796,21 @@ func controlByteKey(r rune, mod tea.KeyMod) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: r + 96, Mod: mod | tea.ModCtrl}
 }
 
+// isBareShift reports whether a key press event represents a bare Shift key
+// (without other character codes).
+func isBareShift(msg tea.KeyPressMsg, s string) bool {
+	if msg.Code == tea.KeyLeftShift || msg.Code == tea.KeyRightShift {
+		return true
+	}
+	if s == "leftshift" || s == "rightshift" || s == "shift" {
+		return true
+	}
+	if msg.Code == 0 && msg.Text == "" && msg.Mod == tea.ModShift {
+		return true
+	}
+	return false
+}
+
 func New(paths ...string) Model {
 	fe := make(chan string, 16)
 	m := Model{
@@ -712,6 +827,8 @@ func New(paths ...string) Model {
 		dapBreak:              map[string]map[int]bool{},
 		dapBPVerif:            map[string]map[int]bool{},
 		bookmarks:             map[string]map[int]bool{},
+		syntaxCh:              make(chan tea.Msg, 8),
+		diffCh:                make(chan tea.Msg, 8),
 		chatThreadPos:         -1,
 		chatPromptIdx:         -1,
 		todo:                  todo.New(),
@@ -725,6 +842,9 @@ func New(paths ...string) Model {
 	}); err == nil {
 		m.watcher = w
 	}
+	// Chroma parses every embedded grammar on its first lookup. Doing that
+	// in the background keeps the first frame from waiting for it.
+	go debug.CapturePanicReport(func() { syntax.Warmup() })
 
 	var files []string
 	for _, p := range paths {
@@ -748,6 +868,7 @@ func New(paths ...string) Model {
 				m.openPath(f)
 			}
 			m.restoreCursors(sess.Cursors)
+			m.restoreBookmarks(sess.Bookmarks)
 			restoreActiveTab = sess.ActiveTab
 		}
 	} else {
@@ -814,6 +935,24 @@ func (m *Model) cur() *tab {
 
 func (m *Model) openPath(rawPath string) {
 	path := normalizePath(m.baseDir(), rawPath)
+	// Refuse to load obvious binary/non-text files as text buffers: rendering
+	// them as text corrupts the UI. Images and SQLite files have their own
+	// dedicated open paths below.
+	if !looksLikeImage(path) && !sqlitePathCandidate(path) {
+		if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
+			if !isPlausibleText(path) {
+				m.msg = "binary file not supported"
+				return
+			}
+		}
+	}
+	if sqlitePathCandidate(path) {
+		if err := m.tryOpenSQLite(path); err == nil {
+			m.msg = m.t("msg.sqlite_opened", filepath.Base(path))
+			return
+		}
+		// Not (readable as) SQLite: fall through to the plain text open.
+	}
 	data, err := os.ReadFile(path)
 	t := tab{path: path, buf: buffer.New(), lineEnding: "lf", encoding: "utf-8"}
 	if err != nil {
@@ -826,7 +965,23 @@ func (m *Model) openPath(rawPath string) {
 		le, enc := detectFileInfo(data)
 		t.lineEnding = le
 		t.encoding = enc
-		t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
+		// A picture is opened as a picture, and only if the decoder agrees: a
+		// .png that is not one falls through to the text view below with the
+		// reason in the status line, because a tab full of mojibake and no
+		// explanation is worse than either. The extension is the cheap first
+		// question and the bytes are the real one, so a picture named without
+		// a suffix still opens as text — attempting a decode on every file the
+		// editor opens is the wrong question to ask of a log.
+		if looksLikeImage(path) {
+			if v, err2 := loadImage(data); err2 == nil {
+				t.img = v
+			} else {
+				m.msg = m.t("msg.image_failed", err2.Error())
+			}
+		}
+		if t.img == nil {
+			t.buf = buffer.Load(normalizePaste(string(data)))
+		}
 	}
 	if m.watcher != nil && path != "" {
 		if err := m.watcher.Watch(path); err != nil {
@@ -844,7 +999,8 @@ func (m *Model) openPath(rawPath string) {
 		m.plugins.Emit(m, "file_open")
 	}
 	// Hint when this file's language needs an LSP server that isn't installed.
-	if err == nil {
+	// A picture asks no LSP questions: the buffer behind it is empty by design.
+	if err == nil && t.img == nil {
 		if hint := m.lspMissingHintFor(t.path); hint != "" {
 			m.msg = m.t("msg.lsp_missing", hint)
 		}
@@ -1037,6 +1193,12 @@ func (m *Model) pasteInput(text string) {
 			m.searchQuery = append(m.searchQuery, []rune(text)...)
 			m.updateSearchMatches(false)
 		}
+		return
+	case m.projSearchOpen && m.projSearchInput:
+		m.projSearchQ = append(m.projSearchQ, []rune(text)...)
+		return
+	case m.lspRenameOpen:
+		m.lspRenameIn = append(m.lspRenameIn, []rune(text)...)
 		return
 	case m.finderOpen:
 		m.finderQ = append(m.finderQ, []rune(text)...)
@@ -1317,11 +1479,45 @@ func waitForFileEvent(ch <-chan string) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh), waitForDAPEvent(m.dapCh))
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh), waitForDAPEvent(m.dapCh), waitForSyntax(m.syntaxCh), waitForDiff(m.diffCh))
 }
 
+// Update handles a message and keeps the background highlighting in step
+// with the buffers: a stale highlight is recomputed off the UI thread, so
+// typing never waits for a whole-file re-tokenisation.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	mdl, cmd := m.update(msg)
+	mm, ok := mdl.(Model)
+	if !ok {
+		return mdl, cmd
+	}
+	mm.requestSyntax()
+	mm.requestDiff()
+	return mm, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case diffPassMsg:
+		// The buffer had time to settle: start the diff pass if the text is
+		// still the one the wait was started for.
+		m.runDiff(msg.tabIdx, m.tabs[msg.tabIdx].repoFor(m.repo))
+		return m, waitForDiff(m.diffCh)
+	case diffReadyMsg:
+		// A background diff landed: keep it if it still matches the buffer
+		// and arm the waiter for the next one.
+		m.applyDiff(msg)
+		return m, waitForDiff(m.diffCh)
+	case syntaxPassMsg:
+		// The buffer had time to settle: start the pass if the text is still
+		// the one the wait was started for, otherwise wait again.
+		m.runSyntax(msg.tabIdx)
+		return m, waitForSyntax(m.syntaxCh)
+	case syntaxReadyMsg:
+		// A background pass landed: keep it if it still matches the buffer
+		// and arm the waiter for the next one.
+		m.applySyntax(msg)
+		return m, waitForSyntax(m.syntaxCh)
 	case FileChangedMsg:
 		path := msg.Path
 		// Hot-reload config when .dmed.conf changes
@@ -1353,16 +1549,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			absT, _ := filepath.Abs(t.path)
 			if absT == path || t.path == path {
+				// A picture tab reloads as a picture — and falls back to text
+				// with the reason if the file stopped being one. Letting the
+				// bytes through to the buffer is the one place a re-decoded
+				// picture silently becomes mojibake again, and conflict mode
+				// is meaningless when the user cannot edit what is on screen.
+				if t.img != nil {
+					t.img = nil
+					if data, err := os.ReadFile(t.path); err == nil {
+						if v, err2 := loadImage(data); err2 == nil {
+							t.img = v
+						} else {
+							t.buf = buffer.Load(normalizePaste(string(data)))
+							m.msg = m.t("msg.image_failed", err2.Error())
+						}
+					}
+					break
+				}
 				if !t.buf.Dirty() {
 					if data, err := os.ReadFile(t.path); err == nil {
-						t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
+						t.buf = buffer.Load(normalizePaste(string(data)))
 						t.syntaxCached = nil
 						t.diffText = ""
 						m.msg = m.t("msg.reloaded_name", t.name(m.baseDir()))
 					}
 				} else {
 					if data, err := os.ReadFile(t.path); err == nil {
-						diskText := strings.ReplaceAll(string(data), "\r\n", "\n")
+						diskText := normalizePaste(string(data))
 						bufText := t.buf.Text()
 						m.conflictRows = vcs.SideBySide(bufText, diskText)
 						m.conflictLeftLines = strings.Split(strings.TrimRight(bufText, "\n"), "\n")
@@ -1398,6 +1611,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.height = msg.Height
 		}
 		m.resizeTerminal()
+	case tea.ColorProfileMsg:
+		// The terminal's colour range: the picture renderer converts every
+		// pixel to it. A profile nobody delivered falls back to Detect at
+		// draw time.
+		m.profile = msg.Profile
+	case imgFrameMsg:
+		// The tick clears its own pending flag, then the tail either advances
+		// the animation (it is still on screen) or lets the chain die — and
+		// schedules the next frame either way.
+		m.imgPending = false
+		if m.animationDelay() > 0 {
+			m.advanceFrame()
+		}
 	case terminalOutputMsg:
 		if msg.gen != m.termGen {
 			return m, nil
@@ -1411,7 +1637,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.termVT.Unlock()
 		}
 		if msg.exited {
-			m.msg = "terminal: process exited"
+			m.msg = m.t("term.exited")
 		}
 		return m, waitForTermOutput(m.termCh)
 	case terminalExitMsg:
@@ -1420,8 +1646,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.termSession = nil
 		if msg.err != nil && !strings.Contains(strings.ToLower(msg.err.Error()), "killed") {
-			m.msg = "terminal: " + msg.err.Error()
+			m.msg = m.t("term.error", msg.err.Error())
 		}
+	case projSearchMsg:
+		m.handleProjSearchMessage(msg)
+		return m, waitForProjSearch(m.projSearchCh)
 	case ChatOutputMsg:
 		if msg.Gen != m.chatGen {
 			return m, nil // stale event from a cancelled/cleared conversation
@@ -1541,7 +1770,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateStatusHover(msg)
 	case tea.PasteMsg:
 		if text := msg.String(); text != "" {
-			if m.termOpen && m.termSession != nil {
+			if t := m.cur(); t != nil && t.img != nil {
+				// A paste arrives as one message carrying the whole text, so a
+				// check written for key presses alone would miss it entirely.
+				m.msg = m.t("msg.image_readonly")
+			} else if m.termOpen && m.termSession != nil {
 				_, _ = m.termSession.Write([]byte(strings.ReplaceAll(text, "\r\n", "\r")))
 			} else {
 				m.pasteInput(text)
@@ -1589,6 +1822,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.clampScroll()
 		}
+	case lspRenameMsg:
+		m.handleLspRenameMsg(msg)
+	case lspActionsMsg:
+		m.handleLspActionsMsg(msg)
+	case agentUndoMsg:
+		m.handleAgentUndoMsg(msg)
+	case lspFormatMsg:
+		m.handleLspFormatMsg(msg)
 	case pluginStoreMsg:
 		m.storeLoading = false
 		if msg.err != nil {
@@ -1683,7 +1924,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyDapBPSyncs([]dapBPSyncMsg{msg})
 	}
 	m.clampScroll()
-	return m, nil
+	// The animation chain asks once per message: something may have brought a
+	// picture on screen, so the next frame gets scheduled from here — not from
+	// every branch of this switch.
+	return m, m.animCmd()
 }
 
 func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -1698,7 +1942,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			msg = controlByteKey(r, msg.Mod)
 		}
 	} else if msg.Text == "" && msg.Code < 32 && !c0Special(msg.Code) {
-		msg = controlByteKey(msg.Code, msg.Mod)
+		if !(msg.Code == 0 && msg.Mod == tea.ModShift) {
+			msg = controlByteKey(msg.Code, msg.Mod)
+		}
 	}
 	// Normalize Russian ЙЦУКЕН → English QWERTY for layout-independent keys.
 	// Use []rune so multi-byte UTF-8 (Cyrillic) inputs don't leave trailing NULs.
@@ -1745,19 +1991,25 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	}
 
-	// JetBrains-style double Shift opens the palette ("search everywhere").
+	// JetBrains-style double Shift opens "search everywhere": commands,
+	// project files and settings in one list.
 	// Bare modifier presses are only reported by terminals with the Kitty
-	// keyboard protocol / Windows Console API; elsewhere this is a no-op.
-	if !msg.IsRepeat && (msg.Code == tea.KeyLeftShift || msg.Code == tea.KeyRightShift) {
-		now := time.Now()
-		if now.Sub(m.lastShiftTime) <= doubleShiftInterval && !m.lastShiftTime.IsZero() {
-			m.lastShiftTime = time.Time{}
-			m.startPalette()
-			return nil
+	// keyboard protocol or Win32 Input Mode; elsewhere this is a no-op.
+	if isBareShift(msg, s) {
+		if !msg.IsRepeat {
+			now := time.Now()
+			if now.Sub(m.lastShiftTime) <= doubleShiftInterval && !m.lastShiftTime.IsZero() {
+				m.lastShiftTime = time.Time{}
+				m.startSearchEverywhere()
+				return nil
+			}
+			m.lastShiftTime = now
 		}
-		m.lastShiftTime = now
 		return nil
 	}
+	// Any non-Shift key resets double-shift detection so chords or typing
+	// between Shift taps don't accidentally trigger the palette.
+	m.lastShiftTime = time.Time{}
 
 	// While the completion popup is open, navigation keys control it.
 	if m.complOpen && m.handleCompletionKey(s) {
@@ -1774,7 +2026,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.msg = m.t("msg.copied")
 			return nil
 		}
-		return m.requestQuit()
+		// Ctrl+C never quits: an editor that dies on the key a terminal
+		// uses to interrupt a program is a trap. Ctrl+Q is the way out.
+		m.msg = m.t("msg.quit_hint")
+		return nil
 	case "ctrl+w":
 		return m.closeActiveTab()
 	case "ctrl+x":
@@ -1786,7 +2041,15 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		return m.closeActiveTab()
-	case "ctrl+p", "ctrl+shift+p", "f2":
+	case "ctrl+shift+p", "alt+p":
+		// Search everywhere: commands, files and settings. The double Shift
+		// does the same, but most terminals never report a bare modifier
+		// press, and on legacy terminals Ctrl+Shift+P collapses into the
+		// Ctrl+P control byte — Alt+P (ESC+p) stays distinguishable even
+		// there, so this is the binding that always works.
+		m.startSearchEverywhere()
+		return nil
+	case "ctrl+p", "f2":
 		m.startPalette()
 		return nil
 	case "ctrl+t":
@@ -1823,6 +2086,27 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+f":
 		m.startSearch()
 		return nil
+	case "ctrl+shift+f":
+		// On legacy terminals Ctrl+Shift+F arrives as Ctrl+F (both are the
+		// control byte), so this only fires where the terminal can tell them
+		// apart; the palette command covers the rest.
+		m.startProjectSearch()
+		return nil
+	case "ctrl+alt+r":
+		m.startLspRename()
+		return nil
+	case "ctrl+alt+q":
+		return m.startLspActions()
+	case "ctrl+alt+l":
+		// JetBrains-style reformat chord (+ note: alt+l alone toggles the
+		// agent panel). Layout is the language server's job, not a reindent:
+		// reach textDocument/formatting where the terminal lets ctrl+alt
+		// through, palette command covers the rest.
+		return m.lspFormatCmd()
+	case "ctrl+alt+f":
+		// Same reformat, the pre-JetBrains chord kept as a fallback for
+		// terminals that mangle ctrl+alt+L (ctrl+L alone is goto-line).
+		return m.lspFormatCmd()
 	case "ctrl+h":
 		m.startReplace()
 		return nil
@@ -1896,7 +2180,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 				absT, _ := filepath.Abs(t.path)
 				if absT == m.conflictPath || t.path == m.conflictPath {
 					if data, err := os.ReadFile(t.path); err == nil {
-						t.buf = buffer.Load(strings.ReplaceAll(string(data), "\r\n", "\n"))
+						t.buf = buffer.Load(normalizePaste(string(data)))
 						t.syntaxCached = nil
 						t.diffText = ""
 						m.msg = m.t("msg.reloaded")
@@ -1950,6 +2234,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.diffViewOpen {
 		return m.handleDiffView(msg)
+	}
+	if m.sqlOpen {
+		return m.handleSqlite(msg)
 	}
 	if m.agentReviewMode {
 		return m.handleAgentReview(msg)
@@ -2007,6 +2294,19 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.treeFocus {
 		return m.handleTree(msg)
+	}
+	// The LSP rename input and the quick-fix list own their keys (bottom
+	// overlays like the search prompt).
+	if m.lspRenameOpen {
+		return m.handleLspRename(msg)
+	}
+	if m.lspActionsOpen {
+		return m.handleLspActions(msg)
+	}
+	// Find in Project owns its keys first: it is a bottom overlay like the
+	// finder, and its Enter must not jump the file-search cursor underneath.
+	if m.projSearchOpen {
+		return m.handleProjSearch(msg)
 	}
 	if m.dapOpen {
 		return m.handleDap(msg)
@@ -2075,6 +2375,14 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.dismissGhost()
 		}
 	}
+	// A picture tab owns its keys first: nothing may reach the buffer, because a
+	// keypress that did would type into an empty document the user cannot see,
+	// and the first Ctrl+S would then replace the picture with what they typed.
+	// handleImageKey answers what is about the workspace (tab switching,
+	// scrolling, hunk jumps) and drops the rest.
+	if t := m.cur(); t != nil && t.img != nil {
+		return m.handleImageKey(s)
+	}
 	switch s {
 	case "ctrl+space":
 		return m.triggerCompletion(true)
@@ -2105,6 +2413,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.toggleWordWrap()
 	case "alt+b":
 		return m.toggleBlame()
+	case "alt+c":
+		m.foldCloseAtCursor()
+	case "alt+o":
+		m.foldOpenAtCursor()
 	case "ctrl+z":
 		if m.cur().buf.Undo() {
 			m.msg = ""
@@ -2177,12 +2489,14 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		} else {
 			m.cur().buf.MoveUp()
 		}
+		m.foldSkip(-1)
 	case "down":
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MoveAllDown()
 		} else {
 			m.cur().buf.MoveDown()
 		}
+		m.foldSkip(1)
 	case "left":
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MoveAllLeft()
@@ -2203,17 +2517,19 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		t := m.cur()
 		for i := 0; i < m.paneViewHeight(m.activePane)-2 && t.buf.CurLine() > 0; i++ {
 			t.buf.MoveUp()
+			m.foldSkip(-1)
 		}
 	case "pgdown":
 		t := m.cur()
 		for i := 0; i < m.paneViewHeight(m.activePane)-2 && t.buf.CurLine() < t.buf.LineCount()-1; i++ {
 			t.buf.MoveDown()
+			m.foldSkip(1)
 		}
 	case "enter":
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MultiNewline()
 		} else {
-			m.cur().buf.InsertNewline()
+			m.cur().buf.IndentedNewline(m.smartIndent())
 		}
 		m.msg = ""
 		if m.ai != nil {
@@ -2222,7 +2538,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "backspace":
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MultiBackspace()
-		} else {
+		} else if !deletePair(m.cur().buf) {
 			m.cur().buf.Backspace()
 		}
 		m.msg = ""
@@ -2237,8 +2553,16 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "tab":
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MultiInsertRune('\t')
+		} else if m.cur().buf.HasSelection() {
+			// Indent the selected lines as a block, like every editor.
+			m.cur().buf.IndentLines("\t")
 		} else {
 			m.cur().buf.Insert('\t')
+		}
+		m.msg = ""
+	case "shift+tab":
+		if !m.cur().buf.HasMultipleCursors() {
+			m.cur().buf.UnindentLines("\t")
 		}
 		m.msg = ""
 	default:
@@ -2246,8 +2570,15 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			if m.cur().buf.HasMultipleCursors() {
 				m.cur().buf.MultiInsertText(msg.Text)
 			} else {
+				b := m.cur().buf
 				for _, r := range msg.Text {
-					m.cur().buf.Insert(r)
+					if b.HasSelection() {
+						// Typing over a selection replaces it; auto-close
+						// resumes on the first keystroke after the replace.
+						b.Insert(r)
+					} else {
+						insertTyped(b, r)
+					}
 				}
 			}
 			m.msg = ""
@@ -2355,37 +2686,55 @@ func (m *Model) clampScroll() {
 	if t == nil {
 		return
 	}
+	if t.img != nil {
+		// A picture's pane offset is its own scroll through the art, clamped by
+		// scrollImage. The buffer behind it is one empty line, and letting its
+		// geometry clamp here would pin every picture to the top of the pane
+		// on the next message that arrives.
+		return
+	}
 	h := m.paneViewHeight(m.activePane)
 	cur := t.buf.CurLine()
 	tabW := m.cfg.Editor.TabWidth
+	// Folding: rows are display rows (folded blocks collapsed to one hint
+	// line). A cursor that ended up on a hidden line — buffer edits shifting
+	// things around — unfolds the block that hides it first.
+	d := m.dispRows(m.activePane, m.paneContentWidth(m.activePane))
+	if dispIndexOfLine(d, cur) < 0 {
+		t.unfoldThrough(cur, tabW)
+		d = m.dispRows(m.activePane, m.paneContentWidth(m.activePane))
+	}
 	if p.wordWrap {
-		w := m.paneContentWidth(m.activePane)
-		if w > 0 && h > 0 {
-			segs := t.tabWrap(w, tabW)
-			expCol := visCol(t.buf.LineAt(cur), t.buf.Col(), tabW)
-			row, _ := segRowForCol(segs, cur, expCol)
-			if row < p.offsetY {
-				p.offsetY = row
-			}
-			if row >= p.offsetY+h {
-				p.offsetY = row - h + 1
-			}
-			if maxOff := len(segs) - h; p.offsetY > maxOff {
-				p.offsetY = maxOff
-			}
-			if p.offsetY < 0 {
-				p.offsetY = 0
-			}
+		expCol := visCol(t.buf.LineAt(cur), t.buf.Col(), tabW)
+		row := dispCursorRow(d, cur, expCol)
+		if row < p.offsetY {
+			p.offsetY = row
+		}
+		if row >= p.offsetY+h {
+			p.offsetY = row - h + 1
+		}
+		if maxOff := len(d) - h; p.offsetY > maxOff {
+			p.offsetY = maxOff
+		}
+		if p.offsetY < 0 {
+			p.offsetY = 0
 		}
 		p.offsetX = 0
 		return
 	}
-	if h > 0 {
-		if cur < p.offsetY {
-			p.offsetY = cur
+	if h > 0 && len(d) > 0 {
+		row := dispCursorRow(d, cur, 0)
+		if row < p.offsetY {
+			p.offsetY = row
 		}
-		if cur >= p.offsetY+h {
-			p.offsetY = cur - h + 1
+		if row >= p.offsetY+h {
+			p.offsetY = row - h + 1
+		}
+		if maxOff := len(d) - h; p.offsetY > maxOff {
+			p.offsetY = maxOff
+		}
+		if p.offsetY < 0 {
+			p.offsetY = 0
 		}
 	}
 	w := m.paneContentWidth(m.activePane)
@@ -2435,6 +2784,11 @@ func (m *Model) handleSearch(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "ctrl+h":
 		m.startReplace()
+	case "tab":
+		// Regex mode toggle. Applies to this prompt and to Ctrl+H replace
+		// (same query); the hint row shows the (.* state.
+		m.searchRegex = !m.searchRegex
+		m.updateSearchMatches(false)
 	case "backspace":
 		if n := len(m.searchQuery); n > 0 {
 			m.searchQuery = m.searchQuery[:n-1]
@@ -2494,8 +2848,9 @@ func (m *Model) handleReplace(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 type searchMatch struct {
-	line int
-	col  int
+	line   int // 0-based buffer line; 0 for per-line matches
+	col    int
+	length int
 }
 
 // startGotoPrompt opens the "Go to Line" input (empty; type N, N:C, or +N/-N).
@@ -2620,27 +2975,6 @@ func (m *Model) toggleWordWrap() {
 	}
 }
 
-func findMatchesInRunes(line []rune, query []rune) []int {
-	if len(query) == 0 || len(line) < len(query) {
-		return nil
-	}
-	var cols []int
-	for i := 0; i <= len(line)-len(query); i++ {
-		match := true
-		for j := 0; j < len(query); j++ {
-			if line[i+j] != query[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			cols = append(cols, i)
-			i += len(query) - 1
-		}
-	}
-	return cols
-}
-
 func (m *Model) allMatches() []searchMatch {
 	if len(m.searchQuery) == 0 {
 		return nil
@@ -2648,9 +2982,8 @@ func (m *Model) allMatches() []searchMatch {
 	t := m.cur()
 	var matches []searchMatch
 	for ln := 0; ln < t.buf.LineCount(); ln++ {
-		cols := findMatchesInRunes(t.buf.LineAt(ln), m.searchQuery)
-		for _, col := range cols {
-			matches = append(matches, searchMatch{line: ln, col: col})
+		for _, hit := range m.matchRanges(t.buf.LineAt(ln)) {
+			matches = append(matches, searchMatch{line: ln, col: hit.col, length: hit.length})
 		}
 	}
 	return matches
@@ -2709,21 +3042,23 @@ func (m *Model) doReplace() {
 	}
 	curLine := t.buf.CurLine()
 	curCol := t.buf.Col()
-	qLen := len(m.searchQuery)
 
-	onMatch := false
+	onMatch := 0
 	for _, mPos := range matches {
 		if mPos.line == curLine && mPos.col == curCol {
-			onMatch = true
+			onMatch = mPos.length
 			break
 		}
 	}
-	if !onMatch {
+	if onMatch == 0 {
 		m.updateSearchMatches(false)
 		return
 	}
 
-	t.buf.ReplaceRange(curLine, curCol, qLen, m.replaceWith)
+	// Regex mode replaces the whole matched range; literal mode replaces
+	// exactly the query length (the two only differ when the pattern has run
+	// wild, and then they are the same too).
+	t.buf.ReplaceRange(curLine, curCol, onMatch, m.replaceWith)
 	m.msg = m.t("msg.replaced_one")
 	m.updateSearchMatches(false)
 }
@@ -2733,8 +3068,23 @@ func (m *Model) doReplaceAll() {
 		return
 	}
 	t := m.cur()
-	count := t.buf.ReplaceAll(string(m.searchQuery), string(m.replaceWith))
-	m.msg = fmt.Sprintf("replaced %d occurrence(s)", count)
+	var count int
+	if m.searchRegex {
+		re := m.searchRegexCompiled()
+		if re == nil {
+			// Invalid pattern: never fall back to literal here — the user
+			// asked to replace by pattern, not by the pattern's raw text.
+			return
+		}
+		count = t.buf.ReplaceAllRE(re, string(m.replaceWith))
+	} else {
+		count = t.buf.ReplaceAll(string(m.searchQuery), string(m.replaceWith))
+	}
+	if count == 1 {
+		m.msg = m.t("msg.replaced_one")
+	} else {
+		m.msg = m.t("msg.replaced_many", count)
+	}
 	m.searchOpen = false
 	m.replaceOpen = false
 }
@@ -2744,7 +3094,7 @@ func (m *Model) jumpHunk(dir int) {
 	if t.path == "" {
 		return
 	}
-	diff := t.getDiff(m.repo)
+	diff := t.getDiff()
 	if len(diff.Hunks) == 0 {
 		m.msg = m.t("msg.no_git_changes")
 		return
@@ -2776,10 +3126,26 @@ func (m *Model) jumpHunk(dir int) {
 }
 
 func (m *Model) startPalette() {
+	m.openPalette(false)
+}
+
+// startSearchEverywhere opens the palette in the JetBrains "search
+// everywhere" mode: commands, project files and settings in one list.
+func (m *Model) startSearchEverywhere() {
+	m.openPalette(true)
+}
+
+func (m *Model) openPalette(all bool) {
 	m.paletteOpen = true
 	m.paletteQ = nil
 	m.paletteSel = 0
 	m.paletteOffset = 0
+	m.paletteAll = all
+	if all {
+		// The file list is collected once, like the file finder does: the
+		// query only filters it.
+		m.paletteFiles = collectFiles(m.baseDir(), m.cfg.Editor.SkippedDirs)
+	}
 	// Unfocus all panels so the palette receives keystrokes (the palette
 	// is lower priority than chat/agent/git in the mode-guard chain).
 	m.chatFocus = false
@@ -2860,6 +3226,7 @@ func (m *Model) saveSession() {
 		Layout:     int(m.layout),
 		ActivePane: m.activePane,
 		Cursors:    cursors,
+		Bookmarks:  m.bookmarksForSession(),
 	}
 	_ = session.Save(session.DefaultPath(m.root), sess)
 }
@@ -2893,7 +3260,17 @@ func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
 	}
 
 	editorRow := y - 1
-	ln, rawCol := m.clickPosToLineCol(m.activePane, editorRow, x)
+	ln, rawCol, d := m.clickPosToLineCol(m.activePane, editorRow, x)
+	if d.summary {
+		// Drag started on a fold summary: expand the block and drag from its
+		// start line.
+		t := m.cur()
+		if t.toggleFoldAt(d.ln, m.cfg.Editor.TabWidth) {
+			m.clampScroll()
+		}
+		ln = d.ln
+		rawCol = 0
+	}
 
 	m.cur().buf.DragSelect(ln, rawCol)
 	return nil
@@ -2981,17 +3358,14 @@ func (m Model) cursorScreenPos() (int, int) {
 	gw := m.gutterWidthForTab(t)
 	leftW := m.leftRailWidth()
 
-	screenRow := curLine
-	segStart := 0
-	if p.wordWrap {
-		w := m.paneContentWidth(m.activePane)
-		if w > 0 {
-			segs := t.tabWrap(w, m.cfg.Editor.TabWidth)
-			row, es := segRowForCol(segs, curLine, expCol)
-			screenRow = row
-			segStart = es
-		}
+	screenRow, segStart := curLine, 0
+	d := m.dispRows(m.activePane, m.paneContentWidth(m.activePane))
+	if len(d) == 0 {
+		return 0, 0
 	}
+	row := dispCursorRow(d, curLine, expCol)
+	screenRow = row
+	segStart = d[row].expStart
 
 	// X position within the pane content area.
 	paneX := gw + (expCol - (p.offsetX + segStart))

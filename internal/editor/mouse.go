@@ -203,7 +203,7 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) tea.Cmd {
 
 	// Full-screen modes replace the buffer; their content is scrolled with
 	// the wheel. A click places the cursor only in the buffer.
-	if m.diffViewOpen || m.aiReviewMode || m.agentReviewMode || m.chatReviewMode || m.conflictOpen || m.aiCfgOpen || m.helpOpen {
+	if m.diffViewOpen || m.sqlOpen || m.aiReviewMode || m.agentReviewMode || m.chatReviewMode || m.conflictOpen || m.aiCfgOpen || m.helpOpen {
 		return nil
 	}
 
@@ -478,11 +478,25 @@ func (m *Model) clickBuffer(x, y int, btn tea.MouseButton, mod tea.KeyMod) tea.C
 
 	// A click in the gutter toggles markers without moving the cursor. One
 	// shared column: left click flips a breakpoint, middle click (the wheel
-	// button) flips a bookmark.
+	// button) flips a bookmark. The fold chevron (the last cell) flips the
+	// block's folded state instead, as does the whole summary row.
 	gw := m.gutterWidthForTab(t)
 	if gx := x - leftW; gx >= 0 && gx < gw {
-		ln, _ := m.clickPosToLineCol(m.activePane, editorRow, x)
+		ln, _, d := m.clickPosToLineCol(m.activePane, editorRow, x)
 		m.lastClickValid = false // a rapid second click must not toggle twice
+		tabW := m.cfg.Editor.TabWidth
+		// The gutter's last cell is the fold column whenever the buffer has
+		// anything to fold. It only ever toggles a fold: a blank chevron cell
+		// (a line that starts no block) must not fall through to the
+		// breakpoint toggle, which lives in the marker column to its left.
+		if d.summary {
+			t.toggleFoldAt(ln, tabW) // the summary row unfolds its block
+			return nil
+		}
+		if t.hasFolds(tabW) && gx == gw-1 {
+			t.toggleFoldAt(ln, tabW)
+			return nil
+		}
 		if btn == tea.MouseMiddle {
 			m.toggleBookmarkAt(ln)
 			return nil
@@ -490,7 +504,14 @@ func (m *Model) clickBuffer(x, y int, btn tea.MouseButton, mod tea.KeyMod) tea.C
 		return m.toggleBreakpointAt(ln)
 	}
 
-	ln, rawCol := m.clickPosToLineCol(m.activePane, editorRow, x)
+	ln, rawCol, d := m.clickPosToLineCol(m.activePane, editorRow, x)
+
+	// A content click on a fold summary expands the block it stands for.
+	if d.summary {
+		t.toggleFoldAt(d.ln, m.cfg.Editor.TabWidth)
+		t.buf.SetCursor(d.ln, 0)
+		return nil
+	}
 
 	// Ctrl+Click navigates to the definition under the pointer (like Zed /
 	// VS Code), instead of moving the cursor.
@@ -521,42 +542,41 @@ func (m *Model) clickBuffer(x, y int, btn tea.MouseButton, mod tea.KeyMod) tea.C
 }
 
 // clickPosToLineCol converts a pointer at screen (x, editorRow) inside the
-// pane content into a buffer (line, raw column), accounting for word wrap
-// segments and horizontal scrolling.
-func (m Model) clickPosToLineCol(paneIdx, editorRow, x int) (int, int) {
+// pane content into a buffer (line, raw column), accounting for folding (the
+// pointer may sit on a fold summary row), word wrap segments and horizontal
+// scrolling. The returned dispRow describes the row under the pointer so the
+// caller can react to synthetic rows (toggling the fold from a summary).
+func (m Model) clickPosToLineCol(paneIdx, editorRow, x int) (int, int, dispRow) {
 	p := &m.panes[paneIdx]
 	t := &m.tabs[p.tabIdx]
 	leftW := m.leftRailWidth()
 	gw := m.gutterWidthForTab(t)
 	tabW := m.cfg.Editor.TabWidth
 
-	if p.wordWrap {
-		w := m.paneContentWidth(paneIdx)
-		if w > 0 {
-			si := editorRow + p.offsetY
-			segs := t.tabWrap(w, tabW)
-			if si >= 0 && si < len(segs) {
-				s := segs[si]
-				clickX := x - leftW - gw + s.expStart
-				if clickX < 0 {
-					clickX = 0
-				}
-				return clampLineCol(t, s.line, clickX, tabW)
-			}
-			ll := t.buf.LineCount() - 1
-			if ll < 0 {
-				ll = 0
-			}
-			return ll, t.buf.LineLen(ll)
-		}
+	disp := m.dispRows(paneIdx, m.paneContentWidth(paneIdx))
+	if len(disp) == 0 {
+		return 0, 0, dispRow{}
 	}
-
-	ln := editorRow + p.offsetY
-	clickX := x - leftW - gw + p.offsetX
+	di := editorRow + p.offsetY
+	if di >= len(disp) {
+		di = len(disp) - 1
+	}
+	if di < 0 {
+		di = 0
+	}
+	d := disp[di]
+	if d.summary {
+		return d.ln, 0, d
+	}
+	clickX := x - leftW - gw + d.expStart
+	if !p.wordWrap {
+		clickX = x - leftW - gw + p.offsetX
+	}
 	if clickX < 0 {
 		clickX = 0
 	}
-	return clampLineCol(t, ln, clickX, tabW)
+	ln, col := clampLineCol(t, d.ln, clickX, tabW)
+	return ln, col, d
 }
 
 // clampLineCol maps an expanded column to a raw buffer column on a line.
@@ -605,7 +625,7 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 				m.chatReviewOffY = 0
 			}
 			if maxOff := len(m.chatReviewRows) - 1; m.chatReviewOffY > maxOff {
-				m.chatReviewOffY = maxInt(0, maxOff)
+				m.chatReviewOffY = max(0, maxOff)
 			}
 			return nil
 		}
@@ -653,7 +673,7 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 				m.chatReviewOffY = 0
 			}
 			if maxOff := len(m.chatReviewRows) - 1; m.chatReviewOffY > maxOff {
-				m.chatReviewOffY = maxInt(0, maxOff)
+				m.chatReviewOffY = max(0, maxOff)
 			}
 			return nil
 		}
@@ -684,13 +704,17 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 		m.diffOffsetY += dir
 		m.clampDiffScroll(h)
 		return nil
+	case m.sqlOpen:
+		// The wheel moves the rows one by one, like in the buffer.
+		m.sqliteMove(dir, 0)
+		return nil
 	case m.aiReviewMode:
 		m.aiReviewOffY += dir
 		if m.aiReviewOffY < 0 {
 			m.aiReviewOffY = 0
 		}
 		if maxOff := len(m.aiReviewRows) - 1; m.aiReviewOffY > maxOff {
-			m.aiReviewOffY = maxInt(0, maxOff)
+			m.aiReviewOffY = max(0, maxOff)
 		}
 		return nil
 	case m.agentReviewMode:
@@ -699,7 +723,7 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 			m.agentReviewOffY = 0
 		}
 		if maxOff := len(m.agentReviewRows) - 1; m.agentReviewOffY > maxOff {
-			m.agentReviewOffY = maxInt(0, maxOff)
+			m.agentReviewOffY = max(0, maxOff)
 		}
 		return nil
 	case m.conflictOpen && len(m.conflictRows) > 0:
@@ -708,7 +732,7 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 			m.conflictOffY = 0
 		}
 		if maxOff := len(m.conflictRows) - 1; m.conflictOffY > maxOff {
-			m.conflictOffY = maxInt(0, maxOff)
+			m.conflictOffY = max(0, maxOff)
 		}
 		return nil
 	case m.helpOpen:
@@ -733,16 +757,15 @@ func (m *Model) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 		return m.wheelLeftRail(dir)
 	}
 
+	// A picture tab: the wheel scrolls the art with the pane's own offset.
+	if t := m.cur(); t != nil && t.img != nil {
+		m.scrollImage(dir)
+		return nil
+	}
+
 	// Buffer scroll.
 	p := m.curPane()
-	t := &m.tabs[p.tabIdx]
-	maxOff := t.buf.LineCount() - m.paneContentHeight(m.activePane)
-	if p.wordWrap {
-		w := m.paneContentWidth(m.activePane)
-		if w > 0 {
-			maxOff = len(t.tabWrap(w, m.cfg.Editor.TabWidth)) - m.paneContentHeight(m.activePane)
-		}
-	}
+	maxOff := len(m.dispRows(m.activePane, m.paneContentWidth(m.activePane))) - m.paneContentHeight(m.activePane)
 	if maxOff < 0 {
 		maxOff = 0
 	}

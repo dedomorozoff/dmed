@@ -162,7 +162,7 @@ func (m *Model) refreshGitFiles() {
 	}
 	m.gitFiles = files
 	if m.gitSel >= len(m.gitFiles) {
-		m.gitSel = maxInt(0, len(m.gitFiles)-1)
+		m.gitSel = max(0, len(m.gitFiles)-1)
 	}
 	m.clampGitScroll()
 }
@@ -237,7 +237,7 @@ func (m *Model) refreshGitDiffPreview() {
 	if t := m.tabByPath(abs); t != nil {
 		right = t.buf.Text()
 	} else if data, rerr := os.ReadFile(abs); rerr == nil {
-		right = strings.ReplaceAll(string(data), "\r\n", "\n")
+		right = strings.ReplaceAll(strings.ReplaceAll(string(data), "\r\n", "\n"), "\r", "\n")
 	}
 
 	m.diffPath = fs.Path
@@ -272,7 +272,7 @@ func (m *Model) refreshGitLog() {
 	}
 	m.gitLogEntries = entries
 	if m.gitLogSel >= len(m.gitLogEntries) {
-		m.gitLogSel = maxInt(0, len(m.gitLogEntries)-1)
+		m.gitLogSel = max(0, len(m.gitLogEntries)-1)
 	}
 	m.clampGitLogScroll()
 }
@@ -467,7 +467,7 @@ func (m *Model) branchPanel(h int) []string {
 			cell = statusHiStyle.Render(line)
 		case isCur:
 			styled := " " + gitAddStyle.Render(prefix) + name
-			cell = styled + strings.Repeat(" ", maxInt(0, gitPanelWidth-1-lipgloss.Width(styled)))
+			cell = styled + strings.Repeat(" ", max(0, gitPanelWidth-1-lipgloss.Width(styled)))
 		default:
 			cell = line
 		}
@@ -981,7 +981,7 @@ func (m *Model) handleGitLog(msg tea.KeyPressMsg) tea.Cmd {
 	case "pgdown":
 		m.gitLogSel += m.viewHeight()
 		if m.gitLogSel >= len(m.gitLogEntries) {
-			m.gitLogSel = maxInt(0, len(m.gitLogEntries)-1)
+			m.gitLogSel = max(0, len(m.gitLogEntries)-1)
 		}
 		m.clampGitLogScroll()
 		m.showLogDiff()
@@ -990,7 +990,7 @@ func (m *Model) handleGitLog(msg tea.KeyPressMsg) tea.Cmd {
 		m.clampGitLogScroll()
 		m.showLogDiff()
 	case "end":
-		m.gitLogSel = maxInt(0, len(m.gitLogEntries)-1)
+		m.gitLogSel = max(0, len(m.gitLogEntries)-1)
 		m.clampGitLogScroll()
 		m.showLogDiff()
 	case "r":

@@ -1,6 +1,9 @@
 package buffer
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 const maxUndo = 1000
 
@@ -62,7 +65,7 @@ func (b *Buffer) linesCopy() [][]rune { return b.d.lines() }
 // setLines replaces the whole document from a flat slice of lines.
 func (b *Buffer) setLines(m [][]rune) { b.d = newDoc(m) }
 
-func (b *Buffer) lineLen(i int) int { return len(b.d.lineAt(i)) }
+func (b *Buffer) lineLen(i int) int { return b.d.lineLen(i) }
 
 func (b *Buffer) pushUndo() {
 	b.undoStack = append(b.undoStack, snapshot{b.d.root, b.line, b.col})
@@ -126,6 +129,11 @@ func (b *Buffer) DragSelect(line, col int) {
 
 // LineLen returns the number of runes in the given line.
 func (b *Buffer) LineLen(i int) int { return b.lineLen(i) }
+
+// IndentWidth returns the width of the leading whitespace of the given line
+// (a tab counts as tabW columns), or -1 when the line is blank. The line is
+// read in place, so scanning a whole document stays allocation free.
+func (b *Buffer) IndentWidth(i, tabW int) int { return b.d.indentWidth(i, tabW) }
 
 func (b *Buffer) SelectionRange() (startLine, startCol, endLine, endCol int) {
 	if !b.hasSelection {
@@ -245,6 +253,55 @@ func (b *Buffer) SetCursor(line, col int) {
 	b.goalCol = b.col
 }
 
+// ReplaceSpan removes [startLine,startCol .. endLine,endCol] (rune columns,
+// both inclusive of the start / exclusive of the end) and inserts replacement,
+// which may span several lines. One undo step. Used by LSP workspace edits.
+func (b *Buffer) ReplaceSpan(startLine, startCol, endLine, endCol int, replacement string) bool {
+	mat := b.linesCopy()
+	if startLine < 0 || endLine < startLine || endLine >= len(mat) {
+		return false
+	}
+	if startCol < 0 || startCol > len(mat[startLine]) ||
+		endCol < 0 || endCol > len(mat[endLine]) {
+		return false
+	}
+	ins := splitTextLines(replacement)
+	if len(ins) == 0 {
+		ins = [][]rune{{}}
+	}
+	prefix := append([]rune(nil), mat[startLine][:startCol]...)
+	suffix := append([]rune(nil), mat[endLine][endCol:]...)
+	out := make([][]rune, 0, len(mat)-(endLine-startLine)+len(ins))
+	out = append(out, mat[:startLine]...)
+	first := append(append([]rune(nil), prefix...), ins[0]...)
+	if len(ins) == 1 {
+		out = append(out, append(first, suffix...))
+	} else {
+		out = append(out, first)
+		for _, mid := range ins[1 : len(ins)-1] {
+			out = append(out, append([]rune(nil), mid...))
+		}
+		out = append(out, append(append([]rune(nil), ins[len(ins)-1]...), suffix...))
+	}
+	out = append(out, mat[endLine+1:]...)
+
+	b.beginChange()
+	b.pushUndo()
+	b.setLines(out)
+	b.line = startLine + len(ins) - 1
+	if len(ins) == 1 {
+		b.col = startCol + len(ins[0])
+	} else {
+		b.col = len(ins[len(ins)-1])
+	}
+	if lim := b.lineLen(b.line); b.col > lim {
+		b.col = lim
+	}
+	b.goalCol = b.col
+	b.hasSelection = false
+	return true
+}
+
 func (b *Buffer) ReplaceRange(line, col, length int, replacement []rune) bool {
 	if line < 0 || line >= b.d.count() {
 		return false
@@ -298,10 +355,49 @@ func (b *Buffer) ReplaceAll(find, replace string) int {
 	return count
 }
 
+func (b *Buffer) ReplaceAllRE(re *regexp.Regexp, replace string) int {
+	if re == nil {
+		return 0
+	}
+	count := 0
+	n := b.d.count()
+	for i := 0; i < n; i++ {
+		count += len(re.FindAllStringIndex(string(b.d.lineAt(i)), -1))
+	}
+	if count == 0 {
+		return 0
+	}
+	b.beginChange()
+	b.pushUndo()
+	for i := 0; i < n; i++ {
+		str := string(b.d.lineAt(i))
+		if idx := re.FindStringIndex(str); idx != nil {
+			b.d.root = b.d.setLine(i, []rune(re.ReplaceAllString(str, replace)))
+		}
+	}
+	if b.line >= b.d.count() {
+		b.line = b.d.count() - 1
+	}
+	if b.col > b.lineLen(b.line) {
+		b.col = b.lineLen(b.line)
+	}
+	b.goalCol = b.col
+	b.hasSelection = false
+	return count
+}
+
 func (b *Buffer) Insert(r rune) {
 	if b.HasSelection() {
-		b.DeleteSelection()
-		return
+		// Typing over a selection replaces it. The delete and the insert
+		// share ONE undo step: the pre-selection snapshot is pushed here and
+		// the typing-run state below is primed so Insert does not push a
+		// second snapshot for the typed rune.
+		b.beginChange()
+		b.pushUndo()
+		b.deleteSelectionWithoutUndo()
+		b.lastWasInsert = true
+		b.lastLine = b.line
+		b.lastCol = b.col
 	}
 	grouped := b.lastWasInsert && b.line == b.lastLine && b.col == b.lastCol
 	b.breakGroup()
@@ -324,11 +420,13 @@ func (b *Buffer) Insert(r rune) {
 
 func (b *Buffer) InsertNewline() {
 	if b.HasSelection() {
-		b.DeleteSelection()
-		return
+		b.beginChange()
+		b.pushUndo()
+		b.deleteSelectionWithoutUndo()
+	} else {
+		b.beginChange()
+		b.pushUndo()
 	}
-	b.beginChange()
-	b.pushUndo()
 	l := b.d.lineAt(b.line)
 	rest := append([]rune(nil), l[b.col:]...)
 	b.d.root = b.d.setLine(b.line, l[:b.col:b.col])
@@ -336,6 +434,31 @@ func (b *Buffer) InsertNewline() {
 	b.line++
 	b.col = 0
 	b.goalCol = 0
+	b.hasSelection = false
+}
+
+// IndentedNewline splits the line at the caret like InsertNewline but gives
+// the new line a whitespace prefix (the smart-indent continuation computed by
+// the editor: current line's leading whitespace, possibly one level deeper for
+// an open bracket before the caret). One undo step.
+func (b *Buffer) IndentedNewline(indent string) {
+	if b.HasSelection() {
+		b.beginChange()
+		b.pushUndo()
+		b.deleteSelectionWithoutUndo()
+	} else {
+		b.beginChange()
+		b.pushUndo()
+	}
+	l := b.d.lineAt(b.line)
+	rest := append([]rune(nil), l[b.col:]...)
+	ind := []rune(indent)
+	nl := append(append([]rune(nil), ind...), rest...)
+	b.d.root = b.d.setLine(b.line, l[:b.col:b.col])
+	b.d.root = b.d.insertLines(b.line+1, [][]rune{nl})
+	b.line++
+	b.col = len(ind)
+	b.goalCol = b.col
 	b.hasSelection = false
 }
 
@@ -445,6 +568,74 @@ func (b *Buffer) DuplicateLineUp() {
 	b.line = el + 1
 	b.goalCol = b.col
 	b.hasSelection = false
+}
+
+// IndentLines adds one indentation unit (width, usually "\t") to the start of
+// every line touched by the selection, or just the current line without a
+// selection. UnindentLines removes at most one such unit of leading
+// whitespace. Both are single undo steps (Tab/Shift+Tab in the editor).
+func (b *Buffer) IndentLines(width string)   { b.indentLines(width, true) }
+func (b *Buffer) UnindentLines(width string) { b.indentLines(width, false) }
+
+func (b *Buffer) indentLines(width string, add bool) {
+	if width == "" {
+		return
+	}
+	b.beginChange()
+	b.pushUndo()
+	mat := b.linesCopy()
+	sl, sc, el, ec := b.SelectionRange()
+	hadSel := b.HasSelection()
+	if !hadSel {
+		sl = b.line
+		el = b.line
+	}
+	w := []rune(width)
+	// Per-line delta of the change, to shift the caret and columns.
+	deltas := make([]int, el-sl+1)
+	for i := sl; i <= el; i++ {
+		line := mat[i]
+		if add {
+			nl := make([]rune, 0, len(line)+len(w))
+			nl = append(nl, w...)
+			nl = append(nl, line...)
+			mat[i] = nl
+			deltas[i-sl] = len(w)
+		} else {
+			// Strip at most one unit of leading whitespace; a line with less
+			// indentation still loses what it has. Content after the cut is
+			// never touched.
+			cut := 0
+			for cut < len(w) && cut < len(line) && (line[cut] == ' ' || line[cut] == '\t') {
+				cut++
+			}
+			if cut > 0 {
+				mat[i] = append([]rune(nil), line[cut:]...)
+				deltas[i-sl] = -cut
+			}
+		}
+	}
+	// A block tab keeps its selection (Shift+Tab follows Tab on the same
+	// lines); the caret rides at the end of the range.
+	b.line = el
+	b.col = clampCol(ec+deltas[el-sl], mat[el])
+	if hadSel {
+		b.selLine = sl
+		b.selCol = clampCol(sc+deltas[0], mat[sl])
+		b.hasSelection = true
+	}
+	b.goalCol = b.col
+	b.setLines(mat)
+}
+
+func clampCol(col int, line []rune) int {
+	if col < 0 {
+		return 0
+	}
+	if col > len(line) {
+		return len(line)
+	}
+	return col
 }
 
 // ToggleComment comments or uncomments the current line (or the selected

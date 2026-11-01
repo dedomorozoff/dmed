@@ -12,7 +12,8 @@ type CursorPos struct {
 	Col  int `json:"col"`
 }
 
-// SessionState captures the editor layout, open files, and cursor positions.
+// SessionState captures the editor layout, open files, cursor positions, and
+// bookmarks.
 type SessionState struct {
 	Root       string               `json:"root,omitempty"`
 	Files      []string             `json:"files"`
@@ -20,6 +21,8 @@ type SessionState struct {
 	Layout     int                  `json:"layout"`
 	ActivePane int                  `json:"active_pane"`
 	Cursors    map[string]CursorPos `json:"cursors,omitempty"`
+	// Bookmarks maps an absolute file path to its sorted 1-based marked lines.
+	Bookmarks map[string][]int `json:"bookmarks,omitempty"`
 }
 
 // DefaultPath returns the default session file path for a project root or user home.

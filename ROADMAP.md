@@ -322,6 +322,233 @@ plan with per-item estimates, design decisions and open questions lives in
       goes through the same queue and the same diff review, and the chat parks
       instead of blocking the UI while it runs.
 
+### Post-M8 — housekeeping
+- [x] `config.WriteAI`/`WriteLang` converted onto the shared `writeSection`
+      engine (they were byte-for-byte near-duplicates of it; a new `[ai]` key
+      no longer needs two edits).
+- [x] The file finder and agent panel index the project through the same
+      checker target `walkProject` + `newProjectSkipFor` as the AI tools,
+      so the finder list cannot drift out of the AI's skip rules.
+- [x] `maxInt`/`minInt` replaced with the Go builtins `max`/`min`.
+- [x] Stray hardcoded English strings routed through i18n (m.t): terminal
+      exit/error messages, "provider offline", "no models available",
+      "replaced N occurrence(s)" — new keys `term.*`, `chat.provider_offline`,
+      `chat.no_models`, `msg.replaced_many` in both catalogs.
+- [x] `fetchRemoteSource` escapes each URL path component like the listing
+      fetch already did (a branch/file name with a space or "?" produced a
+      broken URL).
+- [x] Dead `DMED_SHELL` branch removed from config.Load (the editor reads
+      the variable itself).
+- [x] `AIConfig.Unconfigured` is complete: it also counts a hand-tuned
+      `ModelsPath` and a custom `SystemPrompt` as configuration. Your own
+      prompt or model list must not leak to the keyless public fallback.
+- [x] Lua plugins run under a wall-clock budget (`Manager.timeout`, 3s
+      default): `SetContext` makes the VM check the deadline between
+      instructions, so a `while true do end` handler or load fails with
+      "context deadline exceeded" in the status bar instead of freezing the
+      editor forever. Plugin call errors are no longer silently dropped.
+- [x] The plugin store's HTTP fetches go through a test seam
+      (`storeHTTPTransport`): unit tests redirect both the listing and the
+      source downloads to a local httptest server, as with
+      `aiFreeURLOverride`/`webSearchOverride`.
+- [x] One generation-stamp helper: `termGen`/`chatGen`/`dapGen` bumps all go
+      through `bumpGen`, keeping the supersede-session convention documented
+      in one place for future async subsystems.
+
+### Post-M8 — editor UX
+- [x] **Find in Project** (`Ctrl+Shift+F`, палитра "Edit: Find in Project..."):
+      async full-text search shared with the AI tools' walk rules (`walkProject` +
+      `newProjectSkip`), results streamed in batches with a generation guard,
+      live hit list (`↑↓`/Enter opens the file at the match, panel stays open),
+      500-hit cap. Empty dir / no-file roots supported.
+- [x] **Smart case + regex search**: a query without uppercase runes matches
+      case-insensitively, in-file (Ctrl+F) and Find in Project alike; Tab in
+      the search prompt toggles regex (`.*`), the hint row shows the state;
+      invalid patterns match nothing and say so instead of degrading to a
+      literal search. Regex replace-all (`Ctrl+A` in the replace prompt)
+      expands `$1`/`$name` groups; the buffer gained `ReplaceAllRE` (a single
+      undo step, line-wise like the literal path).
+- [x] **Fuzzy command palette**: `filterPalette` now uses the file finder's
+      scorer on titles (descriptions as fallback) instead of
+      `strings.Contains` — consistent UX with `Ctrl+O`, subsequence queries
+      work.
+- [x] **Smart indent + typing niceties** (`internal/editor/smartedit.go`):
+      block indent — Tab with a selection indents the selected lines
+      (selection kept for Shift+Tab), Shift+Tab unindents one level without
+      eating content (`buffer.IndentLines`/`UnindentLines`, single undo step);
+      Enter continues the line's leading whitespace and goes one tab deeper
+      after an open bracket before the caret (`buffer.IndentedNewline`); auto-
+      close for `(`/`[`/`{`/`"` with type-over of the closing character and a
+      pair-consuming Backspace. Fixed a real bug on the way: typing over a
+      selection swallowed the first keystroke (`buffer.Insert`/`InsertNewline`
+      deleted the selection and returned without inserting).
+- [x] **Bookmarks survive a restart**: the session file gained a `bookmarks`
+      section (abs path → sorted 1-based lines); `New(dir)` restores them next
+      to files/cursors, and bookmark jumps work right away on the restored
+      set. The session file itself (`.dmed_session.json`) is hidden from
+      project walks (SEARCH/LIST_DIR/GLOB/agent tools). Persisting undo
+      stacks across restarts was considered and deliberately left out: an
+      undo history that survives a file being reloaded is more confusing
+      than useful.
+- [x] **LSP rename + code actions** (`Ctrl+Alt+R` / `Ctrl+Alt+Q`, палитра
+      "Edit: Rename Symbol..." / "Edit: Code Actions..."): rename asks the
+      server for the symbol under the cursor (`internal/lsp.Client.Rename`),
+      shows an input pre-filled with the word, and applies the reply
+      `WorkspaceEdit` across files — open tabs edit in-buffer (one
+      `ReplaceSpan` per edit, tab stays dirty, server notified via
+      didChange), closed paths go straight to disk. Code actions list the
+      server's quick fixes in a bottom panel (↑↓/Enter/Esc); a zero-width
+      range at the cursor asks for them. Protocol plumbing in
+      `internal/lsp`: `ColToRune` (UTF-16 → rune, astral planes correct),
+      `SortedEdits` (right-to-left), `ApplyEditsToText` (multi-line insert/
+      replace), `parseWorkspaceEdit` (both `changes` and `documentChanges`
+      reply shapes); command-only actions are shown but refuse to run.
+      Legacy terminals that lose `Ctrl+Alt+*` use the palette commands.
+- [x] **Code block folding**: indentation-based fold ranges (a non-blank line
+      whose next non-blank line is deeper, ending where the indent falls back —
+      nested blocks included), display-only state that never touches the
+      buffer. The whole pane renders from one display-row list (`dispRows`):
+      folded blocks collapse to a `… N lines hidden` hint right under the
+      start line, working with and without word wrap. Folding goes through
+      chevrons in the gutter (▾/▸, one extra column only when the buffer is
+      foldable, and that column is part of the reported gutter width so a
+      click lands on the cell under the pointer and the content stays aligned
+      with the gutter), a click anywhere on the summary row, Alt+C / Alt+O
+      (vim zc/zo), and "Edit: Toggle Fold" / "Edit: Toggle All Folds" from
+      the palette.
+      Arrows
+      and PgUp/PgDn skip over hidden lines so the cursor can never enter a
+      folded block; a cursor that ends up on a hidden line (undo, an external
+      edit, a jump) forces the block open in `clampScroll`. Fold ranges are
+      cached like wrap segments and stale folded marks heal themselves on the
+      next render.
+- [x] **Folding performance**: the display-row list, the fold scan and the
+      gutter chevrons are linear in the size of the buffer. `dispRows` walks
+      the folded blocks with a moving pointer instead of rescanning them per
+      line, `foldAtStart` is a binary search over the sorted ranges (the
+      gutter asks for it on every visible row) and the block scan itself is a
+      single stack pass. The document text is cached in the buffer and
+      invalidated by the tree root, so the view-layer caches (syntax, wrap,
+      folds) stop rebuilding the whole file string several times per
+      keystroke. On a 20k-line file with everything folded this took the
+      frame from 11 s to 17 ms.
+- [x] **Background syntax highlighting**: chroma re-tokenizes the whole
+      buffer, which on a large file costs seconds and hundreds of megabytes
+      of garbage. The highlighting now runs off the UI thread: the editor
+      asks for a pass when the cached highlight no longer matches the
+      buffer, the pass runs in the background and the result is swapped in
+      when it lands. A pass for text the buffer has moved away from is
+      dropped instead of painted. Typing never waits for the tokenizer any
+      more; the colors of a line that changed catch up a moment later.
+      The cache itself holds one token per character instead of a whole
+      style: a file with 60k lines went from 443 MB of styles to 6 MB of
+      tokens, and the styles are resolved when a line is painted.
+      A pass also waits for the typing to settle: while the buffer keeps
+      changing, the wait is restarted and no tokenizing happens at all, so a
+      typing burst in a huge file costs nothing.
+- [x] **Cheaper frames**: the per-frame lookups that do not change with the
+      buffer are cached on the tab — the syntax language of the file (chroma
+      asks the filesystem for it) and the repository of the file's directory
+      (opening a repository touches the filesystem). The fold scan reads the
+      indentation of a line in place instead of copying the line out of the
+      buffer, which allocated once per line of the file on every edit.
+      Typing and rendering a 20k-line file now costs about 7 ms per
+      keystroke (was 457 ms) and 4 MB of garbage (was 493 MB).
+- [x] **Git diff in the background**: the gutter shows which lines differ
+      from HEAD, and that diff is a whole-file job — the text is diffed line
+      by line against the committed version, which cost 42 ms per keystroke
+      on a file of 3000 lines. It runs in the background now, like the
+      highlighting, and waits for the typing to settle before it starts.
+      The line painting groups the characters of equal style into runs: a
+      lipgloss render per character was thousands of calls per frame.
+- [x] **Search everywhere**: a double `Shift` opens the JetBrains-style
+      search: commands, project files and settings in one list, each result
+      marked with what it is. Picking a file opens it, picking a setting
+      opens the configuration file. `Ctrl+P` / `F2` keep searching commands
+      only. Since barely any terminal reports a bare `Shift` (and on legacy
+      input `Ctrl+Shift+P` collapses into the `Ctrl+P` control byte), the
+      bindings that actually reach the list are `Alt+P` — distinguishable
+      everywhere, because `Alt+letter` is sent as `ESC+letter` — and
+      `Ctrl+Shift+P` on terminals that tell Shift apart.
+- [x] **Ctrl+C never quits**: Ctrl+C copies the selection (as before) and
+      otherwise says how to leave the editor — an editor that dies on the key
+      a terminal uses to interrupt a program is a trap. `Ctrl+Q` is the way
+      out, and the interrupt signal is filtered out too (SIGTERM still stops
+      the editor).
+- [x] **Partial highlighting**: chroma hands out the tokens of a file in one
+      go, so the colors of a large file only appeared when the whole file
+      was tokenized. The tokenizer is now consumed as it goes and the pass
+      publishes the lines it has done — the visible part of a file is
+      painted in a fraction of a second and the rest catches up.
+      The language tag of a file comes from a table instead of chroma:
+      asking chroma for it initializes its lexer registry, which parses every
+      embedded grammar and takes seconds.
+- [x] **SQLite browser**: opening a `.sqlite`/`.db` file (magic-header
+      verified, so a text-only `.db` stays a text tab) opens a full-screen
+      browser instead of a garbage binary tab: a table/view strip (Tab
+      cycles), paged row grid (50 rows), substring filter over every column
+      (`/`), sorting (`o` cycles the cursor column asc/desc/off), the CREATE
+      statement (`s`), and immediate editing with the rowid as the row
+      address — Enter edits the cell (empty value = NULL, values go in
+      bound), Ctrl+N inserts an all-defaults row, Ctrl+D deletes the cursor
+      row. Views and WITHOUT ROWID tables are shown read-only: without a
+      rowid there is no stable row address. The data layer is
+      `internal/sqlitedb` on modernc.org/sqlite (pure Go, no CGO — the
+      8-platform cross build stays green); user-supplied values move as bound
+      parameters, all identifiers are double-quoted with "" escaping.
+
+- [x] **ASCII picture preview**: a `.png`/`.jpg`/`.jpeg`/`.gif`/`.bmp` file
+      (extension list + decoder as the real check) opens as a picture tab:
+      the buffer stays empty (the pane draws the picture, never loads the
+      bytes in), the pane renders half-blocks (`▀`, two pixels per cell, box
+      average with the aspect through the 2:1 cell) with the terminal's colour
+      profile via `colorprofile` (ANSI-256/ANSI/ASCII degradations) and the ASCII
+      ramp fallback for a colourless terminal, GIF frames animated through a
+      single tick chain (`imgFrameMsg` + `imgTick` + one pending flag, frame
+      counter in the caption, delay from the file's own numbers, clamped to
+      something watchable). Keys on a picture tab are the workspace's
+      (`Ctrl+S`/`Ctrl+C`/`Ctrl+V` refused as read-only with an explanation, `Ctrl+E`
+      chat still reachable via palette), scrolling a tall picture is the pane
+      offset, the wheel scrolls it too. Reload (watcher) re-decodes and falls
+      back to text with the reason if the file stopped being one.
+- [x] **Tree panel: names survive the width**. Three related failures, one
+      cause: entries were composed without a true width budget. An entry whose
+      name plus its tree prefix overflowed the panel used to slice the plain
+      string with `len+pad`, which lands at or before the string start for
+      deeply nested names and rendered the row blank; the same overflowing
+      rows were one cell wider than the panel, which shifted the whole editor
+      row (line numbers included) one character right on those lines only; and
+      deep ancestors ate the name outright (`│   │   ├── ` costs 4 cells per
+      level). The render now composes each row to the panel width: the
+      ancestor gauge collapses to an ellipsis before the final connector so a
+      nested file keeps its full name, only a name too long for whatever is
+      left is cut — from the head, keeping the readable tail (extension
+      included) — and no row ever grows past the panel width.
+- [x] **LSP formatting**: `textDocument/formatting` reaches the language
+      server (`gopls`→gofmt, the TypeScript server→prettier, whatever else
+      implements it): `Ctrl+Alt+F` and the palette "Edit: Format Document"
+      ask for a whole-document layout, the reply (a bare TextEdit array,
+      parsed apart from the WorkspaceEdit shapes rename/code actions return)
+      lands in the buffer through the same `applyWorkspaceEdit` path and the
+      buffer stays dirty — the layout is on screen, saving stays the human's
+      call. Rename and code actions already existed; the analysis calling
+      them absent was out of date.
+- [x] **AI rounds stop walking the whole project**: the touched-file detection
+      after every tool batch cost two full `snapshotFiles` walks over the root
+      (`before` + `after`) even when the batch was pure reading (SEARCH,
+      GLOB, TODO_*). The walks are gated by `toolBatchTouchesDisk` now: only
+      a batch containing RUN/EDIT/REPLACE pays the walk, so read-only rounds
+      between AI iterations no longer crawl a large repository.
+- [x] **Undo of AI work from inside the editor**: accepted agent changes are
+      committed at once, so Ctrl+Z never could reach them. `u` in the agent
+      panel (or the palette command) reverts the newest `agent: …` commit
+      through `vcs.RevertCommit`: refuse-first — every working-tree file must
+      still match what the agent commit produced, one user edit after the
+      apply aborts the revert without writing a byte — and the restore is
+      staged into its own `agent: revert <hash>` commit, so the undo is
+      traceable in history rather than a silent tree rewrite. No external
+      terminal needed.
+
 ## Infrastructure: CI and releases
 
 - [x] GitHub Actions CI (`ci.yml`): vet + unit tests + cross-build for 8 platforms
