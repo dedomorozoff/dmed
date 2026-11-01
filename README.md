@@ -142,7 +142,7 @@ Open a file (`Ctrl+O` fuzzy finder or `Ctrl+T`), edit, `Ctrl+S` to save. `Ctrl+G
 | `Alt+B` | Toggle inline git blame |
 | `Alt+↑` / `Alt+↓` | Move line up / down |
 | `Alt+D` / `Alt+Click` | Multi-cursor (next word / at click), `Esc` exits |
-| `Alt+C` / `Alt+O` | Fold / unfold block at cursor |
+| `Alt+C` / `Alt+O` | Fold / unfold the block around the cursor |
 | `Ctrl+Shift+O` / `T` / `B` | Merge conflict: take ours / theirs / both under the cursor |
 | `Ctrl+]` | Jump to the matching bracket or quote; from inside a pair, to its closer |
 | `Ctrl+Shift+]` | Select the text inside the surrounding pair (delimiters excluded) |

@@ -344,3 +344,112 @@ func TestGutterGrowsOnlyWhenFoldable(t *testing.T) {
 		t.Fatal("a buffer without foldable blocks must not grow the fold column")
 	}
 }
+
+// TestFoldFromInsideTheBlock: the caret inside a function body belongs to that
+// body, so Alt+C has to fold the block around it — waiting for the user to
+// reach for the block's first line is what made a function "not fold".
+func TestFoldFromInsideTheBlock(t *testing.T) {
+	m := foldModel(t)
+	place(m, 2, 3) // "\t\tdo()", inside the nested if inside the function
+	m = press(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModAlt})
+
+	// The innermost block (the if) folds, not the function around it.
+	if !m.tabs[0].folds[1] || len(m.tabs[0].folds) != 1 {
+		t.Fatalf("alt+c inside a block must fold it, folds=%v", m.tabs[0].folds)
+	}
+	if got := m.tabs[0].buf.CurLine(); got != 1 {
+		t.Fatalf("folding from inside must land the cursor on the fold start, got line %d", got)
+	}
+	// A caret left on a hidden line would have clampScroll force the very block
+	// open again: the fold has to survive both a re-clamp and a render.
+	m.clampScroll()
+	if _, _, hid := m.tabs[0].foldHidden(m.tabs[0].buf.CurLine(), m.cfg.Editor.TabWidth); hid {
+		t.Fatal("the cursor must not stay on a hidden line")
+	}
+	if plain := foldPlain(m); strings.Contains(plain, "do()") || !strings.Contains(plain, "1 lines hidden") {
+		t.Fatalf("the folded body line must collapse to a summary:\n%s", plain)
+	}
+}
+
+// TestFoldFromTheClosingLine: the closer belongs to its own block, so the
+// function folds from its `}` exactly as it does from the signature.
+func TestFoldFromTheClosingLine(t *testing.T) {
+	m := foldModel(t)
+	place(m, 4, 0) // the function's closing brace
+	m = press(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModAlt})
+	if !m.tabs[0].folds[0] {
+		t.Fatalf("alt+c on the closer must fold that block, folds=%v", m.tabs[0].folds)
+	}
+	if got := m.tabs[0].buf.CurLine(); got != 0 {
+		t.Fatalf("the cursor must move to the fold start, got line %d", got)
+	}
+}
+
+// TestFoldFromInsideTogglesBack: the palette's toggle has to give the same
+// block back on the second press, wherever the first one started from.
+func TestFoldFromInsideTogglesBack(t *testing.T) {
+	m := foldModel(t)
+	place(m, 2, 3)
+	m.foldCloseAtCursor()
+	m.toggleFoldAtCursor()
+	if len(m.tabs[0].folds) != 0 {
+		t.Fatalf("the second toggle must unfold, folds=%v", m.tabs[0].folds)
+	}
+	if m.msg != "" {
+		t.Fatalf("a fold that worked must not leave a hint behind, msg=%q", m.msg)
+	}
+}
+
+// TestFoldAllmanFromTheSignature pins the shape where the body's brace sits on
+// its own line: the fold belongs to the brace, but the command has to answer on
+// the signature line above it too.
+func TestFoldAllmanFromTheSignature(t *testing.T) {
+	const allman = "function foo()\n{\n    bar();\n    baz();\n}\n"
+	newAllman := func() Model {
+		m := New()
+		m.width, m.height = 60, 20
+		m.tabs = []tab{{buf: buffer.Load(allman)}}
+		return m
+	}
+
+	m := newAllman()
+	if rs := m.tabs[0].foldRanges(4); len(rs) != 1 || rs[0] != (foldRange{start: 1, end: 3}) {
+		t.Fatalf("the brace line owns the block, ranges=%+v", rs)
+	}
+
+	place(m, 0, 0) // "function foo()"
+	m = press(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModAlt})
+	if !m.tabs[0].folds[1] {
+		t.Fatalf("alt+c on the signature must fold the block below it, folds=%v", m.tabs[0].folds)
+	}
+	if plain := foldPlain(m); !strings.Contains(plain, "function foo()") || strings.Contains(plain, "baz()") {
+		t.Fatalf("the signature stays, the body collapses:\n%s", plain)
+	}
+
+	// Alt+O from the same signature line is how that fold opens again.
+	place(m, 0, 0)
+	m = press(m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModAlt})
+	if len(m.tabs[0].folds) != 0 {
+		t.Fatalf("alt+o on the signature must unfold, folds=%v", m.tabs[0].folds)
+	}
+
+	// A line above a block whose start is not a lone brace is not that block's
+	// header: no fold is stolen from the line below it.
+	m = New()
+	m.width, m.height = 60, 20
+	m.tabs = []tab{{buf: buffer.Load("a\nb {\n  c\n}\n")}}
+	place(m, 0, 0)
+	m.foldCloseAtCursor()
+	if len(m.tabs[0].folds) != 0 {
+		t.Fatalf("a header may only claim a lone brace, folds=%v", m.tabs[0].folds)
+	}
+	if !strings.Contains(m.msg, "nothing to fold") {
+		t.Fatalf("the refusal must hint, msg=%q", m.msg)
+	}
+	// The very block refuses nothing from its own line.
+	place(m, 1, 0)
+	m.foldCloseAtCursor()
+	if !m.tabs[0].folds[1] {
+		t.Fatalf("the block must fold from its start line, folds=%v", m.tabs[0].folds)
+	}
+}

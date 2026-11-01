@@ -415,10 +415,16 @@ plan with per-item estimates, design decisions and open questions lives in
       click lands on the cell under the pointer and the content stays aligned
       with the gutter), a click anywhere on the summary row, Alt+C / Alt+O
       (vim zc/zo), and "Edit: Toggle Fold" / "Edit: Toggle All Folds" from
-      the palette.
-      Arrows
-      and PgUp/PgDn skip over hidden lines so the cursor can never enter a
-      folded block; a cursor that ends up on a hidden line (undo, an external
+      the palette. The keyboard commands act on the block the cursor
+      *belongs to* (`foldTargetAt`): the one starting on its line, the
+      innermost one around it — the closing brace included, even though the
+      scan leaves that line visible — or the block whose lone brace sits on the
+      line below an Allman signature, which is what made a
+      `function foo()` fold from the line above. Folding from inside moves the
+      caret onto the block's start line: left on a hidden line, the next
+      `clampScroll` would force the very block open again.
+      Arrows and PgUp/PgDn skip over hidden lines so the cursor can never enter
+      a folded block; a cursor that ends up on a hidden line (undo, an external
       edit, a jump) forces the block open in `clampScroll`. Fold ranges are
       cached like wrap segments and stale folded marks heal themselves on the
       next render.
@@ -583,6 +589,12 @@ Order and contents will be refined as work proceeds.
       would quietly move an end the command had just computed.
 - Column (rectangular) selection: `Alt+Shift+arrows`, drag with a modifier;
   pasting a block unfolds it into one multi-cursor per line.
+- Fold ranges are still purely indentation-based, which no target lookup can
+  fix: a `switch` whose `case` labels sit at the `switch` column opens no block
+  of its own, so Alt+C there folds the enclosing function instead, and a body
+  written at its header's indent folds nowhere at all. The honest fix is
+  brace-aware ranges built on the delimiter scanner in
+  `internal/buffer/match.go`, which belongs with the tree-sitter item in M11.
 - [x] **Selection transformations**: upper/lower case (`Ctrl+U`/`Ctrl+Shift+U`),
       sort lines (`Alt+Shift+S`), trim trailing whitespace (`Alt+Shift+T`),
       align indentation (`Ctrl+Alt+J`) and sequence numbering 1..N

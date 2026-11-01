@@ -129,6 +129,14 @@ The code is split into focused internal packages:
   status-bar message; the text work is the buffer's), `delimiter.go` (the
   bracket jump and select-inside commands: the same thin shape, and pure caret
   moves — no edit, no undo step, no dirty flag; the scanning is the buffer's),
+  `fold.go` (the indentation fold ranges and the display-row list the whole
+  pane renders from. The fold commands act on the block the cursor *belongs
+  to* — `foldTargetAt`: the block starting on its line, the innermost one
+  around it (the closing brace included, although the scan leaves that line
+  visible), or the block whose lone brace sits on the line below an Allman
+  signature. Folding from inside must then move the caret onto the block's
+  start line: `clampScroll` forces any block hiding the caret open again, so a
+  caret left inside would undo the fold it just made),
   `tools.go` (agent tools:
   READ/SEARCH/LIST_DIR/GLOB/RUN/REPLACE/EDIT), `tools_fs.go` (shared project
   walk plus the LIST_DIR/GLOB tools), `tools_core.go` (`toolEnv`: the TUI-free

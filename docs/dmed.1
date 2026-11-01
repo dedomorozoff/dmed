@@ -77,6 +77,14 @@ Toggle word wrap
 Toggle inline git blame (who changed each line and when)
 .It Sy Alt+Up / Alt+Down
 Move line up / down
+.It Sy Alt+C / Alt+O
+Fold / unfold the block the cursor belongs to. Blocks come from the indentation;
+the command answers anywhere inside the block, on the closing brace that stays
+visible, and on a signature line whose brace is written on its own line below.
+The cursor lands on the block's first line, which carries the gutter chevron;
+the hidden lines collapse into a
+.Dq … N lines hidden
+row that unfolds on a click.
 .It Sy Ctrl+Shift+O / Ctrl+Shift+T / Ctrl+Shift+B
 Merge conflict under the cursor: keep our side / their side / both. One
 resolution is one undo step; markers that do not form a complete block are

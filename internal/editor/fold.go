@@ -114,6 +114,71 @@ func (t *tab) foldStateAt(ln, tabW int) (foldRange, bool) {
 	return r, true
 }
 
+// foldBlockAt returns the innermost block the line belongs to: the one holding
+// it, or the one whose hidden part ends on the line above — the closing brace
+// stays visible in a folded block by design, yet the caret on it still stands
+// inside that block. Ranges are sorted by start and no line starts two blocks,
+// so the last block holding the line is the innermost.
+func (t *tab) foldBlockAt(ln, tabW int) (foldRange, bool) {
+	if t.buf.IndentWidth(ln, tabW) < 0 {
+		return foldRange{}, false // a blank line belongs to no block
+	}
+	var found foldRange
+	ok := false
+	for _, r := range t.foldRanges(tabW) {
+		if r.start > ln {
+			break // ascending by start: nothing past this can hold ln
+		}
+		if ln <= r.end+1 {
+			found, ok = r, true
+		}
+	}
+	return found, ok
+}
+
+// foldTargetAt is the block the keyboard commands act on: the one starting on
+// ln, the innermost one around it (its closing brace included), or — when the
+// brace sits on its own line under a signature (Allman style) — the block
+// starting on the next non-blank line below it. That last rule is what lets
+// Alt+C answer on `function foo()` instead of reporting there is nothing to
+// fold.
+func (t *tab) foldTargetAt(ln, tabW int) (foldRange, bool) {
+	if r, ok := t.foldAtStart(ln, tabW); ok {
+		return r, true
+	}
+	if r, ok := t.foldBlockAt(ln, tabW); ok {
+		return r, true
+	}
+	for i := ln + 1; i < t.buf.LineCount(); i++ {
+		if t.buf.IndentWidth(i, tabW) < 0 {
+			continue // the blank gap between a signature and its brace
+		}
+		r, ok := t.foldAtStart(i, tabW)
+		if !ok || !isLoneBrace(t.buf.LineAt(i)) {
+			return foldRange{}, false
+		}
+		return r, true
+	}
+	return foldRange{}, false
+}
+
+// isLoneBrace reports whether the line is just an opening brace: the Allman
+// shape, where a body's brace sits on its own line under the signature.
+func isLoneBrace(line []rune) bool {
+	i := 0
+	for ; i < len(line) && (line[i] == ' ' || line[i] == '\t'); i++ {
+	}
+	if i == len(line) || line[i] != '{' {
+		return false
+	}
+	for _, r := range line[i+1:] {
+		if r != ' ' && r != '\t' {
+			return false
+		}
+	}
+	return true
+}
+
 // foldHidden reports whether ln lies strictly inside a currently folded
 // block, returning its outermost such block's start and end; it is what
 // actually hides the line.
@@ -192,26 +257,37 @@ func (m Model) foldChevron(t *tab, ln, tabW int) (string, bool) {
 	return " ", true
 }
 
-// foldCloseAtCursor folds the block starting on the cursor line (vim zc).
+// foldCloseAtCursor folds the block the cursor belongs to (vim zc): the one
+// starting on its line, the innermost one around it, or the one whose brace is
+// on the line below. The cursor moves to the block's start line: folded lines
+// are hidden, and a caret left on one of them would have that very block forced
+// open by the next clampScroll.
 func (m *Model) foldCloseAtCursor() {
 	t := m.cur()
 	if t == nil {
 		return
 	}
 	ln := t.buf.CurLine()
-	if _, ok := t.foldAtStart(ln, m.cfg.Editor.TabWidth); ok {
-		if t.folds == nil {
-			t.folds = map[int]bool{}
-		}
-		t.folds[ln] = true
-		m.clampScroll()
+	tabW := m.cfg.Editor.TabWidth
+	r, ok := t.foldTargetAt(ln, tabW)
+	if !ok {
+		m.msg = m.t("msg.no_fold")
 		return
 	}
-	m.msg = m.t("msg.no_fold")
+	if t.folds == nil {
+		t.folds = map[int]bool{}
+	}
+	t.folds[r.start] = true
+	if ln != r.start {
+		t.buf.SetCursor(r.start, t.buf.Col())
+	}
+	m.clampScroll()
+	// A fold that worked must not leave the previous refusal on the status line.
+	m.msg = ""
 }
 
 // foldOpenAtCursor expands the folded state at the cursor line: the block it
-// starts, or the ancestor block hiding it (vim zo).
+// starts, the block around it, or the ancestor block hiding it (vim zo).
 func (m *Model) foldOpenAtCursor() {
 	t := m.cur()
 	if t == nil {
@@ -219,31 +295,46 @@ func (m *Model) foldOpenAtCursor() {
 	}
 	ln := t.buf.CurLine()
 	tabW := m.cfg.Editor.TabWidth
-	if _, ok := t.foldStateAt(ln, tabW); ok {
+	_, foldedHere := t.foldStateAt(ln, tabW)
+	_, _, hidden := t.foldHidden(ln, tabW)
+	switch {
+	case foldedHere:
 		t.toggleFoldAt(ln, tabW)
-		m.clampScroll()
-		return
-	}
-	if _, _, hid := t.foldHidden(ln, tabW); hid {
+	case hidden:
 		t.unfoldThrough(ln, tabW)
-		m.clampScroll()
-		return
+	default:
+		// The signature above a folded Allman block carries no marker of its
+		// own, but opening it from there is how that fold gets undone by the
+		// same key.
+		r, ok := t.foldTargetAt(ln, tabW)
+		if !ok || !t.folds[r.start] {
+			m.msg = m.t("msg.no_fold")
+			return
+		}
+		t.toggleFoldAt(r.start, tabW)
 	}
-	m.msg = m.t("msg.no_fold")
+	m.clampScroll()
+	m.msg = ""
 }
 
-// toggleFoldAtCursor flips the fold of the block starting on the cursor line
-// and reports the outcome for the status line.
+// toggleFoldAtCursor flips the fold of the block the cursor belongs to and
+// reports the outcome for the status line.
 func (m *Model) toggleFoldAtCursor() {
 	t := m.cur()
 	if t == nil {
 		return
 	}
 	tabW := m.cfg.Editor.TabWidth
-	if ln := t.buf.CurLine(); t.toggleFoldAt(ln, tabW) {
+	r, ok := t.foldTargetAt(t.buf.CurLine(), tabW)
+	if !ok {
+		m.msg = m.t("msg.no_fold")
 		return
 	}
-	m.msg = m.t("msg.no_fold")
+	if t.folds[r.start] {
+		m.foldOpenAtCursor()
+		return
+	}
+	m.foldCloseAtCursor()
 }
 
 // toggleFoldAll folds (or, when everything is already folded, unfolds) every
