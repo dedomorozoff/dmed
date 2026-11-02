@@ -284,7 +284,7 @@ The VS Code "JavaScript Debugger" (`ms-vscode.js-debug`, adapter script `src/dap
 - [Autocompletion & LSP](docs/AUTOCOMPLETION.md) — completion popup + language servers
 - [M4 Agents](docs/M4-AGENTS.md) — background agent tasks, queue, diff-review apply
 - [ROADMAP.md](ROADMAP.md) — milestones, features and their design notes
-- [docs/RELEASE-v0.9.3.md](docs/RELEASE-v0.9.3.md) — the latest release notes
+- [docs/RELEASE-v0.10.0.md](docs/RELEASE-v0.10.0.md) — the latest release notes
 
 ## Known Limitations
 
