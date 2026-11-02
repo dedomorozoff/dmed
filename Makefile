@@ -14,7 +14,12 @@ PREFIX   ?= /usr/local
 # Total coverage measured by `make cover`. Raise it when coverage goes up;
 # `make cover-check` fails when the total drops more than COVERAGE_SLACK
 # points below it, so a new untested file cannot silently pass CI.
-COVERAGE_BASELINE := 72.2
+#
+# Measured on the Linux CI runner, not locally: the DAP/DBGp real-adapter
+# tests run on a developer machine with Delve/PHP installed and skip on CI,
+# so a Windows-local reading is about two points higher and would gate the
+# build on coverage CI can never reach.
+COVERAGE_BASELINE := 70.3
 COVERAGE_SLACK    := 1
 
 BUILD_TARGETS := build-linux-amd64 build-linux-arm64 build-freebsd-amd64 \
