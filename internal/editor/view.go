@@ -977,6 +977,14 @@ func (m Model) treePanel(h int) []string {
 		entryRows = 0
 	}
 	off := m.clampedTreeOffset(entryRows)
+	// The last column is a vertical rule drawing the panel's edge against the
+	// editor. It takes the cell the rows used to leave blank, so the panel
+	// stays exactly TreeWidth wide and the editor gutter does not shift.
+	sepStyle := treeSepStyle
+	if m.treeFocus {
+		sepStyle = treeSepFocusStyle
+	}
+	sep := sepStyle.Render(m.g.vline)
 	rows := make([]string, 0, h)
 	for row := 0; row < entryRows; row++ {
 		i := off + row
@@ -986,7 +994,7 @@ func (m Model) treePanel(h int) []string {
 		} else {
 			cell = strings.Repeat(" ", inner)
 		}
-		rows = append(rows, cell+" ")
+		rows = append(rows, cell+sep)
 	}
 	return rows
 }

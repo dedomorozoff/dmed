@@ -18,6 +18,11 @@ var (
 	treeIconStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("208"))
 	treeDirStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true)
 	treeFileStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("253"))
+	// The rule the panel paints in its last column, dividing it from the
+	// editor. It brightens while the tree owns the keyboard, like the chat
+	// rail's own rule.
+	treeSepStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	treeSepFocusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("61"))
 )
 
 const (

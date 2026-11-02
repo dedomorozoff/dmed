@@ -184,6 +184,32 @@ func deepTreeModel(t *testing.T, root, name string) Model {
 	return m
 }
 
+// TestTreePanelPaintsSeparator checks that the panel's last column is a
+// vertical rule rather than a blank cell, so the project tree has a visible
+// edge against the editor window.
+func TestTreePanelPaintsSeparator(t *testing.T) {
+	root := t.TempDir()
+	writeTemp(t, root, "a.txt", "x\n")
+
+	m := New(root)
+	m.width, m.height = 100, 24
+	m.treeVisible = true
+	m.rebuildTree()
+
+	rows := m.treePanel(m.viewHeight())
+	if len(rows) == 0 {
+		t.Fatal("tree panel rendered no rows")
+	}
+	for i, r := range rows {
+		if got := stripANSI(r); !strings.HasSuffix(got, m.g.vline) {
+			t.Fatalf("tree row %d must end with the separator %q, got %q", i, m.g.vline, got)
+		}
+		if w := lipgloss.Width(r); w != m.cfg.UI.TreeWidth {
+			t.Fatalf("tree row %d width = %d, want %d", i, w, m.cfg.UI.TreeWidth)
+		}
+	}
+}
+
 // TestTreeDeepNestingKeepsNameVisible checks that a nested entry keeps its
 // whole file name: deep ancestor gauges collapse before the name is touched.
 func TestTreeDeepNestingKeepsNameVisible(t *testing.T) {
