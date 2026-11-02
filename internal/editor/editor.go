@@ -429,6 +429,26 @@ type Model struct {
 	lspActionsOff  int
 	lspActions     []lsp.CodeAction
 
+	// M10: diagnostics navigation, hover popup, references and outline.
+	// diagsCursor tracks the F8 walk through the active tab's diagnostics;
+	// hover renders as a bottom overlay like the rename input; references and
+	// outline reuse the code-actions panel shape (a bottom list with j/k and
+	// Enter jumping to the target).
+	diagCursor int // index into the sorted diags of the active tab, -1 = unset
+	hoverOpen  bool
+	hoverText  []string
+
+	refsOpen  bool
+	refsSel   int
+	refsOff   int
+	refs      []lsp.Location
+	refsPaths []string // resolved paths for each ref (refs[i].Path)
+
+	outlineOpen bool
+	outlineSel  int
+	outlineOff  int
+	outline     []lsp.DocumentSymbol
+
 	// Go to line
 	gotoOpen bool
 	gotoIn   []rune
@@ -1265,6 +1285,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.rebuildTree()
 			}
 		}
+		// The language server learns about files changed outside the editor
+		// (agent commits, tool runs): without the notification it keeps
+		// serving stale diagnostics from its caches.
+		if m.lspClient != nil && m.lspClient.Alive() {
+			m.lspClient.DidChangeWatchedFiles([]string{path})
+		}
 		return m, waitForFileEvent(m.fileEvents)
 	case tea.WindowSizeMsg:
 		if msg.Width > 0 {
@@ -1483,6 +1509,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		abs, _ := filepath.Abs(msg.path)
 		m.diags[abs] = msg.diags
 		return m, waitForLSPDiag(m.diagCh)
+	case lspHoverMsg:
+		if len(msg.lines) == 0 {
+			m.msg = m.t("msg.no_hover")
+			return m, nil
+		}
+		m.hoverText = msg.lines
+		m.hoverOpen = true
+	case lspRefsMsg:
+		m.handleRefsMsg(msg)
+	case lspOutlineMsg:
+		m.handleOutlineMsg(msg)
 	case lspDefinitionMsg:
 		if msg.err != nil {
 			m.msg = "goto def: " + msg.err.Error()

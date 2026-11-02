@@ -555,7 +555,7 @@ plan with per-item estimates, design decisions and open questions lives in
       traceable in history rather than a silent tree rewrite. No external
       terminal needed.
 
-## M9–M13 — planned (M9 done except the brace-aware fold ranges, which belong with the tree-sitter item in M11)
+## M9–M13 — planned (M9 and M10 done)
 
 The list below is drawn from the aftermath of Post-M8: the "chroma →
 tree-sitter (later)" note in the stack, the plugins' "Remaining: more
@@ -734,19 +734,52 @@ Order and contents will be refined as work proceeds.
       stay `Ctrl+S` and the Git panel.
 
 ### M10 — LSP to the end
-- Diagnostics navigation: next/prev error (`F8`/`Shift+F8`), an inline
-  hint on the error line, a summary diagnostics pool across all tabs.
-- Hover documentation (a popup like the completion window), signature
-  help while typing.
-- Outline: document symbols in the sidebar + workspace symbols in the
-  palette / search-everywhere.
-- References ("Find Usages", a panel like the code actions panel),
-  implementation.
-- The language table moves into the config: a command/args per filetype,
-  a health-check in the palette ("LSP: Status"), automatic restart of a
-  crashed server.
-- Honor `workspace/didChangeWatchedFiles` — the server learns about
-  files created outside the editor (the agent commits past the tabs).
+- [x] Diagnostics navigation: `Alt+E` next / `Alt+Shift+E` previous (the
+      palette "Edit: Next Diagnostic" is the documented route for legacy
+      terminals), per active tab, sorted by position, wrapping, the walk
+      counts a caret already parked on a diagnostic so the first press shows
+      the hint where the cursor stands. Each jump records a jump-list entry
+      (`Ctrl+Alt+←` walks back), and the status line carries the index, the
+      severity and the message — the inline hint of the line under the cursor.
+      (F8/Shift+F8 from the plan stayed taken: F8 switches panes.)
+- [x] Hover documentation (`Ctrl+K`, the palette "Edit: Hover"): the server's
+      markdown as a bottom overlay — code fences lose their markers, backticks
+      unwrap, long lines clip to the pane width; Esc closes, an empty reply
+      says so instead of opening an empty box.
+- [x] References ("Find Usages", `Shift+F12`, the palette "Edit: Find
+      References"): a bottom list like the code-actions panel (↑↓/j/k, Enter
+      jumps through `focusOrOpen` + a jump-list entry, Esc closes). The
+      declaration is included, so the definition the usages hang off is in
+      the list.
+- [x] Outline (`Ctrl+Alt+O`, the palette "View: Document Outline"): the
+      document symbols in a bottom list with a kind glyph, the line number and
+      the detail; Enter jumps. Both reply shapes parse — hierarchical
+      DocumentSymbol[] (flattened in document order) and flat
+      SymbolInformation[].
+- [x] The language table moved into the config: `[lsp] lang.<id> = command
+      [args...]` replaces a built-in entry (`lang.go = my-gopls --stdio`),
+      an empty value removes the language (`lang.python =`), and a bare
+      extension id adds a language the table never knew (`lang.foo =
+      foo-ls`). The lookup answers by the built-in language id first, then the
+      bare extension.
+- [x] Auto-restart of a crashed server: the client marks itself dead when its
+      read loop hits EOF (`Alive`), `ensureLSP` drops a dead client and
+      lazily spawns a fresh one on the next LSP request, with a status
+      message.
+- [x] `workspace/didChangeWatchedFiles`: a watcher event outside the editor
+      (an agent commit past the open tabs, a tool run) is forwarded to the
+      server, so its caches drop the stale file and the diagnostics follow
+      the working tree.
+- [x] Health-check in the palette: "LSP: Server Status" already existed
+      (`lspStatusMsg`); this milestone's restart command (`msg.lsp_respawned`
+      on a crash) completes the picture.
+- Workspace symbols in the palette / search-everywhere: deliberately left
+  out — document outline covers the daily navigation, and a workspace-wide
+  symbol query needs result streaming and a cap the current panel shape does
+  not have. Revisit if it hurts.
+- Signature help while typing: left out with the same reasoning — the hover
+  overlay shows the same information on demand, and an auto-popping signature
+  window fights the completion popup for the same corner of the screen.
 
 ### M11 — highlighting: incremental
 Careful: go-tree-sitter pulls cgo and breaks the 8-platform no-CGO

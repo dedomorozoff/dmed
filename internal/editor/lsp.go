@@ -85,10 +85,31 @@ func lspServerFor(ext string) (cmd string, args []string, langID string) {
 }
 
 // lspResolve is the config-aware variant of lspServerFor: the master [lsp]
-// switch and per-language opt-out toggles can shut a server off even when the
-// binary is installed. Empty command means no LSP for that extension.
+// switch, per-language opt-out toggles and the lang.<id> command overrides
+// shape the answer. Empty command means no LSP for that extension.
 func (m Model) lspResolve(ext string) (cmd string, args []string, langID string) {
 	cmd, args, lang := lspServerFor(ext)
+	// A hand-written lang.<id> entry wins over the built-in table; the lookup
+	// key is the language id the built-in table answered, or the bare
+	// extension for an unknown file type (so a config can add a language the
+	// table never knew).
+	if m.cfg.LSP.Languages != nil {
+		id := lang
+		if id == "" {
+			id = strings.TrimPrefix(ext, ".")
+		}
+		line, ok := m.cfg.LSP.Languages[id]
+		if !ok {
+			line, ok = m.cfg.LSP.Languages[strings.TrimPrefix(ext, ".")]
+		}
+		if ok {
+			if strings.TrimSpace(line) == "" {
+				return "", nil, "" // explicitly removed
+			}
+			fields := strings.Fields(line)
+			return fields[0], fields[1:], id
+		}
+	}
 	if cmd == "" || lang == "" {
 		return "", nil, ""
 	}
@@ -141,7 +162,14 @@ func lspMissingHint(path string) string {
 
 // ensureLSP starts a language server for the current file if supported and the
 // server binary is installed. It is lazy: only invoked when completion is used.
+// A client whose server process died is dropped and a fresh one started — the
+// auto-restart of a crashed server.
 func (m *Model) ensureLSP() {
+	if m.lspClient != nil && !m.lspClient.Alive() {
+		_ = m.lspClient.Close()
+		m.lspClient = nil
+		m.msg = m.t("msg.lsp_respawned")
+	}
 	if m.lspClient != nil {
 		return
 	}

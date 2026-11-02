@@ -71,6 +71,10 @@ type DebugConfig struct {
 type LSPConfig struct {
 	Enabled  bool            // master switch; default true = LSP on everywhere
 	Disabled map[string]bool // language id => LSP switched off for it
+	// Languages overrides the built-in server table: language id => command
+	// line ("gopls", "pyright-langserver --stdio"). An empty command removes
+	// the language; entries only add or replace, the built-ins stay.
+	Languages map[string]string
 }
 
 // AgentConfig holds settings for background agent tasks (M4).
@@ -329,8 +333,9 @@ func Defaults() Config {
 			AutoDetect:    true,
 		},
 		LSP: LSPConfig{
-			Enabled:  true,
-			Disabled: map[string]bool{},
+			Enabled:   true,
+			Disabled:  map[string]bool{},
+			Languages: map[string]string{},
 		},
 	}
 }
@@ -647,6 +652,16 @@ func loadFile(path string, cfg *Config) {
 		}
 		for k, v := range s {
 			if k == "enabled" {
+				continue
+			}
+			// lang.<id> = command [args...] — a per-language override of the
+			// built-in server table; an empty value removes the language.
+			if strings.HasPrefix(k, "lang.") {
+				lang := strings.TrimPrefix(k, "lang.")
+				if cfg.LSP.Languages == nil {
+					cfg.LSP.Languages = map[string]string{}
+				}
+				cfg.LSP.Languages[lang] = v
 				continue
 			}
 			if parseBool(v) {

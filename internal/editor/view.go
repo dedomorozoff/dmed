@@ -282,7 +282,7 @@ func (m Model) contextBottomExtraRows() int {
 		m.aiInlineOpen, m.aiInlineBusy, m.aiFixOpen, m.aiFixBusy,
 		m.aiFixReviewMode, m.conflictOpen, m.treeConfirm != "", m.quitConfirm,
 		m.aiCfgOpen, m.gitOpen, m.promptSave, m.promptOpen,
-		m.searchOpen, m.gotoOpen, m.lspRenameOpen:
+		m.searchOpen, m.gotoOpen, m.lspRenameOpen, m.hoverOpen:
 		return 1
 	default:
 		return 0
@@ -290,7 +290,7 @@ func (m Model) contextBottomExtraRows() int {
 }
 
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.contextBottomExtraRows() - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows() - m.askExtraRows() - m.projSearchExtraRows() - m.lspActionsExtraRows()
+	h := m.height - 2 - m.contextBottomExtraRows() - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows() - m.askExtraRows() - m.projSearchExtraRows() - m.lspActionsExtraRows() - m.m10PanelExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -452,6 +452,15 @@ func (m Model) View() tea.View {
 	}
 	if m.lspActionsOpen {
 		rows = append(rows, m.withDivider(m.lspActionsPanel())...)
+	}
+	if m.hoverOpen {
+		rows = append(rows, m.withDivider(m.hoverPanel())...)
+	}
+	if m.refsOpen {
+		rows = append(rows, m.withDivider(m.refsPanel())...)
+	}
+	if m.outlineOpen {
+		rows = append(rows, m.withDivider(m.outlinePanel())...)
 	}
 	if m.agentPrompt {
 		rows = append(rows, m.agentPromptInputRender()...)
@@ -2128,6 +2137,28 @@ func (m Model) lspActionsExtraRows() int {
 	return n + 2 // divider + title
 }
 
+// m10PanelExtraRows is the height the references and outline panels add —
+// the same shape as lspActionsExtraRows (divider + title + the visible
+// window). The hover panel is a one-row overlay handled by contextBottomRow.
+func (m Model) m10PanelExtraRows() int {
+	const visible = 10
+	if m.refsOpen {
+		n := len(m.refs)
+		if n > visible {
+			n = visible
+		}
+		return n + 2
+	}
+	if m.outlineOpen {
+		n := len(m.outline)
+		if n > 12 {
+			n = 12
+		}
+		return n + 2
+	}
+	return 0
+}
+
 // lspRenameInputRender is the rename prompt line (Enter fires, Esc cancels).
 func (m Model) lspRenameInputRender() string {
 	line := statusHiStyle.Render(m.t("rename.prompt")) +
@@ -2162,6 +2193,117 @@ func (m Model) lspActionsPanel() []string {
 	}
 	return rows
 }
+
+// hoverPanel renders the hover popup: the server's markdown as plain lines,
+// clipped to the pane width, hint row with the close key.
+func (m Model) hoverPanel() []string {
+	rows := make([]string, 0, len(m.hoverText)+2)
+	title := statusHiStyle.Render(" " + m.t("hover.title"))
+	fill := m.width - lipgloss.Width(title)
+	if fill > 0 {
+		title += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	rows = append(rows, title)
+	for _, ln := range m.hoverText {
+		for len(ln) > 0 {
+			cut := len(ln)
+			if cut > m.width-2 {
+				cut = m.width - 2
+			}
+			rows = append(rows, statusStyle.Render(" "+ln[:cut]))
+			ln = ln[cut:]
+		}
+	}
+	hint := hintStyle.Render(" " + m.t("hover.hint"))
+	fill = m.width - lipgloss.Width(hint)
+	if fill > 0 {
+		hint += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	rows = append(rows, hint)
+	return rows
+}
+
+// symKindGlyph renders a symbol kind as a one-cell glyph (the common kinds)
+// or "·" for the rest.
+func (m Model) symKindGlyph(kind int) string {
+	switch kind {
+	case 5: // Class
+		return "C"
+	case 6: // Interface
+		return "I"
+	case 12: // Function
+		return "f"
+	case 13: // Variable
+		return "v"
+	case 9: // Constructor
+		return "c"
+	case 10: // Method
+		return "m"
+	case 23: // Struct
+		return "S"
+	case 8: // Field
+		return "F"
+	case 3: // Namespace
+		return "n"
+	}
+	return "·"
+}
+
+// refsPanel renders the references list: one row per usage, path:line prefix
+// kept narrow so the code line reads first.
+func (m Model) refsPanel() []string {
+	rows := make([]string, 0, len(m.refs)+1)
+	title := statusHiStyle.Render(" " + m.t("refs.title"))
+	fill := m.width - lipgloss.Width(title)
+	if fill > 0 {
+		title += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	rows = append(rows, title)
+	const visible = 10
+	n := len(m.refs)
+	end := m.refsOff + visible
+	for i := m.refsOff; i < end && i < n; i++ {
+		loc := m.refs[i]
+		where := loc.Path + ":" + itoa(loc.Line+1)
+		label := " " + where + "  "
+		if i == m.refsSel {
+			rows = append(rows, statusHiStyle.Render(padTo(label, m.width)))
+		} else {
+			rows = append(rows, statusStyle.Render(padTo(label, m.width)))
+		}
+	}
+	return rows
+}
+
+// outlinePanel renders the symbol list: kind glyph, name, and the line number.
+func (m Model) outlinePanel() []string {
+	rows := make([]string, 0, len(m.outline)+1)
+	title := statusHiStyle.Render(" " + m.t("outline.title"))
+	fill := m.width - lipgloss.Width(title)
+	if fill > 0 {
+		title += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	rows = append(rows, title)
+	const visible = 12
+	n := len(m.outline)
+	end := m.outlineOff + visible
+	for i := m.outlineOff; i < end && i < n; i++ {
+		sym := m.outline[i]
+		label := " " + m.symKindGlyph(sym.Kind) + " " + sym.Name + "  :" + itoa(sym.Line+1)
+		if sym.Detail != "" {
+			label += " " + sym.Detail
+		}
+		if i == m.outlineSel {
+			rows = append(rows, statusHiStyle.Render(padTo(label, m.width)))
+		} else {
+			rows = append(rows, statusStyle.Render(padTo(label, m.width)))
+		}
+	}
+	return rows
+}
+
+// itoa is a tiny strconv.Itoa alias for the panel formatters.
+func itoa(n int) string { return strconv.Itoa(n) }
 
 // projListRow renders row i of the panel list: a hit in Find in Project, a
 // previewed file in Replace in Project.
@@ -2746,7 +2888,7 @@ func (m Model) statusBar() string {
 		}
 	}
 	hint := ""
-	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gotoOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !m.projSearchOpen && !m.lspRenameOpen && !m.lspActionsOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
+	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gotoOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !m.projSearchOpen && !m.lspRenameOpen && !m.lspActionsOpen && !m.hoverOpen && !m.refsOpen && !m.outlineOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
 		hint = m.t("")
 		if m.layout != splitNone {
 			hint += m.t("status.f8_pane")

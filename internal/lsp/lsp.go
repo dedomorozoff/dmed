@@ -59,6 +59,7 @@ type Client struct {
 	diagnostics map[string][]Diagnostic
 	diagMu      sync.RWMutex
 	onDiag      func(path string, diags []Diagnostic)
+	dead        atomic.Bool // the server process exited; calls fail fast
 }
 
 type rpcRequest struct {
@@ -279,6 +280,31 @@ func (c *Client) GetDiagnostics(path string) []Diagnostic {
 	return c.diagnostics[abs]
 }
 
+// DidChangeWatchedFiles tells the server that files changed outside the
+// editor (a watcher event, an agent commit past the open tabs). Servers use
+// it to drop their file caches — without it gopls keeps serving stale
+// diagnostics for a file the working tree no longer holds. An empty changes
+// list sends nothing.
+func (c *Client) DidChangeWatchedFiles(paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	changes := make([]map[string]interface{}, 0, len(paths))
+	for _, p := range paths {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		changes = append(changes, map[string]interface{}{"uri": pathToURI(abs)})
+	}
+	if len(changes) == 0 {
+		return
+	}
+	_ = c.notify("workspace/didChangeWatchedFiles", map[string]interface{}{
+		"changes": changes,
+	})
+}
+
 // callTimeout bounds how long call blocks waiting for a server response. It
 // must stay generous: on a cold start gopls indexes the whole module graph
 // before it can answer the first completion, which can take close to a minute
@@ -288,8 +314,10 @@ const callTimeout = 60 * time.Second
 
 // closePending unblocks every call still waiting for a response. Called from
 // the read loop once the server process dies, so callers error out promptly
-// instead of draining the full timeout.
+// instead of draining the full timeout. It also marks the client dead, which
+// Alive reports so the editor can respawn the server on the next request.
 func (c *Client) closePending() {
+	c.dead.Store(true)
 	c.mu.Lock()
 	for id, ch := range c.pending {
 		close(ch)
@@ -297,6 +325,12 @@ func (c *Client) closePending() {
 	}
 	c.mu.Unlock()
 }
+
+// Alive reports whether the server process is still expected to answer.
+// A client whose read loop hit EOF is dead; the editor drops it and lazily
+// starts a fresh one on the next LSP request (auto-restart of a crashed
+// server).
+func (c *Client) Alive() bool { return !c.dead.Load() }
 
 func (c *Client) call(method string, params interface{}) (json.RawMessage, error) {
 	// All requests must wait for the initialize handshake: gopls processes
@@ -550,8 +584,232 @@ func (c *Client) Definition(path string, line, col int) (*Location, error) {
 	return nil, nil
 }
 
-// TextEdit is one replacement inside a document. Positions are 0-based;
-// StartCol/EndCol are LSP character offsets (UTF-16 code units, see
+// Hover is the reply of textDocument/hover: the rendered markdown of the
+// symbol under the cursor and the range it covers. Both fields are optional
+// in the protocol; an empty Contents means "nothing to show".
+type Hover struct {
+	Contents string
+	// Range is 0-indexed buffer coordinates (start line/col, end line/col).
+	Line    int
+	Col     int
+	EndLine int
+	EndCol  int
+	HasRange bool
+}
+
+// SymbolKind names are the LSP SymbolKind numbers; the editor renders a
+// handful of them as glyphs and falls back to the number's common name.
+type DocumentSymbol struct {
+	Name      string
+	Kind      int
+	Line      int // 0-indexed range start
+	Col       int
+	EndLine   int
+	Detail    string
+	Children  []DocumentSymbol
+	Selection int // the range.start.line the outline sorts by (same as Line)
+}
+
+// rawSymbol is the wire shape of one hierarchical DocumentSymbol (children
+// nested as raw JSON, so one named type can recurse without pointer gymnastics).
+type rawSymbol struct {
+	Name     string            `json:"name"`
+	Kind     int               `json:"kind"`
+	Detail   string            `json:"detail"`
+	Range    struct {
+		Start struct {
+			Line      int `json:"line"`
+			Character int `json:"character"`
+		} `json:"start"`
+		End struct {
+			Line      int `json:"line"`
+			Character int `json:"character"`
+		} `json:"end"`
+	} `json:"range"`
+	Children []json.RawMessage `json:"children"`
+}
+
+// DocumentSymbols returns the flat symbol list of a document. The reply shape
+// is either DocumentSymbol[] (hierarchical, each with a range + selectionRange
+// and optional children) or SymbolInformation[] (flat, location-based); both
+// are parsed, the hierarchical tree is flattened in document order.
+func (c *Client) DocumentSymbols(path string) ([]DocumentSymbol, error) {
+	abs, _ := filepath.Abs(path)
+	res, err := c.call("textDocument/documentSymbol", map[string]interface{}{
+		"textDocument": map[string]interface{}{"uri": pathToURI(abs)},
+	})
+	if err != nil || len(res) == 0 {
+		return nil, err
+	}
+	// Hierarchical shape first: [{name, kind, range{...}, children:[...], detail}].
+	var hier []rawSymbol
+	if err := json.Unmarshal(res, &hier); err == nil && len(hier) > 0 && hier[0].Range.End.Line != 0 {
+		var out []DocumentSymbol
+		var walk func(raws []rawSymbol)
+		walk = func(raws []rawSymbol) {
+			for _, r := range raws {
+				out = append(out, DocumentSymbol{
+					Name:    r.Name,
+					Kind:    r.Kind,
+					Detail:  r.Detail,
+					Line:    r.Range.Start.Line,
+					Col:     r.Range.Start.Character,
+					EndLine: r.Range.End.Line,
+				})
+				if len(r.Children) > 0 {
+					var kids []rawSymbol
+					if err := json.Unmarshal([]byte("["+strings.Join(rawJSONs(r.Children), ",")+"]"), &kids); err == nil {
+						walk(kids)
+					}
+				}
+			}
+		}
+		walk(hier)
+		if len(out) > 0 {
+			sort.Slice(out, func(i, j int) bool { return out[i].Line < out[j].Line })
+			return out, nil
+		}
+	}
+	// Flat SymbolInformation shape: [{name, kind, location{uri, range}}].
+	var flat []struct {
+		Name     string `json:"name"`
+		Kind     int    `json:"kind"`
+		Location struct {
+			Range struct {
+				Start struct {
+					Line      int `json:"line"`
+					Character int `json:"character"`
+				} `json:"start"`
+				End struct {
+					Line      int `json:"line"`
+					Character int `json:"character"`
+				} `json:"end"`
+			} `json:"range"`
+		} `json:"location"`
+	}
+	if err := json.Unmarshal(res, &flat); err == nil {
+		var out []DocumentSymbol
+		for _, r := range flat {
+			out = append(out, DocumentSymbol{
+				Name:    r.Name,
+				Kind:    r.Kind,
+				Line:    r.Location.Range.Start.Line,
+				Col:     r.Location.Range.Start.Character,
+				EndLine: r.Location.Range.End.Line,
+			})
+		}
+		return out, nil
+	}
+	return nil, nil
+}
+
+// rawJSONs is a tiny helper: []json.RawMessage as []string for joining.
+func rawJSONs(raws []json.RawMessage) []string {
+	out := make([]string, len(raws))
+	for i, r := range raws {
+		out[i] = string(r)
+	}
+	return out
+}
+
+// References returns the locations referencing the symbol at (line, col).
+// includeDecl controls whether the symbol's own declaration counts.
+func (c *Client) References(path string, line, col int, includeDecl bool) ([]Location, error) {
+	abs, _ := filepath.Abs(path)
+	res, err := c.call("textDocument/references", map[string]interface{}{
+		"textDocument": map[string]interface{}{"uri": pathToURI(abs)},
+		"position": map[string]interface{}{
+			"line":      line,
+			"character": col,
+		},
+		"context": map[string]interface{}{"includeDeclaration": includeDecl},
+	})
+	if err != nil || len(res) == 0 {
+		return nil, err
+	}
+	var locs []struct {
+		URI   string `json:"uri"`
+		Range struct {
+			Start struct {
+				Line      int `json:"line"`
+				Character int `json:"character"`
+			} `json:"start"`
+		} `json:"range"`
+	}
+	if err := json.Unmarshal(res, &locs); err != nil {
+		return nil, err
+	}
+	out := make([]Location, 0, len(locs))
+	for _, l := range locs {
+		out = append(out, Location{Path: uriToPath(l.URI), Line: l.Range.Start.Line, Col: l.Range.Start.Character})
+	}
+	return out, nil
+}
+
+// Hover asks for the hover information at (line, col). The reply is either
+// null (nothing under the cursor) or {contents, range?}; contents is a string,
+// a MarkupContent {value} or the legacy {language, value} pair.
+func (c *Client) Hover(path string, line, col int) (*Hover, error) {
+	abs, _ := filepath.Abs(path)
+	res, err := c.call("textDocument/hover", map[string]interface{}{
+		"textDocument": map[string]interface{}{"uri": pathToURI(abs)},
+		"position": map[string]interface{}{
+			"line":      line,
+			"character": col,
+		},
+	})
+	if err != nil || len(res) == 0 || string(res) == "null" {
+		return nil, err
+	}
+	var raw struct {
+		Contents json.RawMessage `json:"contents"`
+		Range    struct {
+			Start struct {
+				Line      int `json:"line"`
+				Character int `json:"character"`
+			} `json:"start"`
+			End struct {
+				Line      int `json:"line"`
+				Character int `json:"character"`
+			} `json:"end"`
+		} `json:"range"`
+	}
+	if err := json.Unmarshal(res, &raw); err != nil {
+		return nil, err
+	}
+	h := &Hover{}
+	// contents: string | {value} | {language, value} | [legacy pairs]
+	var s string
+	if err := json.Unmarshal(raw.Contents, &s); err == nil {
+		h.Contents = s
+	} else {
+		var mk struct {
+			Value string `json:"value"`
+		}
+		if err := json.Unmarshal(raw.Contents, &mk); err == nil {
+			h.Contents = mk.Value
+		} else {
+			var legacy struct {
+				Language string `json:"language"`
+				Value    string `json:"value"`
+			}
+			if err := json.Unmarshal(raw.Contents, &legacy); err == nil {
+				h.Contents = legacy.Value
+			}
+		}
+	}
+	if raw.Range.End.Line != 0 || raw.Range.Start.Line != 0 {
+		h.Line, h.Col = raw.Range.Start.Line, raw.Range.Start.Character
+		h.EndLine, h.EndCol = raw.Range.End.Line, raw.Range.End.Character
+		h.HasRange = true
+	}
+	if strings.TrimSpace(h.Contents) == "" {
+		return nil, nil
+	}
+	return h, nil
+}
+
+// TextEdit is one replacement inside a document. Positions are 0-based;// StartCol/EndCol are LSP character offsets (UTF-16 code units, see
 // ColToRune) because the protocol says so — convert at application time when
 // the line's runes are available.
 type TextEdit struct {

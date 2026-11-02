@@ -14,7 +14,7 @@ PREFIX   ?= /usr/local
 # Total coverage measured by `make cover`. Raise it when coverage goes up;
 # `make cover-check` fails when the total drops more than COVERAGE_SLACK
 # points below it, so a new untested file cannot silently pass CI.
-COVERAGE_BASELINE := 71.8
+COVERAGE_BASELINE := 72.1
 COVERAGE_SLACK    := 1
 
 BUILD_TARGETS := build-linux-amd64 build-linux-arm64 build-freebsd-amd64 \

@@ -559,6 +559,23 @@ var editorBindings = map[string]binding{
 		m.focusOtherPane()
 		return nil, true
 	},
+	"alt+e": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.nextDiagnostic(1)
+		return nil, true
+	},
+	"alt+shift+e": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.nextDiagnostic(-1)
+		return nil, true
+	},
+	"ctrl+k": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		return m.startHoverCmd(), true
+	},
+	"shift+f12": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		return m.startRefsCmd(), true
+	},
+	"ctrl+alt+o": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		return m.startOutlineCmd(), true
+	},
 	"ctrl+alt+w": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.closePane()
 		return nil, true
@@ -973,6 +990,16 @@ func (m *Model) dispatchPanes(s string, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	}
 	if m.lspActionsOpen {
 		return m.handleLspActions(s, msg), true
+	}
+	// Hover, references and outline: bottom overlays like the quick fixes.
+	if m.hoverOpen {
+		return m.handleHover(s, msg), true
+	}
+	if m.refsOpen {
+		return m.handleRefs(s, msg), true
+	}
+	if m.outlineOpen {
+		return m.handleOutline(s, msg), true
 	}
 	// Find in Project owns its keys first: it is a bottom overlay like the
 	// finder, and its Enter must not jump the file-search cursor underneath.

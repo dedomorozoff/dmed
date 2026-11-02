@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"bytes"
+	"io"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -71,6 +72,44 @@ func testClient() *Client {
 		pending:  make(map[int64]chan json.RawMessage),
 		opened:   make(map[string]bool),
 		versions: make(map[string]int),
+	}
+}
+
+// clientWithWriter is a testClient whose wire output lands in the given
+// recorder.
+func clientWithWriter(w io.WriteCloser) *Client {
+	c := testClient()
+	c.stdin = w
+	return c
+}
+
+// RecWriter is an exported recorder for TestClientWithWriter: every write
+// lands in Buf for inspection.
+type RecWriter struct {
+	Buf bytes.Buffer
+}
+
+func (r *RecWriter) Write(p []byte) (int, error) { return r.Buf.Write(p) }
+func (r *RecWriter) Close() error                { return nil }
+
+// TestWatchedFilesNotification checks the wire: a file event outside the
+// editor reaches the server as workspace/didChangeWatchedFiles with the
+// file's URI, and an empty list sends nothing.
+func TestWatchedFilesNotification(t *testing.T) {
+	r := &RecWriter{}
+	c := clientWithWriter(r)
+	c.DidChangeWatchedFiles([]string{filepath.Join("some", "file.go")})
+	out := r.Buf.String()
+	if !strings.Contains(out, "workspace/didChangeWatchedFiles") {
+		t.Fatalf("notification missing: %q", out)
+	}
+	if !strings.Contains(out, "file.go") {
+		t.Fatalf("URI missing: %q", out)
+	}
+	r.Buf.Reset()
+	c.DidChangeWatchedFiles(nil)
+	if r.Buf.Len() != 0 {
+		t.Fatalf("empty list sent %q", r.Buf.String())
 	}
 }
 
