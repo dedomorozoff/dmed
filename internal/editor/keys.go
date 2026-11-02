@@ -164,9 +164,7 @@ var globalBindings = map[string]binding{
 	},
 	"ctrl+c": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.cur().buf.HasSelection() {
-			m.clipboard = m.cur().buf.SelectedText()
-			clipboard.WriteAll(m.clipboard)
-			m.msg = m.t("msg.copied")
+			m.copySelection()
 			return nil, true
 		}
 		// Ctrl+C never quits: an editor that dies on the key a terminal
@@ -179,10 +177,7 @@ var globalBindings = map[string]binding{
 	},
 	"ctrl+x": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.cur().buf.HasSelection() {
-			m.clipboard = m.cur().buf.SelectedText()
-			clipboard.WriteAll(m.clipboard)
-			m.cur().buf.DeleteSelection()
-			m.msg = m.t("msg.cut")
+			m.cutSelection()
 			return nil, true
 		}
 		return m.closeActiveTab(), true
@@ -570,16 +565,16 @@ var editorBindings = map[string]binding{
 	},
 	"ctrl+v": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if sysClip, err := clipboard.ReadAll(); err == nil && sysClip != "" {
-			m.clipboard = normalizePaste(sysClip)
-		}
-		if m.clipboard != "" {
-			if m.cur().buf.HasMultipleCursors() {
-				m.cur().buf.MultiInsertText(m.clipboard)
-			} else {
-				m.cur().buf.InsertText(m.clipboard)
+			sysClip = normalizePaste(sysClip)
+			// External text took the clipboard over: it cannot be a block this
+			// editor copied, so the unfold rule does not apply to it.
+			if sysClip != m.clipboard {
+				m.clipboardBlock = false
 			}
-			m.msg = ""
+			m.clipboard = sysClip
 		}
+		m.pasteClipboard(m.clipboard)
+		m.msg = ""
 		return nil, true
 	},
 	"alt+left": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
@@ -650,6 +645,22 @@ var editorBindings = map[string]binding{
 	},
 	"shift+right": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.MoveRightWithSelect()
+		return nil, true
+	},
+	"ctrl+alt+shift+up": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.growColumnSelection(-1, 0)
+		return nil, true
+	},
+	"ctrl+alt+shift+down": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.growColumnSelection(1, 0)
+		return nil, true
+	},
+	"ctrl+alt+shift+left": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.growColumnSelection(0, -1)
+		return nil, true
+	},
+	"ctrl+alt+shift+right": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.growColumnSelection(0, 1)
 		return nil, true
 	},
 	"shift+home": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {

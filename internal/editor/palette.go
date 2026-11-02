@@ -66,6 +66,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "toggle_breakpoint", title: "cmd.toggle_breakpoint_t", desc: "cmd.toggle_breakpoint_d", action: func(m *Model) tea.Cmd { return m.toggleDebugBreakpoint() }},
 		{id: "goto_definition", title: "cmd.goto_definition_t", desc: "cmd.goto_definition_d", action: func(m *Model) tea.Cmd { return m.gotoDefinition() }},
 		{id: "jump_bracket", title: "cmd.jump_bracket_t", desc: "cmd.jump_bracket_d", action: func(m *Model) tea.Cmd { m.jumpToMatchingDelimiterActive(); return nil }},
+		{id: "col_select_toggle", title: "cmd.col_select_t", desc: "cmd.col_select_d", action: func(m *Model) tea.Cmd { m.toggleColumnSelectionActive(); return nil }},
 		{id: "select_inside_brackets", title: "cmd.select_inside_t", desc: "cmd.select_inside_d", action: func(m *Model) tea.Cmd { m.selectInsideBracketsActive(); return nil }},
 		{id: "jump_back", title: "cmd.jump_back_t", desc: "cmd.jump_back_d", action: func(m *Model) tea.Cmd { m.jumpBack(); return nil }},
 		{id: "jump_forward", title: "cmd.jump_forward_t", desc: "cmd.jump_forward_d", action: func(m *Model) tea.Cmd { m.jumpForward(); return nil }},

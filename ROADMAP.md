@@ -555,7 +555,7 @@ plan with per-item estimates, design decisions and open questions lives in
       traceable in history rather than a silent tree rewrite. No external
       terminal needed.
 
-## M9–M13 — planned (M9 started: bracket matching, selection transformations, jump list, MRU tabs and last change)
+## M9–M13 — planned (M9 started: bracket matching, selection transformations, jump list, MRU tabs and last change; column selection done, macros remain)
 
 The list below is drawn from the aftermath of Post-M8: the "chroma →
 tree-sitter (later)" note in the stack, the plugins' "Remaining: more
@@ -587,8 +587,27 @@ Order and contents will be refined as work proceeds.
       step, and the selection needed its own setter (`SelectRange`) for exactly that
       reason: `DragSelect` re-clamps the column through the sticky goal column and
       would quietly move an end the command had just computed.
-- Column (rectangular) selection: `Alt+Shift+arrows`, drag with a modifier;
-  pasting a block unfolds it into one multi-cursor per line.
+- [x] Column (rectangular) selection: `Ctrl+Alt+Shift+arrows` grows a block
+      (first press enters column mode from the caret or from a linear
+      selection's bounding box), the palette "Edit: Column Selection"
+      reinterprets an existing selection as a rectangle. The block is the
+      buffer's two selection corners read as a rectangle (`internal/buffer/
+      column.go`) — no new mode, the ~20 places that clear a selection end the
+      block with it, and the linear extend chords clear the flag so a stale
+      block cannot turn an ordinary selection rectangular. The corner column
+      is the caret's sticky goal column, so a vertical grow keeps its width
+      across short rows; cells are derived per read and clamped to each row, a
+      row past the block's left edge holds nothing. Typing puts one line into
+      every cell, a multi-line paste distributes one line per row, a block
+      copied to the clipboard unfolds back down a column on paste
+      (`clipboardBlock` remembers it — the system clipboard carries no type),
+      Backspace/Delete work per cell with the character in front of an empty
+      one, Enter splits every row at the block's left edge, case folding
+      touches one cell per row, and a row-permutation command does not narrow
+      the corner. Every edit is one undo step and leaves a caret per row, so
+      the block turns into ordinary multi-cursor state. A Shift+drag grows the
+      block with the pointer (the chords need a terminal that reports three
+      modifiers; the drag and the palette toggle do not).
 - Fold ranges are still purely indentation-based, which no target lookup can
   fix: a `switch` whose `case` labels sit at the `switch` column opens no block
   of its own, so Alt+C there folds the enclosing function instead, and a body

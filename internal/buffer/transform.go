@@ -30,6 +30,12 @@ func (b *Buffer) commitRange(mat [][]rune) {
 	b.setLines(mat)
 	b.col = clampCol(b.col, b.d.lineAt(b.line))
 	b.selCol = clampCol(b.selCol, b.d.lineAt(b.selLine))
+	if b.colSel {
+		// The goal column is a rectangle's corner and may stand past the end of a
+		// short row: lowering it to the clamped caret would narrow the block after
+		// a command that permuted its rows and never touched its columns.
+		return
+	}
 	b.goalCol = b.col
 }
 
@@ -44,6 +50,12 @@ func (b *Buffer) ApplyCase(toUpper bool) {
 	fold := strings.ToLower
 	if toUpper {
 		fold = strings.ToUpper
+	}
+	if b.IsColumnSelection() {
+		// The span below would rewrite whole rows between the corners: a rectangle
+		// folds one cell per row and leaves the rest of the row alone.
+		b.MapColumnCells(fold)
+		return
 	}
 	if b.HasSelection() {
 		sl, sc, el, ec := b.SelectionRange()

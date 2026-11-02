@@ -23,6 +23,9 @@ type Buffer struct {
 	selLine       int
 	selCol        int
 	hasSelection  bool
+	// Read the selection as a rectangle instead of the span between its corners.
+	// Meaningful only while hasSelection is set; see column.go.
+	colSel        bool
 	undoStack     []snapshot
 	redoStack     []snapshot
 	saved         string
@@ -117,15 +120,20 @@ func (b *Buffer) HasSelection() bool {
 
 func (b *Buffer) ClearSelection() {
 	b.hasSelection = false
+	b.colSel = false
 }
 
 // Deselect clears any active selection.
 func (b *Buffer) Deselect() {
 	b.hasSelection = false
+	b.colSel = false
 }
 
-// StartSelection ensures a selection anchor exists at the current cursor.
+// StartSelection ensures a selection anchor exists at the current cursor. It is
+// the entry the linear extend chords share, so it drops the column flag: a plain
+// Shift+arrow on a block makes an ordinary selection, not a rectangle.
 func (b *Buffer) StartSelection() {
+	b.colSel = false
 	if !b.hasSelection {
 		b.hasSelection = true
 		b.selLine = b.line
@@ -135,6 +143,7 @@ func (b *Buffer) StartSelection() {
 
 // DragSelect moves the cursor and extends the selection anchor.
 func (b *Buffer) DragSelect(line, col int) {
+	b.colSel = false
 	if !b.hasSelection {
 		b.hasSelection = true
 		b.selLine = b.line
@@ -158,6 +167,7 @@ func (b *Buffer) SelectRange(startLine, startCol, endLine, endCol int) {
 	startCol = clampCol(startCol, b.d.lineAt(startLine))
 	endCol = clampCol(endCol, b.d.lineAt(endLine))
 	b.breakGroup()
+	b.colSel = false
 	b.hasSelection = startLine != endLine || startCol != endCol
 	b.selLine, b.selCol = startLine, startCol
 	b.line, b.col = endLine, endCol
@@ -186,6 +196,9 @@ func (b *Buffer) SelectedText() string {
 	if !b.HasSelection() {
 		return ""
 	}
+	if b.IsColumnSelection() {
+		return b.ColumnText()
+	}
 	sl, sc, el, ec := b.SelectionRange()
 	if sl == el {
 		return string(b.d.lineAt(sl)[sc:ec])
@@ -199,6 +212,10 @@ func (b *Buffer) SelectedText() string {
 	return strings.Join(parts, "\n")
 }
 
+// deleteSelectionWithoutUndo removes the selection for a caller that has already
+// pushed its undo step and primed the typing run. It is the linear path: every
+// public caller branches on a column selection first, because a rectangle is one
+// cell per row and the column splice owns the undo step of its own.
 func (b *Buffer) deleteSelectionWithoutUndo() (int, int) {
 	if !b.HasSelection() {
 		return b.line, b.col
@@ -220,6 +237,9 @@ func (b *Buffer) DeleteSelection() bool {
 	if !b.HasSelection() {
 		return false
 	}
+	if b.IsColumnSelection() {
+		return b.applyColumnEdits(b.columnEdits(nil))
+	}
 	b.beginChange()
 	b.pushUndo()
 	b.deleteSelectionWithoutUndo()
@@ -237,6 +257,10 @@ func splitTextLines(text string) [][]rune {
 
 func (b *Buffer) InsertText(text string) {
 	if text == "" && !b.HasSelection() {
+		return
+	}
+	if b.IsColumnSelection() {
+		b.InsertColumnText(text)
 		return
 	}
 	b.beginChange()
@@ -424,6 +448,12 @@ func (b *Buffer) ReplaceAllRE(re *regexp.Regexp, replace string) int {
 }
 
 func (b *Buffer) Insert(r rune) {
+	if b.IsColumnSelection() {
+		// One undo step per keystroke, which is how the multi-cursor edits already
+		// group a run: the block has become a cursor per row by now anyway.
+		b.InsertColumnText(string(r))
+		return
+	}
 	if b.HasSelection() {
 		// Typing over a selection replaces it. The delete and the insert
 		// share ONE undo step: the pre-selection snapshot is pushed here and
@@ -456,6 +486,10 @@ func (b *Buffer) Insert(r rune) {
 }
 
 func (b *Buffer) InsertNewline() {
+	if b.IsColumnSelection() {
+		b.EnterColumn("")
+		return
+	}
 	if b.HasSelection() {
 		b.beginChange()
 		b.pushUndo()
@@ -479,6 +513,10 @@ func (b *Buffer) InsertNewline() {
 // the editor: current line's leading whitespace, possibly one level deeper for
 // an open bracket before the caret). One undo step.
 func (b *Buffer) IndentedNewline(indent string) {
+	if b.IsColumnSelection() {
+		b.EnterColumn(indent)
+		return
+	}
 	if b.HasSelection() {
 		b.beginChange()
 		b.pushUndo()
@@ -500,6 +538,12 @@ func (b *Buffer) IndentedNewline(indent string) {
 }
 
 func (b *Buffer) Backspace() {
+	if b.IsColumnSelection() {
+		// Not simply DeleteSelection: where a row has no cell — the empty column a
+		// stack of vertical carets is — the character in front of it still goes.
+		b.ColumnBackspace()
+		return
+	}
 	if b.HasSelection() {
 		b.DeleteSelection()
 		return
@@ -529,6 +573,10 @@ func (b *Buffer) Backspace() {
 }
 
 func (b *Buffer) Delete() {
+	if b.IsColumnSelection() {
+		b.ColumnDelete()
+		return
+	}
 	if b.HasSelection() {
 		b.DeleteSelection()
 		return

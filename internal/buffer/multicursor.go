@@ -120,6 +120,7 @@ func (b *Buffer) currentWord() []rune {
 // the main cursor and arms multi mode; each subsequent call adds a cursor at
 // the next occurrence of that word. It returns true when something changed.
 func (b *Buffer) AddNextOccurrence() bool {
+	b.colSel = false
 	if b.word == "" {
 		f, t := b.WordAt(b.line, b.col)
 		if f == t {

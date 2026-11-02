@@ -140,6 +140,33 @@ func TestKeyOfNormalization(t *testing.T) {
 			wantText: "",
 		},
 		{
+			// The column-selection chords. Three modifiers on an arrow: the name
+			// order (ctrl, alt, shift) is what the table is keyed by, and all
+			// four directions are bound, so all four names are pinned.
+			name:     "ctrl+alt+shift+up",
+			msg:      tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModCtrl | tea.ModAlt | tea.ModShift},
+			wantKey:  "ctrl+alt+shift+up",
+			wantText: "",
+		},
+		{
+			name:     "ctrl+alt+shift+down",
+			msg:      tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModCtrl | tea.ModAlt | tea.ModShift},
+			wantKey:  "ctrl+alt+shift+down",
+			wantText: "",
+		},
+		{
+			name:     "ctrl+alt+shift+left",
+			msg:      tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModCtrl | tea.ModAlt | tea.ModShift},
+			wantKey:  "ctrl+alt+shift+left",
+			wantText: "",
+		},
+		{
+			name:     "ctrl+alt+shift+right",
+			msg:      tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModCtrl | tea.ModAlt | tea.ModShift},
+			wantKey:  "ctrl+alt+shift+right",
+			wantText: "",
+		},
+		{
 			// Terminals put the raw control byte in Text for these and
 			// String() prints it verbatim: a name no binding could ever match.
 			name:     "enter is named from the code when Text carries CR",

@@ -565,6 +565,10 @@ type Model struct {
 	paletteAll    bool     // "search everywhere": commands, files and settings
 	paletteFiles  []string // the project files the palette can offer
 	clipboard     string
+	// True when `clipboard` was copied off a column (rectangular) selection, so a
+	// paste can unfold it back down a column — the system clipboard carries no
+	// type, this flag is the only memory. See column.go.
+	clipboardBlock bool
 
 	// Language chooser
 	langChooserOpen bool
@@ -758,6 +762,7 @@ type Model struct {
 	termSelEnd    selPos
 	dragChat      bool             // motion events extend the chat selection
 	dragTerm      bool             // motion events extend the terminal selection
+	dragColumn    bool             // Shift+drag extends the column (rectangular) selection
 	termFocus     bool             // the terminal panel owns keyboard input
 	hoverChatBtn  chatButtonAction // chat panel button under the cursor
 
@@ -1399,6 +1404,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case tea.MouseReleaseMsg:
 		m.mouseDown = false
+		m.dragColumn = false
 		switch {
 		case m.dragChat:
 			m.dragChat = false
@@ -1843,8 +1849,25 @@ func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
 		rawCol = 0
 	}
 
+	if m.dragColumn {
+		m.dragColumnTo(ln, rawCol)
+		return nil
+	}
 	m.cur().buf.DragSelect(ln, rawCol)
 	return nil
+}
+
+// dragColumnTo extends the Shift+drag column selection to the pointer. The
+// buffer grows the rectangle's corner toward it; the focus resets match a
+// plain click's.
+func (m *Model) dragColumnTo(ln, rawCol int) {
+	m.treeFocus = false
+	m.agentFocus = false
+	m.gitFocus = false
+	m.gitDiffFocused = false
+	m.chatFocus = false
+	m.termFocus = false
+	m.cur().buf.GrowColumnTo(ln, rawCol)
 }
 
 // updateStatusHover tracks which status-bar icon the cursor is over so the

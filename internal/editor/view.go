@@ -2455,22 +2455,31 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 	selStart := -1
 	selEnd := -1
 	if t.buf.HasSelection() {
-		sl, sc, el, ec := t.buf.SelectionRange()
-		if ln >= sl && ln <= el {
-			if ln == sl {
-				if sc <= len(raw) {
-					selStart = rawToExp[sc]
-				}
-			} else {
-				selStart = 0
+		if t.buf.IsColumnSelection() {
+			// A rectangle highlights one cell per row, not the span between its
+			// corners — ColumnCell clamps to this row and says when it is empty.
+			if f, to, ok := t.buf.ColumnCell(ln); ok {
+				selStart = rawToExp[f]
+				selEnd = rawToExp[to]
 			}
-
-			if ln == el {
-				if ec <= len(raw) {
-					selEnd = rawToExp[ec]
+		} else {
+			sl, sc, el, ec := t.buf.SelectionRange()
+			if ln >= sl && ln <= el {
+				if ln == sl {
+					if sc <= len(raw) {
+						selStart = rawToExp[sc]
+					}
+				} else {
+					selStart = 0
 				}
-			} else {
-				selEnd = len(exp)
+
+				if ln == el {
+					if ec <= len(raw) {
+						selEnd = rawToExp[ec]
+					}
+				} else {
+					selEnd = len(exp)
+				}
 			}
 		}
 	}

@@ -528,6 +528,17 @@ func (m *Model) clickBuffer(x, y int, btn tea.MouseButton, mod tea.KeyMod) tea.C
 		return nil
 	}
 
+	// Shift+drag starts a column (rectangular) selection: the anchor is where
+	// the caret was, the corner follows the pointer.
+	if mod&tea.ModShift != 0 {
+		t.buf.SetCursor(ln, rawCol)
+		t.buf.Deselect()
+		m.treeFocus = false
+		m.mouseDown = true
+		m.dragColumn = true
+		return nil
+	}
+
 	t.buf.SetCursor(ln, rawCol)
 	t.buf.Deselect()
 	m.treeFocus = false
