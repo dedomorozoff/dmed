@@ -44,7 +44,13 @@ type tab struct {
 	syntaxComplete bool   // the cached highlight covers the whole text
 	langTag        string // cached syntax language of the file
 	langKnown      bool
-	repo           *vcs.Repo // cached repository of the file's directory
+	// inc is the per-document incremental token cache (internal/syntax): a
+	// pass reuses the lines whose text and lexer state are unchanged and
+	// tokenizes only the changed region plus its re-sync window. Recreated
+	// when the file's language changes.
+	inc     *syntax.Incremental
+	incLang string
+	repo    *vcs.Repo // cached repository of the file's directory
 	repoTried      bool
 	diffCached     vcs.FileDiff
 	diffText       string

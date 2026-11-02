@@ -32,12 +32,16 @@ const syntaxPassDelay = 150 * time.Millisecond
 // steps — every chunk costs a frame.
 const syntaxChunkLines = 200
 
-// syntaxReq asks for a highlighting pass of one tab's text.
+// syntaxReq asks for a highlighting pass of one tab's text. inc carries the
+// tab's incremental cache (nil on the first pass of a tab); incLang is the
+// language the cache was built for, so a language change resets it.
 type syntaxReq struct {
-	tabIdx int
-	path   string
-	text   string
-	syn    *syntax.Highlighter
+	tabIdx  int
+	path    string
+	text    string
+	syn     *syntax.Highlighter
+	inc     *syntax.Incremental
+	incLang string
 }
 
 // syntaxPassMsg asks the UI thread to start a highlighting pass: the text
@@ -48,12 +52,17 @@ type syntaxPassMsg struct {
 }
 
 // syntaxReadyMsg carries a part of a highlighting pass: the lines that were
-// tokenized so far. The last part of a pass is marked complete.
+// tokenized (or spliced) so far, at offset. The last part of a pass is marked
+// complete. inc is the cache the pass ran through — it becomes the tab's
+// cache for the next pass; incLang stamps the language it was built for.
 type syntaxReadyMsg struct {
 	tabIdx   int
 	text     string
 	lines    []syntax.HighlightedLine
+	offset   int
 	complete bool
+	inc      *syntax.Incremental
+	incLang  string
 }
 
 // waitForSyntax waits for the next message of the highlighting pipeline.
@@ -118,23 +127,37 @@ func (m *Model) scheduleSyntax(tabIdx int, text string) {
 // result to the editor through the syntax channel. The pass publishes the
 // lines it has tokenized while it runs, so the visible part of a large file
 // gets its colors without waiting for the whole file.
+//
+// The pass goes through the tab's incremental cache: lines the previous pass
+// already tokenized in the same lexer state are spliced, only the changed
+// region and its re-sync window are tokenized fresh. A cache keyed by a
+// different language than the file now has is dropped first.
 func (m *Model) startSyntax(req syntaxReq) {
 	ch := m.syntaxCh
 	go func() {
 		defer debug.CapturePanicReport(func() {})
-		var chunk []syntax.HighlightedLine
-		count := 0
-		req.syn.HighlightLines(req.path, req.text, func(line syntax.HighlightedLine) bool {
-			chunk = append(chunk, line)
-			count++
-			if count >= syntaxChunkLines {
-				count = 0
-				ch <- syntaxReadyMsg{tabIdx: req.tabIdx, text: req.text, lines: chunk}
-				chunk = nil
+		lang := syntax.Lang(req.path)
+		inc := req.inc
+		if inc == nil || req.incLang != lang {
+			inc = syntax.NewIncremental()
+		}
+		lines, _ := inc.Update(req.path, req.text, req.syn)
+		// Publish in chunks so the visible part paints first.
+		for i := 0; i < len(lines); i += syntaxChunkLines {
+			end := i + syntaxChunkLines
+			if end > len(lines) {
+				end = len(lines)
 			}
-			return true
-		})
-		ch <- syntaxReadyMsg{tabIdx: req.tabIdx, text: req.text, lines: chunk, complete: true}
+			ch <- syntaxReadyMsg{
+				tabIdx:   req.tabIdx,
+				text:     req.text,
+				lines:    lines[i:end],
+				offset:   i,
+				complete: end == len(lines),
+				inc:      inc,
+				incLang:  lang,
+			}
+		}
 	}()
 }
 
@@ -157,18 +180,32 @@ func (m *Model) runSyntax(tabIdx int) tea.Cmd {
 		t.syntaxPending = false
 		return nil
 	}
-	req := syntaxReq{tabIdx: tabIdx, path: t.path, text: text, syn: m.syn}
+	req := syntaxReq{
+		tabIdx:  tabIdx,
+		path:    t.path,
+		text:    text,
+		syn:     m.syn,
+		inc:     t.inc,
+		incLang: t.incLang,
+	}
 	m.startSyntax(req)
 	return nil
 }
 
 // applySyntax stores a part of a pass. A part for text the buffer has moved
-// away from is dropped; the next update asks for a fresh pass.
+// away from is dropped; the next update asks for a fresh pass. The cache the
+// pass ran through is adopted even when the text moved on: it holds the
+// lines of the text it tokenized, which the next pass diffs against —
+// adopting it is what makes the next pass incremental rather than cold.
 func (m *Model) applySyntax(msg syntaxReadyMsg) {
 	if msg.tabIdx < 0 || msg.tabIdx >= len(m.tabs) {
 		return
 	}
 	t := &m.tabs[msg.tabIdx]
+	if msg.inc != nil && (t.inc == nil || msg.inc != t.inc || t.incLang != msg.incLang) {
+		t.inc = msg.inc
+		t.incLang = msg.incLang
+	}
 	if msg.complete {
 		t.syntaxPending = false
 	}
@@ -177,11 +214,23 @@ func (m *Model) applySyntax(msg syntaxReadyMsg) {
 	}
 	if t.syntaxText != msg.text {
 		// A new pass: the lines of the old one do not fit the text any more.
+		// (The incremental cache survives — the pass adopted it above; it
+		// holds the previous text's lines for the next diff.)
 		t.syntaxCached = nil
 		t.syntaxText = msg.text
 		t.syntaxComplete = false
 	}
-	t.syntaxCached = append(t.syntaxCached, msg.lines...)
+	// The chunk lands at its offset: chunks of a pass cover the text in
+	// order, and a chunk may splice lines the cache reused (which the buffer
+	// below may not have seen yet from earlier chunks of the same pass).
+	for len(t.syntaxCached) < msg.offset {
+		t.syntaxCached = append(t.syntaxCached, syntax.HighlightedLine{})
+	}
+	if msg.offset+len(msg.lines) <= len(t.syntaxCached) {
+		copy(t.syntaxCached[msg.offset:msg.offset+len(msg.lines)], msg.lines)
+	} else {
+		t.syntaxCached = append(t.syntaxCached[:msg.offset], msg.lines...)
+	}
 	if msg.complete {
 		t.syntaxComplete = true
 	}

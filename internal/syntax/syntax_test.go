@@ -128,3 +128,40 @@ func TestCommentTokensUnknown(t *testing.T) {
 		t.Fatalf("unknown type: got (%q,%q), want empty", p, s)
 	}
 }
+
+// TestEmbeddedLanguages pins the composite-lexer behavior the editor relies
+// on: chroma's markdown lexer delegates fenced code blocks to the language
+// lexers, and the JavaScript lexer tokenizes template-string interpolation —
+// both work through the plain HighlightBuffer path, no extra plumbing needed.
+func TestEmbeddedLanguages(t *testing.T) {
+	h := New("monokai")
+
+	// A fenced go block inside markdown: keywords and names must arrive as
+	// Go tokens, not as plain markdown text.
+	md := "# Title\n\n```go\nfunc main() {}\n```\n"
+	hl := h.HighlightBuffer("readme.md", md)
+	found := false
+	for _, ln := range hl {
+		for _, tok := range ln {
+			if tok == chroma.KeywordDeclaration || tok == chroma.NameFunction {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("markdown go-block was not tokenized as Go")
+	}
+
+	// Template-string interpolation in JavaScript.
+	js := "const s = `x ${name} y`;\n"
+	hl = h.HighlightBuffer("a.js", js)
+	hasInterp := false
+	for _, tok := range hl[0] {
+		if tok == chroma.LiteralStringInterpol {
+			hasInterp = true
+		}
+	}
+	if !hasInterp {
+		t.Fatal("template-string interpolation was not tokenized")
+	}
+}

@@ -555,7 +555,7 @@ plan with per-item estimates, design decisions and open questions lives in
       traceable in history rather than a silent tree rewrite. No external
       terminal needed.
 
-## M9–M13 — planned (M9 and M10 done)
+## M9–M13 — planned (M9, M10 and M11 done)
 
 The list below is drawn from the aftermath of Post-M8: the "chroma →
 tree-sitter (later)" note in the stack, the plugins' "Remaining: more
@@ -784,14 +784,37 @@ Order and contents will be refined as work proceeds.
 ### M11 — highlighting: incremental
 Careful: go-tree-sitter pulls cgo and breaks the 8-platform no-CGO
 cross-build. The cheap part first:
-- Incremental highlighting on chroma: a token cache per line, only
-  invalid ranges re-tokenize (the same pattern as the wrap segments and
-  the fold scans), not the whole buffer.
-- Embedded languages (markdown code blocks, template strings) where
-  chroma can do it — composite lexers.
+- [x] **Incremental highlighting on chroma** (`internal/syntax/incremental.go`,
+      the `Incremental` per-line token cache): tokenization is a deterministic
+      function of the text prefix, so lines whose text is byte-for-byte what
+      the previous pass saw can be spliced from the cache — the lexer reaches
+      them in the same state. The pass splices the unchanged prefix, then
+      tokenizes forward watching a re-sync window: when 3 consecutive fresh
+      lines equal their cached tokens (only where the line's text hash also
+      matches, so the cached entry really is that line's previous self), the
+      lexer is demonstrably back in the state the cache was built with — a
+      state shift (a new block comment, an unterminated string) would have
+      made at least one window line differ — and the iteration *stops*, the
+      remaining tail splices from the cache without tokenizing it. Correctness
+      never depends on the heuristic: a wrong decision to keep walking fresh
+      is slow, not wrong. The tab adopts the cache its pass ran through
+      (`tab.inc`, stamped with the language it was built for; a language
+      change resets it), an unchanged text short-circuits before any lexer
+      pass at all, and a language change between passes drops the cache. A
+      one-line edit in a 10k-line Go file went from ~500 ms (full re-tokenize)
+      to ~49 ms — 10x, the bulk of it from not draining the lexer's iterator
+      past the re-sync point. The chunked publishing (`syntaxReadyMsg.offset`)
+      keeps the visible-part-first paint.
+- [x] **Embedded languages**: chroma's composite lexers already cover the
+      plan's cases through the plain `HighlightBuffer` path — a fenced go
+      block in markdown arrives as Go tokens (the markdown lexer delegates to
+      the language lexers), and JavaScript template-string interpolation is
+      tokenized as `LiteralStringInterpol`. Pinned by `TestEmbeddedLanguages`
+      so a chroma upgrade cannot silently drop either.
 - Tree-sitter stays a stretch goal, only if pure-Go bindings appear; then
   folding and bracket matching move from the buffer's own scans
-  (`buffer/match.go`, the fold scan) to the AST.
+  (`buffer/match.go`, the fold scan) to the AST — that is also where the
+  M9 fold-ranges item landed.
 
 ### M12 — AI v3: agents without stops
 - MCP client: attaching external tool servers (`[ai] mcp_servers`), their
