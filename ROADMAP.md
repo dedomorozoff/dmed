@@ -555,7 +555,7 @@ plan with per-item estimates, design decisions and open questions lives in
       traceable in history rather than a silent tree rewrite. No external
       terminal needed.
 
-## M9–M13 — planned (M9 started: bracket matching, selection transformations, jump list, MRU tabs and last change; column selection done, macros remain)
+## M9–M13 — planned (M9 done except the brace-aware fold ranges, which belong with the tree-sitter item in M11)
 
 The list below is drawn from the aftermath of Post-M8: the "chroma →
 tree-sitter (later)" note in the stack, the plugins' "Remaining: more
@@ -636,7 +636,20 @@ Order and contents will be refined as work proceeds.
       rewrite permutes whole lines under them. Fixing the primitive also fixed
       `Ctrl+U` on an unselected buffer: it no longer rebuilds the buffer, so the
       undo history and the caret survive it.
-- Macros: record/playback (`Alt+R`), respecting multi-cursor.
+- [x] **Macros**: record/playback (`Alt+R` starts and stops, `Alt+Shift+R`
+      replays), respecting multi-cursor. Only the keys the *text pane*
+      consumes are recorded — the editor bindings and the typing fallback;
+      the global chords and the pane/overlay keys run as usual while
+      recording but never land in the macro, so a macro can neither swallow
+      Ctrl+Q nor replay into whatever panel has focus. Playback feeds every
+      recorded key through `dispatchKey` — the very chain the live keys ran
+      through (it was factored out of `handleKey` for exactly that) — so a
+      replay respects multi-cursor, smart indent and the column edits by
+      construction, one key per UI step along a tick chain like the GIF
+      frames. Replaying while recording is stop-then-replay, an empty
+      recording is discarded with a message, and the recording lives in the
+      Model unpersisted — a keyboard memory of a few seconds, not a session
+      artifact.
 - [x] **Jump list**: `Ctrl+Alt+←` / `Ctrl+Alt+→` (also the `Edit: Jump Back` /
       `Edit: Jump Forward` palette commands) walk the positions the discrete jumps
       came from, per pane. Only a jump the user cannot retrace by hand records one:

@@ -763,6 +763,14 @@ type Model struct {
 	dragChat      bool             // motion events extend the chat selection
 	dragTerm      bool             // motion events extend the terminal selection
 	dragColumn    bool             // Shift+drag extends the column (rectangular) selection
+
+	// Macro recording (Alt+R record, Alt+Shift+R replay). macroKeys collects
+	// the text-pane keys while recording; macro is the last completed recording
+	// the replay walks one key per UI step. Not persisted. See macro.go.
+	macroRecording bool
+	macroKeys      []macroKey
+	macro          []macroKey
+	replaying      bool
 	termFocus     bool             // the terminal panel owns keyboard input
 	hoverChatBtn  chatButtonAction // chat panel button under the cursor
 
@@ -1279,6 +1287,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.animationDelay() > 0 {
 			m.advanceFrame()
 		}
+	case macroReplayMsg:
+		// One recorded key per UI step: the frame paints between the steps of
+		// a long replay the way it does between GIF frames.
+		return m, m.replayStep(msg.idx)
 	case terminalOutputMsg:
 		if msg.gen != m.termGen {
 			return m, nil

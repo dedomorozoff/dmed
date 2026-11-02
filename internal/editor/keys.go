@@ -849,11 +849,39 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// between Shift taps don't accidentally trigger the palette.
 	m.lastShiftTime = time.Time{}
 
+	// The macro chords answer before anything else, so a recording can be
+	// stopped (and a macro replayed) no matter what the text pane binds.
+	if s == "alt+r" {
+		m.toggleMacroRecording()
+		return nil
+	}
+	if s == "alt+shift+r" {
+		return m.replayMacro()
+	}
+	// While recording, every key that reaches the text pane lands in the
+	// macro; the recording-aware dispatch records as it runs.
+	if m.macroRecording {
+		return m.macroDispatch(s, msg)
+	}
+
 	// While the completion popup is open, navigation keys control it.
 	if m.complOpen && m.handleCompletionKey(s) {
 		return nil
 	}
 
+	return m.dispatchKey(s, msg)
+}
+
+// dispatchKey runs one already-normalized key through the binding chain:
+// the panes/overlay that own the keyboard, the tail tables, the editor's
+// bindings, and finally the typing fallback. Both the live key handling and
+// the macro playback feed the very same chain, so a replayed macro is by
+// construction the same work the recorded keys did.
+func (m *Model) dispatchKey(s string, msg tea.KeyPressMsg) tea.Cmd {
+	// While the completion popup is open, navigation keys control it.
+	if m.complOpen && m.handleCompletionKey(s) {
+		return nil
+	}
 	if cmd, handled := m.runBinding(globalBindings, s, msg); handled {
 		return cmd
 	}
