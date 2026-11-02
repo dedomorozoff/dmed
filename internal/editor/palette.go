@@ -69,6 +69,8 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "select_inside_brackets", title: "cmd.select_inside_t", desc: "cmd.select_inside_d", action: func(m *Model) tea.Cmd { m.selectInsideBracketsActive(); return nil }},
 		{id: "jump_back", title: "cmd.jump_back_t", desc: "cmd.jump_back_d", action: func(m *Model) tea.Cmd { m.jumpBack(); return nil }},
 		{id: "jump_forward", title: "cmd.jump_forward_t", desc: "cmd.jump_forward_d", action: func(m *Model) tea.Cmd { m.jumpForward(); return nil }},
+		{id: "tab_mru", title: "cmd.tab_mru_t", desc: "cmd.tab_mru_d", action: func(m *Model) tea.Cmd { m.mruTab(); return nil }},
+		{id: "last_edit", title: "cmd.last_edit_t", desc: "cmd.last_edit_d", action: func(m *Model) tea.Cmd { m.goToLastEdit(); return nil }},
 		{id: "git_commit", title: "cmd.git_commit_t", desc: "cmd.git_commit_d", action: func(m *Model) tea.Cmd { m.openGitPanel(); return nil }},
 		{id: "git_diff", title: "cmd.git_diff_t", desc: "cmd.git_diff_d", action: func(m *Model) tea.Cmd { m.openDiffView(); return nil }},
 		{id: "git_next", title: "cmd.git_next_t", desc: "cmd.git_next_d", action: func(m *Model) tea.Cmd { m.jumpChange(1); return nil }},

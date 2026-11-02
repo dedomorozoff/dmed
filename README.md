@@ -126,9 +126,11 @@ Open a file (`Ctrl+O` fuzzy finder or `Ctrl+T`), edit, `Ctrl+S` to save. `Ctrl+G
 | `Arrows`, `Home`/`End`, `PgUp`/`PgDn` | Cursor / line / page |
 | `Ctrl+↑/↓` | Scroll without moving cursor |
 | `Ctrl+L` | Go to line (`N`, `N:C`, or `+N`/`-N` relative) |
-| `Ctrl+Alt+←` / `Ctrl+Alt+→` | Jump back / forward in the jump list (definition, search hit, go-to-line, debugger stop; per pane, palette commands on terminals that collapse the chord) |
+| `Ctrl+Alt+←` / `Ctrl+Alt+→` | Jump back / forward in the jump list (definition, search hit, go-to-line, debugger stop, last change; per pane, palette commands on terminals that collapse the chord) |
+| `Ctrl+Shift+Backspace` | Go to where this file was last changed (per file; `Edit: Go to Last Change` where the chord collapses into `Ctrl+H`) |
 | `Alt+←` / `Alt+→` | Switch tabs |
 | `Alt+1..9` | Jump to tab N |
+| `Ctrl+Tab` / Alt+backquote | Cycle this pane's tabs in most-recently-used order, one step per press, wrapping back through where the walk started (holding it walks the list; `View: Cycle Recent Tabs` where the chord is taken by the terminal) |
 
 ### Editing
 

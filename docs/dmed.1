@@ -63,8 +63,10 @@ Jump back / forward through the jump list: the positions this pane's discrete
 jumps came from. A position is recorded by go to definition
 .Pq F12 or Ctrl+Click ,
 a Find in Project hit,
-.Sy Ctrl+L
-and the debugger's stop line — not by motion the cursor keys already retrace
+.Sy Ctrl+L ,
+the debugger's stop line and
+.Sy Ctrl+Shift+Backspace
+below — not by motion the cursor keys already retrace
 (arrows, clicks, the in-file find moves, bookmarks, hunks, the bracket pair), so
 the list stays short enough to walk. Entries name the file by path, so a back
 step reopens a file whose tab was closed meanwhile; the two stacks live in the
@@ -76,6 +78,24 @@ from
 and
 .Dq Edit: Jump Forward
 palette commands.
+.It Sy Ctrl+Shift+Backspace
+Go to where this file was last changed. The position is the buffer's: every
+method that changes text pushes an undo step and the snapshot takes the caret
+with it, so typing, the line commands, the transformations and the multi-cursor
+edits are all answered without separate bookkeeping. It is where the change
+started, which is also what one
+.Sy Ctrl+Z
+restores, and undoing the change does not clear the answer. Per file, never
+across files — the jump list above is what carries the caret between them. The
+command records where it left the caret, so
+.Sy Ctrl+Alt+Left
+returns; a file that was never edited and a caret already standing on the
+change are both refusals that move nothing. Where the terminal collapses the
+chord into
+.Sy Ctrl+H
+(Find and Replace), use the
+.Dq Edit: Go to Last Change
+palette command.
 .El
 .Ss Editing
 .Bl -tag -width "Alt+Up/Down"
@@ -159,6 +179,22 @@ Close tab (last tab quits)
 Switch tabs
 .It Sy Alt+1..9
 Jump to tab N
+.It Sy Ctrl+Tab
+Cycle this pane's tabs in most-recently-used order: one step further per press,
+wrapping back through the tab the walk started on, so holding the chord walks
+the list. A real focus change (the arrow chords, a click on the tab bar, the
+finder) records the recency order; the walk itself does not, or it would
+reorder the list under itself and ping-pong between two tabs. It never reopens a
+tab you closed. Per pane, not saved across runs. Where the terminal cannot
+deliver the chord — a legacy terminal sends the plain
+.Sy Tab
+(the indent) and Windows Terminal keeps
+.Sy Ctrl+Tab
+for its own tab bar — use the
+.Sy Alt+backquote
+alias or the
+.Dq View: Cycle Recent Tabs
+palette command.
 .El
 .Ss Splits and Panels
 .Bl -tag -width "Ctrl+Alt+P"

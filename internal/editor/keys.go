@@ -601,6 +601,25 @@ var editorBindings = map[string]binding{
 		m.jumpForward()
 		return nil, true
 	},
+	"ctrl+tab": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		// The MRU tab cycle. A terminal that cannot tell this chord from Tab
+		// hands the key to the indent below, and Windows Terminal sends Ctrl+Tab
+		// to its own tab bar, so Alt+` is the alias that always arrives (ESC +
+		// backquote) and the palette command the portable route.
+		m.mruTab()
+		return nil, true
+	},
+	"alt+`": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.mruTab()
+		return nil, true
+	},
+	"ctrl+shift+backspace": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		// Go to the last change. On a terminal that cannot report the chord the
+		// control byte arrives as Ctrl+H — Find & Replace, an overlay Esc
+		// closes. The palette command is the route that never collapses.
+		m.goToLastEdit()
+		return nil, true
+	},
 	"alt+up": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.MoveLineUp()
 		return nil, true

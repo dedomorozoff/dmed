@@ -555,7 +555,7 @@ plan with per-item estimates, design decisions and open questions lives in
       traceable in history rather than a silent tree rewrite. No external
       terminal needed.
 
-## M9–M13 — planned (M9 started: bracket matching, selection transformations, jump list)
+## M9–M13 — planned (M9 started: bracket matching, selection transformations, jump list, MRU tabs and last change)
 
 The list below is drawn from the aftermath of Post-M8: the "chroma →
 tree-sitter (later)" note in the stack, the plugins' "Remaining: more
@@ -638,8 +638,37 @@ Order and contents will be refined as work proceeds.
       secondary cursors dropped first, `clampScroll` unfolding a block the landing
       line hides inside. A terminal that cannot tell `Ctrl+Alt+←` from `Alt+←`
       gives the tab switch, which is why the palette route is the documented one.
-- MRU tab switching (`Ctrl+Tab`) and "go to last edit position" — the latter needs
-  a change counter in `internal/buffer` to know where the last edit was.
+- [x] **MRU tab switching and last change**: `Ctrl+Tab` (portable alias
+      Alt+backquote, the `View: Cycle Recent Tabs` palette command) walks this pane's
+      recency order one tab per press and wraps back through the tab the walk started
+      on; `Ctrl+Shift+Backspace` (`Edit: Go to Last Change`) lands the caret where
+      this file was last changed. The recency list is `pane` state holding tab
+      *indices*, unlike the jump list: it must never reopen a file the user closed
+      and it has to address the untitled buffer whose path is empty, so the one
+      place a close already renumbers the pane renumbers it too. The walk freezes
+      the order it derived on the first press and focuses through a quiet setter —
+      a walk that recorded each tab it left would reorder the list under itself and
+      turn the cycle into a ping-pong between two tabs. Every other focus change
+      (`Alt+1..9`, a click on the tab bar, the finder, a split) records and resets,
+      a held chord repeats and so walks the list, and a pane with fewer than two
+      live tabs refuses. Neither command is a jump producer: tab switching keeps
+      meaning *which tab was last in front of me* while `Ctrl+Alt+←` keeps meaning
+      *where my caret was*. The last change needed no change counter — `pushUndo`
+      is the choke point every mutating method already passes through (typing runs,
+      the line commands, the transformations, the multi-cursor edits, redo) and its
+      undo snapshot takes the caret with it, so the tracker is three fields written
+      next to that snapshot plus one getter. It records where the change *started*,
+      which is also what one `Ctrl+Z` restores, and survives the undo that removes
+      it: after `Ctrl+Z` that spot is still the answer. It is per file, never
+      cross-file — the jump list already carries the caret across files. Both
+      refusals move nothing and push nothing, a target equal to the caret is
+      refused instead of spending a jump slot on a no-op, and both commands are
+      pure caret and focus moves: no edit, no dirty flag, no undo step, secondary
+      cursors dropped, `clampScroll` unfolding the block a landing line hides
+      inside. A legacy terminal sends `Ctrl+Tab` as the plain `\t` (the indent
+      binding) and `Ctrl+Shift+Backspace` as `0x08` (`Ctrl+H`, Find and Replace),
+      and Windows Terminal routes `Ctrl+Tab` to its own tab bar — which is why the
+      palette is the documented route for both.
 - [x] **Replace in Project**: the counterpart of Find in Project
       (`Ctrl+Shift+R`, also in the palette). A two-step prompt (query, then
       replacement) streams a file-level preview, one whole-file `agent.Change`

@@ -104,6 +104,57 @@ func (m *Model) jumpTab(n int) {
 	m.setActiveTab(n)
 }
 
+// recency is the order the MRU chord cycles: the tab this pane shows, then the
+// tabs it moved off (most recent first), then the tabs it never focused, in tab
+// order. Derived when a walk starts, so a file opened since the last real focus
+// change joins the cycle and an index that no longer names a tab is never
+// reached.
+func (m *Model) recency() []int {
+	c := m.curPane()
+	out := make([]int, 0, len(m.tabs))
+	seen := make([]bool, len(m.tabs))
+	add := func(i int) {
+		if i >= 0 && i < len(m.tabs) && !seen[i] {
+			seen[i] = true
+			out = append(out, i)
+		}
+	}
+	add(c.tabIdx)
+	for _, v := range c.recent {
+		add(v)
+	}
+	for i := range m.tabs {
+		add(i)
+	}
+	return out
+}
+
+// mruTab cycles this pane's tabs by recency: one step per press, wrapping back
+// through the tab the walk started on, so holding the chord walks the list.
+//
+// The order is frozen for the duration of the walk and the walk records nothing
+// (setPaneTabQuiet). Either rule alone would break the cycle: the live order
+// always starts with the tab the pane shows, so re-deriving it between presses
+// would put the tab just left second and send the next press back to it, and
+// recording each step would reorder the history the same way. A focus change by
+// any other route is a real one, so it ends the walk and starts from the front.
+func (m *Model) mruTab() {
+	c := m.curPane()
+	list := c.recentWalk
+	if list == nil {
+		list = m.recency()
+		c.recentIdx = 0
+	}
+	if len(list) < 2 {
+		m.msg = m.t("msg.mru_none")
+		return
+	}
+	c.recentIdx = (c.recentIdx + 1) % len(list)
+	c.recentWalk = list
+	m.setPaneTabQuiet(list[c.recentIdx])
+	m.msg = ""
+}
+
 func (m *Model) closeTab() tea.Cmd {
 	return m.closeTabAt(m.activeTabIndex())
 }

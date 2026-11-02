@@ -116,6 +116,30 @@ func TestKeyOfNormalization(t *testing.T) {
 			wantText: "",
 		},
 		{
+			// The MRU tab chords: a modern terminal reports Ctrl+Tab as its own
+			// key, a legacy one sends the plain HT and gets the indent instead.
+			name:     "ctrl+tab is named ctrl first",
+			msg:      tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModCtrl},
+			wantKey:  "ctrl+tab",
+			wantText: "",
+		},
+		{
+			// Alt+backquote arrives as ESC + ` on a legacy terminal too, which is
+			// why the MRU walk carries this alias.
+			name:     "alt with backquote",
+			msg:      tea.KeyPressMsg{Code: '`', Text: "`", Mod: tea.ModAlt},
+			wantKey:  "alt+`",
+			wantText: "`",
+		},
+		{
+			// The last-edit chord. Its name is what the table is keyed by, so it
+			// is pinned rather than assumed.
+			name:     "ctrl+shift+backspace",
+			msg:      tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModCtrl | tea.ModShift},
+			wantKey:  "ctrl+shift+backspace",
+			wantText: "",
+		},
+		{
 			// Terminals put the raw control byte in Text for these and
 			// String() prints it verbatim: a name no binding could ever match.
 			name:     "enter is named from the code when Text carries CR",
@@ -382,6 +406,37 @@ func TestEditorBindingsFire(t *testing.T) {
 				if l, c := m.cur().buf.CurLine(), m.cur().buf.Col(); l != 0 || c != 0 {
 					t.Fatalf("forward must return to 0:0, got %d:%d (msg %q)", l, c, m.msg)
 				}
+			}},
+		{"ctrl+tab reaches the MRU cycle instead of indenting",
+			tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModCtrl}, nil,
+			func(t *testing.T, m Model) {
+				// One tab is open, so the cycle refuses — but it must refuse, not
+				// fall through to the tab binding and indent the line.
+				if m.msg != "no other tab to switch to" {
+					t.Fatalf("the chord must reach the MRU command, msg = %q", m.msg)
+				}
+				mustText(t, m.cur().buf.Text(), "one\ntwo\nthree\n")
+			}},
+		{"alt+backquote reaches the MRU cycle instead of typing",
+			tea.KeyPressMsg{Code: '`', Text: "`", Mod: tea.ModAlt}, nil,
+			func(t *testing.T, m Model) {
+				if m.msg != "no other tab to switch to" {
+					t.Fatalf("the alias must reach the MRU command, msg = %q", m.msg)
+				}
+				mustText(t, m.cur().buf.Text(), "one\ntwo\nthree\n")
+			}},
+		{"ctrl+shift+backspace goes to the last change",
+			tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModCtrl | tea.ModShift},
+			func(m *Model) {
+				m.cur().buf.SetCursor(2, 1)
+				m.cur().buf.Insert('!') // the change the command must find
+				m.cur().buf.SetCursor(0, 0)
+			},
+			func(t *testing.T, m Model) {
+				if l, c := m.cur().buf.CurLine(), m.cur().buf.Col(); l != 2 || c != 1 {
+					t.Fatalf("the chord must land on the last change at 2:1, got %d:%d (msg %q)", l, c, m.msg)
+				}
+				mustText(t, m.cur().buf.Text(), "one\ntwo\nt!hree\n")
 			}},
 		{"enter splits the line at the cursor",
 			tea.KeyPressMsg{Code: tea.KeyEnter}, afterFirstRune,

@@ -84,7 +84,11 @@ The code is split into focused internal packages:
   Must stay free of TUI imports; behavior changes belong
   in the corresponding `_test.go`. Undo grouping: consecutive inserts at
   adjacent positions form one undo step; any other operation breaks the group
-  (`beginChange`/`breakGroup`).
+  (`beginChange`/`breakGroup`). `pushUndo` is also the only place that learns
+  where text last changed: it stores the caret its snapshot takes, and `LastEdit`
+  reports it, so every edit shape — typing runs, the line commands, the
+  transformations, the multi-cursor edits, redo — is answered without a second
+  implementation of "did this change text".
 - `internal/editor/` — Bubbletea model and UI. `editor.go` holds the model;
   key handling is in `keys.go`: `keyOf` produces the one normalized key name
   bindings are matched on (control-byte re-encoding, Cyrillic→QWERTY, the
@@ -99,7 +103,11 @@ The code is split into focused internal packages:
   A new binding is a table entry, not a `case` in a switch; a chord that means
   different things in different states returns `handled == false` to fall
   through to the next stage. The rest is split by concern: `view.go`
-  (rendering), `tabs.go` (open/close/switch/save/quit confirmation),
+  (rendering), `tabs.go` (open/close/switch/save/quit confirmation, and the MRU
+  `Ctrl+Tab` cycle over the pane's recency order — the walk freezes the order it
+  derived on the first press and focuses through `setPaneTabQuiet`, because a walk
+  that recorded each tab it left would reorder the list under itself and ping-pong
+  between two tabs),
   `prompt.go` (bottom prompts, including go-to-line), `search.go` (in-file
   find/replace), `projectsearch.go` (Find in Project: the streamed scan, the
   generation stamp and the hit panel), `projectreplace.go` (Replace in
@@ -116,9 +124,13 @@ The code is split into focused internal packages:
   prompt, not this feature),
   `session.go` (save/restore of the session),
   `finder.go` (fuzzy file finder), `split.go` (the panes and their layout; a
-  `pane` holds the tab index, the scroll offsets, word wrap and the two jump-list
+  `pane` holds the tab index, the scroll offsets, word wrap, the two jump-list
   stacks — positions named by path, not by tab index, which every close
-  renumbers), `tree.go`, `mouse.go`,
+  renumbers — and the tab recency list the MRU cycle walks, which is index-based
+  on purpose: unlike a back step it must never reopen a tab the user closed, and
+  the untitled buffer has no path to resolve. `setActiveTab` is the one focus
+  choke point that records it and `fixPaneTabsAfterClose` the one place that
+  renumbers both), `tree.go`, `mouse.go`,
   `completion.go`, `palette.go`, `terminal.go`, `chat.go`
   (AI chat), `ai_inline.go` (inline rewrite → diff review), `ghost.go`
   (Copilot-style ghost text), `agent_panel.go` (agent task queue UI),
@@ -133,12 +145,21 @@ The code is split into focused internal packages:
   bracket jump and select-inside commands: the same thin shape, and pure caret
   moves — no edit, no undo step, no dirty flag; the scanning is the buffer's),
   `jumplist.go` (the jump-list commands: `Ctrl+Alt+←`/`→` walk the pane's two
-  stacks. `pushJump` is called by the four discrete jumps — the definition reply,
-  a project-search hit, go-to-line, the debugger's stop line — and in the handler
+  stacks. `pushJump` is called by the discrete jumps — the definition reply,
+  a project-search hit, go-to-line, the debugger's stop line and
+  `lastedit.go`'s go-to-last-change — and in the handler
   that moves the caret, not where the request started, because the reply is async.
   Nothing else records a position: arrows, clicks, the in-file find moves and the
   chords that already walk back (`Alt+N`, `Alt+[`/`]`, `Ctrl+]`) would flood the
-  history. Like the bracket commands these are caret and focus moves only),
+  history, and a tab switch is a non-producer on purpose — `Ctrl+Alt+←` answers
+  *where the caret was*, `Ctrl+Tab` *which tab was in front*. Like the bracket
+  commands these are caret and focus moves only),
+  `lastedit.go` (`Ctrl+Shift+Backspace` lands the caret where this file was last
+  changed: the position the buffer's `pushUndo` recorded, so no edit shape needs
+  its own bookkeeping. Per file, never cross-file — the jump list already carries
+  the caret across files. Both refusals (a file never edited, a caret already on
+  the change) move nothing and push nothing, so a repeated press cannot spend a
+  jump slot on a no-op),
   `fold.go` (the indentation fold ranges and the display-row list the whole
   pane renders from. The fold commands act on the block the cursor *belongs
   to* — `foldTargetAt`: the block starting on its line, the innermost one

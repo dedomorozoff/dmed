@@ -30,6 +30,11 @@ type Buffer struct {
 	lastLine      int
 	lastCol       int
 
+	// Where the most recent change was made, recorded by pushUndo. See LastEdit.
+	lastEditLine int
+	lastEditCol  int
+	lastEditSet  bool
+
 	// Multi-cursor support: secondary cursors plus the word target used by
 	// AddNextOccurrence (Alt+D). See multicursor.go.
 	cursors []Cursor
@@ -72,6 +77,19 @@ func (b *Buffer) pushUndo() {
 	if len(b.undoStack) > maxUndo {
 		b.undoStack = b.undoStack[1:]
 	}
+	// Every operation that changes text pushes an undo step, so this is the one
+	// place that can answer "where was text last changed". The position is the
+	// caret the snapshot takes, i.e. where the change started: for a typing run
+	// that is the run's start, which is also what one Ctrl+Z restores.
+	b.lastEditLine, b.lastEditCol, b.lastEditSet = b.line, b.col, true
+}
+
+// LastEdit reports where the most recent change was made, and false when this
+// buffer has never been edited. Undo does not clear it: after a Ctrl+Z the place
+// the user was working is still the answer they want, and the position stays
+// usable because the caller lands through SetCursor, which clamps.
+func (b *Buffer) LastEdit() (line, col int, ok bool) {
+	return b.lastEditLine, b.lastEditCol, b.lastEditSet
 }
 
 func (b *Buffer) breakGroup() {

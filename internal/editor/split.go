@@ -19,6 +19,18 @@ type pane struct {
 	wordWrap bool
 	backs    []jumpPoint
 	forwards []jumpPoint
+
+	// recent are the tab indices this pane moved off, most recent first: the raw
+	// history the MRU chord cycles. Indices rather than paths, unlike jumpPoint —
+	// a closed tab must drop out of the list instead of being reopened from disk,
+	// and the untitled buffer has no path at all (two tabs may also share one).
+	// recentWalk is the order frozen for the walk in progress and recentIdx the
+	// position in it; the freeze is what makes the cycle walk instead of
+	// ping-pong, because the live order always starts with the tab the pane shows
+	// and the walk keeps changing that tab.
+	recent     []int
+	recentWalk []int
+	recentIdx  int
 }
 
 type splitLayout int
@@ -44,9 +56,40 @@ func (m Model) activeTabIndex() int { return m.panes[m.activePane].tabIdx }
 func (m *Model) curPane() *pane { return &m.panes[m.activePane] }
 
 func (m *Model) setActiveTab(idx int) {
-	if idx >= 0 && idx < len(m.tabs) {
-		m.panes[m.activePane].tabIdx = idx
+	if idx < 0 || idx >= len(m.tabs) {
+		return
 	}
+	c := m.curPane()
+	if c.tabIdx != idx {
+		c.recent = recordRecent(c.recent, c.tabIdx)
+		c.recentWalk, c.recentIdx = nil, 0
+	}
+	c.tabIdx = idx
+}
+
+// setPaneTabQuiet is the MRU walk's own focus step: it moves the pane and leaves
+// the recency history alone. A walk that recorded each tab it left would reorder
+// the list under itself, and N presses would ping-pong between two tabs instead of
+// reaching the N-th most recent one. Any other focus change goes through
+// setActiveTab, which records and restarts the cycle.
+func (m *Model) setPaneTabQuiet(idx int) {
+	if idx < 0 || idx >= len(m.tabs) {
+		return
+	}
+	m.curPane().tabIdx = idx
+}
+
+// recordRecent puts idx at the front of the recency list, dropping the older copy
+// of it so a tab visited twice is not walked twice.
+func recordRecent(recent []int, idx int) []int {
+	out := make([]int, 0, len(recent)+1)
+	out = append(out, idx)
+	for _, v := range recent {
+		if v != idx {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func (m Model) editorAreaWidth() int {
@@ -183,5 +226,22 @@ func (m *Model) fixPaneTabsAfterClose(closedIdx int) {
 		case ti > closedIdx:
 			m.panes[i].tabIdx--
 		}
+		// The same renumbering for the recency list: the closed tab drops out and
+		// everything above it moves down. The cycle restarts, because its position
+		// counted tabs in the list that just moved.
+		if len(m.panes[i].recent) > 0 {
+			out := make([]int, 0, len(m.panes[i].recent))
+			for _, v := range m.panes[i].recent {
+				switch {
+				case v == closedIdx:
+				case v > closedIdx:
+					out = append(out, v-1)
+				default:
+					out = append(out, v)
+				}
+			}
+			m.panes[i].recent = out
+		}
+		m.panes[i].recentWalk, m.panes[i].recentIdx = nil, 0
 	}
 }

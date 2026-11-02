@@ -702,3 +702,144 @@ func TestReplaceSpanRejectsOutOfRange(t *testing.T) {
 		t.Fatal("end past the line accepted")
 	}
 }
+
+// pushUndo is the choke point every mutating method goes through, so one table has
+// to prove the last-edit tracker answers for all of them. The position it records
+// is the caret the undo snapshot takes — where the change started, which is also
+// what one Ctrl+Z restores. A method that edits away from the caret (ReplaceSpan
+// for an LSP edit, a block transform) therefore records where the user was
+// standing, not where the text moved.
+func TestLastEditTracksEveryEditShape(t *testing.T) {
+	cases := []struct {
+		name              string
+		in                string
+		line, col         int
+		edit              func(b *Buffer)
+		wantLine, wantCol int
+	}{
+		{"a typing run is one step from its start",
+			"one\ntwo\nthree\n", 1, 1,
+			func(b *Buffer) { b.Insert('X'); b.Insert('Y') }, 1, 1},
+		{"a caret move starts a new step at the new position",
+			"one\ntwo\nthree\n", 1, 1,
+			func(b *Buffer) { b.Insert('X'); b.SetCursor(1, 3); b.Insert('Y') }, 1, 3},
+		{"InsertText", "one\ntwo\nthree\n", 1, 1,
+			func(b *Buffer) { b.InsertText("A\nB") }, 1, 1},
+		{"InsertNewline", "one\ntwo\nthree\n", 1, 1,
+			func(b *Buffer) { b.InsertNewline() }, 1, 1},
+		{"IndentedNewline", "one\ntwo\nthree\n", 1, 1,
+			func(b *Buffer) { b.IndentedNewline("\t") }, 1, 1},
+		{"Backspace", "one\ntwo\nthree\n", 1, 1,
+			func(b *Buffer) { b.Backspace() }, 1, 1},
+		{"Delete", "one\ntwo\nthree\n", 1, 1,
+			func(b *Buffer) { b.Delete() }, 1, 1},
+		{"DeleteSelection", "one\ntwo\nthree\n", 0, 0,
+			func(b *Buffer) { b.SelectRange(1, 0, 1, 3); b.DeleteSelection() }, 1, 3},
+		{"DeleteLine", "one\ntwo\nthree\n", 1, 1,
+			func(b *Buffer) { b.DeleteLine() }, 1, 1},
+		{"DuplicateLine", "one\ntwo\nthree\n", 1, 2,
+			func(b *Buffer) { b.DuplicateLine() }, 1, 2},
+		{"ReplaceSpan keeps the caret rather than the span",
+			"one\ntwo\nthree\n", 2, 2,
+			func(b *Buffer) { b.ReplaceSpan(0, 0, 0, 3, "ONE") }, 2, 2},
+		{"ReplaceRange", "one\ntwo\nthree\n", 1, 0,
+			func(b *Buffer) { b.ReplaceRange(0, 0, 3, []rune("ONE")) }, 1, 0},
+		{"ReplaceAll", "one\ntwo\nthree\n", 1, 1,
+			func(b *Buffer) { b.ReplaceAll("o", "0") }, 1, 1},
+		{"MoveLineUp", "one\ntwo\nthree\n", 2, 1,
+			func(b *Buffer) { b.MoveLineUp() }, 2, 1},
+		{"MoveLineDown", "one\ntwo\nthree\n", 0, 1,
+			func(b *Buffer) { b.MoveLineDown() }, 0, 1},
+		{"IndentLines", "one\ntwo\nthree\n", 1, 2,
+			func(b *Buffer) { b.IndentLines("\t") }, 1, 2},
+		{"UnindentLines", "\tone\ntwo\n", 0, 3,
+			func(b *Buffer) { b.UnindentLines("\t") }, 0, 3},
+		{"ToggleComment", "one\ntwo\nthree\n", 1, 1,
+			func(b *Buffer) { b.ToggleComment("//", "") }, 1, 1},
+		{"SortLines", "three\none\ntwo\n", 2, 1,
+			func(b *Buffer) { b.SortLines(0, 2) }, 2, 1},
+		{"ApplyCase", "one\ntwo\n", 1, 2,
+			func(b *Buffer) { b.ApplyCase(true) }, 1, 2},
+		{"TrimTrailing", "one  \ntwo\n", 0, 1,
+			func(b *Buffer) { b.TrimTrailing(0, 1) }, 0, 1},
+		{"NumberLines", "one\ntwo\n", 1, 0,
+			func(b *Buffer) { b.NumberLines(0, 1) }, 1, 0},
+		{"a multi-cursor insert", "one\ntwo\nthree\n", 1, 1,
+			func(b *Buffer) { b.AddCursor(2, 1, 1, 1); b.MultiInsertRune('X') }, 1, 1},
+		{"a multi-cursor newline", "one\ntwo\nthree\n", 1, 1,
+			func(b *Buffer) { b.AddCursor(2, 1, 1, 1); b.MultiNewline() }, 1, 1},
+	}
+	for _, tc := range cases {
+		b := Load(tc.in)
+		b.SetCursor(tc.line, tc.col)
+		tc.edit(b)
+		if b.Text() == tc.in {
+			t.Fatalf("%s: the edit changed nothing, so it proves nothing", tc.name)
+		}
+		line, col, ok := b.LastEdit()
+		if !ok {
+			t.Fatalf("%s: LastEdit must be set by any edit", tc.name)
+		}
+		if line != tc.wantLine || col != tc.wantCol {
+			t.Errorf("%s: LastEdit = %d:%d, want %d:%d", tc.name, line, col, tc.wantLine, tc.wantCol)
+		}
+	}
+}
+
+// Undoing the change does not clear the tracker: after a Ctrl+Z the place the user
+// was working is still the answer they want.
+func TestLastEditSurvivesUndo(t *testing.T) {
+	b := Load("one\ntwo\nthree\n")
+	b.SetCursor(1, 1)
+	b.Insert('X')
+	b.SetCursor(2, 0)
+	if !b.Undo() {
+		t.Fatal("Undo = false")
+	}
+	line, col, ok := b.LastEdit()
+	if !ok || line != 1 || col != 1 {
+		t.Fatalf("LastEdit after undo = %d:%d ok=%v, want 1:1", line, col, ok)
+	}
+}
+
+func TestLastEditUnsetOnLoad(t *testing.T) {
+	for name, b := range map[string]*Buffer{"New": New(), "Load": Load("one\ntwo\n")} {
+		if _, _, ok := b.LastEdit(); ok {
+			t.Errorf("%s: an untouched buffer must not report a last edit", name)
+		}
+	}
+}
+
+// Only a change of text moves the tracker; wandering around the file must not
+// masquerade as an edit, or "go to last change" answers with the caret itself.
+func TestLastEditNotRecordedByCursorMoves(t *testing.T) {
+	b := Load("one\ntwo\nthree\n")
+	b.SetCursor(1, 2)
+	b.MoveLeft()
+	b.MoveRight()
+	b.MoveUp()
+	b.MoveDown()
+	b.LineStart()
+	b.LineEnd()
+	b.StartSelection()
+	b.DragSelect(2, 1)
+	b.ClearSelection()
+	b.SelectRange(0, 1, 1, 1)
+	b.Deselect()
+	b.AddCursor(2, 1, 1, 1)
+	b.MoveAllLeft()
+	b.MarkSaved()
+	if _, _, ok := b.LastEdit(); ok {
+		t.Fatal("cursor and selection moves must not record a last edit")
+	}
+
+	b.SetCursor(1, 1)
+	b.Insert('X')
+	b.SetCursor(2, 2)
+	b.ClearCursors()
+	b.MoveUp()
+	line, col, ok := b.LastEdit()
+	if !ok || line != 1 || col != 1 {
+		t.Fatalf("LastEdit = %d:%d ok=%v, want the edit at 1:1 to stand", line, col, ok)
+	}
+}
