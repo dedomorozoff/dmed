@@ -590,10 +590,10 @@ func (c *Client) Definition(path string, line, col int) (*Location, error) {
 type Hover struct {
 	Contents string
 	// Range is 0-indexed buffer coordinates (start line/col, end line/col).
-	Line    int
-	Col     int
-	EndLine int
-	EndCol  int
+	Line     int
+	Col      int
+	EndLine  int
+	EndCol   int
 	HasRange bool
 }
 
@@ -613,10 +613,10 @@ type DocumentSymbol struct {
 // rawSymbol is the wire shape of one hierarchical DocumentSymbol (children
 // nested as raw JSON, so one named type can recurse without pointer gymnastics).
 type rawSymbol struct {
-	Name     string            `json:"name"`
-	Kind     int               `json:"kind"`
-	Detail   string            `json:"detail"`
-	Range    struct {
+	Name   string `json:"name"`
+	Kind   int    `json:"kind"`
+	Detail string `json:"detail"`
+	Range  struct {
 		Start struct {
 			Line      int `json:"line"`
 			Character int `json:"character"`

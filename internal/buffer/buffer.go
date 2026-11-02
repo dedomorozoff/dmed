@@ -16,13 +16,13 @@ type snapshot struct {
 }
 
 type Buffer struct {
-	d             *doc
-	line          int
-	col           int
-	goalCol       int
-	selLine       int
-	selCol        int
-	hasSelection  bool
+	d            *doc
+	line         int
+	col          int
+	goalCol      int
+	selLine      int
+	selCol       int
+	hasSelection bool
 	// Read the selection as a rectangle instead of the span between its corners.
 	// Meaningful only while hasSelection is set; see column.go.
 	colSel        bool

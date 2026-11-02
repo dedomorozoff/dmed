@@ -48,28 +48,28 @@ type tab struct {
 	// pass reuses the lines whose text and lexer state are unchanged and
 	// tokenizes only the changed region plus its re-sync window. Recreated
 	// when the file's language changes.
-	inc     *syntax.Incremental
-	incLang string
-	repo    *vcs.Repo // cached repository of the file's directory
-	repoTried      bool
-	diffCached     vcs.FileDiff
-	diffText       string
-	diffWant       string          // text the pending diff was started for
-	diffPending    bool            // a diff pass is scheduled or running
-	blame          []vcs.BlameLine // git blame of HEAD lines; nil = not computed
-	lineEnding     string          // "lf" or "crlf"
-	encoding       string          // "utf-8", "utf-16le", "utf-16be", "latin-1"
-	wrapSegs       []wrapSeg
-	wrapW          int
-	wrapTabW       int
-	wrapText       string
-	foldCached     []foldRange // indentation fold blocks, cached like wrapSegs
-	foldText       string
-	foldTabW       int
-	folds          map[int]bool // folded block start lines; nil = nothing folded
-	img            *imageView   // a picture tab: decoded frames, nil = plain text
-	delimMatch     buffer.DelimiterMatch
-	hasDelimMatch  bool
+	inc           *syntax.Incremental
+	incLang       string
+	repo          *vcs.Repo // cached repository of the file's directory
+	repoTried     bool
+	diffCached    vcs.FileDiff
+	diffText      string
+	diffWant      string          // text the pending diff was started for
+	diffPending   bool            // a diff pass is scheduled or running
+	blame         []vcs.BlameLine // git blame of HEAD lines; nil = not computed
+	lineEnding    string          // "lf" or "crlf"
+	encoding      string          // "utf-8", "utf-16le", "utf-16be", "latin-1"
+	wrapSegs      []wrapSeg
+	wrapW         int
+	wrapTabW      int
+	wrapText      string
+	foldCached    []foldRange // indentation fold blocks, cached like wrapSegs
+	foldText      string
+	foldTabW      int
+	folds         map[int]bool // folded block start lines; nil = nothing folded
+	img           *imageView   // a picture tab: decoded frames, nil = plain text
+	delimMatch    buffer.DelimiterMatch
+	hasDelimMatch bool
 }
 
 // wrapSeg describes one screen row of a wrapped (or plain) buffer line: the
@@ -786,9 +786,9 @@ type Model struct {
 	termSelActive bool
 	termSelAnchor selPos
 	termSelEnd    selPos
-	dragChat      bool             // motion events extend the chat selection
-	dragTerm      bool             // motion events extend the terminal selection
-	dragColumn    bool             // Shift+drag extends the column (rectangular) selection
+	dragChat      bool // motion events extend the chat selection
+	dragTerm      bool // motion events extend the terminal selection
+	dragColumn    bool // Shift+drag extends the column (rectangular) selection
 
 	// Macro recording (Alt+R record, Alt+Shift+R replay). macroKeys collects
 	// the text-pane keys while recording; macro is the last completed recording
@@ -797,8 +797,8 @@ type Model struct {
 	macroKeys      []macroKey
 	macro          []macroKey
 	replaying      bool
-	termFocus     bool             // the terminal panel owns keyboard input
-	hoverChatBtn  chatButtonAction // chat panel button under the cursor
+	termFocus      bool             // the terminal panel owns keyboard input
+	hoverChatBtn   chatButtonAction // chat panel button under the cursor
 
 	// Double-click detection: last click position/time plus a validity flag so
 	// a third quick click starts a fresh pair instead of chaining.
