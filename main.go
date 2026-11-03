@@ -56,7 +56,7 @@ func main() {
 		case "-h", "--help":
 			fmt.Println("usage: dmed [dir | files...]")
 			fmt.Println("       dmed setup-ai     interactive AI provider setup (writes ~/.dmed.conf)")
-			fmt.Println("       dmed --dump-keys  print the key cheat sheet the editor shows (md|roff)")
+			fmt.Println("       dmed --dump-keys  print the key cheat sheet the editor shows (md|roff|actions)")
 			return
 		case "--dump-keys":
 			format := "md"

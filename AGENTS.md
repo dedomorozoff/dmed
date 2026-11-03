@@ -104,12 +104,24 @@ The code is split into focused internal packages:
   `bindingDef{act, fn, flags}`: the chord is the map key and the action id
   (`keyAct`, `"file.save"`) is in the value, so aliases are one identity, the
   F1 cheatsheet is generated from the tables (`keydoc.go`, `dmed --dump-keys
-  md|roff`) and a `[keys]` section can address the command rather than the
-  keystroke. `keymap.go` resolves the defaults into the map one model reads
-  (`m.keys`); the package tables are immutable defaults, never a state, and a
-  chord flagged `protected` (Esc, Enter, Tab, the movement keys, `ctrl+q`, the
-  review `y`/`n`) refuses a rebind because the machinery around it depends on
-  it. `type binding func(m *Model, msg tea.KeyPressMsg) (tea.Cmd, bool)`;
+  md|roff|actions`) and a `[keys]` section addresses the command rather than the
+  keystroke. `keymap.go`'s `ResolveKeys(cfg)` joins that section to the defaults
+  into the map one model reads (`m.keys`, re-set on a `.dmed.conf` reload, so a
+  remap re-keys macro playback too — a replay feeds the same `dispatchKey`); the
+  package tables are immutable defaults, never a state. A resolver refuses a line
+  rather than half-applying it and the refusals are reported on the status bar: a
+  silent non-move is the failure mode nobody notices. Applying is two passes —
+  every named action is cleared, then its chords are written — because one pass
+  cannot express a swap. Two of the refusals are structural: a chord is protected
+  (Esc, Enter, Tab, the movement keys, `ctrl+q`, the review `y`/`n`) or another
+  action already owns it, *in either table*, and because a chord can only be
+  claimed once the lines are applied in sorted order so a conflict resolves the
+  same way every run. The claim that is *not* a conflict is a chord shipped in both
+  tables under two actions — F6 and F7, the debug step-over and the split — which
+  either owner may restate without taking the other's half away: the fallthrough
+  between them is machinery rather than a preference, and it is what lets
+  `dmed --dump-keys actions` round-trip back through the resolver unchanged (a test
+  feeds the whole list in). `type binding func(m *Model, msg tea.KeyPressMsg) (tea.Cmd, bool)`;
   a `handled == false` return falls through to
   the next stage (this is how f6/f7 mean step-over in the debug panel and split
   outside it). Every pane handler takes
@@ -213,8 +225,12 @@ The code is split into focused internal packages:
   both `NewProvider` and `WriteAI`, or the probe will 404 and be reported as a
   connection failure.
 - `internal/config/` — INI `.dmed.conf` loader (`[editor]`, `[ai]`, `[agent]`,
-  `[ui]`, `[plugins]`, `[debug]`); priority defaults < global < project < env
-  vars; hot-reload on save; `WriteAI`/`WriteLang` merge helpers.
+  `[ui]`, `[plugins]`, `[debug]`, `[lsp]`, `[keys]`); priority defaults < global <
+  project < env vars; hot-reload on save; `WriteAI`/`WriteLang` merge helpers.
+  `[keys]` maps an *action name* to chords and config deliberately does not check
+  the spelling — only the editor knows which keys exist, so `ResolveKeys` validates
+  and reports. An unknown key in a section with an open-ended grammar (`lang.<id>`,
+  an action) is kept, not dropped.
   `WriteAI` deliberately does not write `tools_enabled`/`tools_disabled`: they
   are a hand-curated list and the wizard must not clobber it.
   `AIConfig.Unconfigured()` is the gate for the keyless fallback: only a
@@ -404,15 +420,22 @@ half-day of misreading a screen:
   input exists is dropped, so `Start` waits for the status bar and for the frame
   to stop changing before any scenario types. Never sleep in a scenario: poll
   the screen (`WaitFor`, `WaitAbsent`, `WaitForAtLeast`, `WaitFile`).
-- Control bytes (`Ctrl+S`) and static escape sequences (Enter, arrows, PgDn)
-  arrive exactly as written. **Alt chords do not**: ConPTY's VT input parser
-  consumes `ESC`+letter as one unrecognized sequence and loses it, so an alt
-  binding cannot be driven from this harness — the palette reaches the same
-  action, and the unit tests (`internal/editor/key*_test.go`) cover the alt
-  bindings themselves.
-- `DMED_DEBUG_KEYS=1` cannot be used from the harness. Its trace goes to stderr,
-  which is the same pty the editor paints to, so it scribbles over the frame
-  under test. To see what a chord resolved to, run the editor in a real terminal.
+- Static escape sequences (Enter, arrows, PgDn) and *most* control bytes
+  (`Ctrl+S`, `Ctrl+K`, `Ctrl+E`) arrive exactly as written. Two things do not:
+  **Alt chords**, because ConPTY's VT input parser consumes `ESC`+letter as one
+  unrecognized sequence and loses it, so an alt binding cannot be driven from this
+  harness — the palette reaches the same action, and the unit tests
+  (`internal/editor/key*_test.go`) cover the alt bindings themselves. And **the
+  control bytes a console reads as a key, not a chord**: `Ctrl+N` and `Ctrl+A`
+  arrive as a bare `leftctrl`, `Ctrl+I` as `tab`, `Ctrl+J`/`Ctrl+M` as `enter`. So
+  a scenario picks a ctrl chord it has seen land, and a `[keys]` test that wants a
+  chord nobody else owns swaps two that work (`Ctrl+S` ⇄ `Ctrl+K`) rather than
+  inventing one.
+- `DMED_DEBUG_KEYS=1` must not be on for a scenario: its stderr trace shares the
+  pty with the frame under test and scribbles over it. It is still how you find out
+  what a chord actually resolved to — the same name also goes to the status bar as
+  `k:<name>`, so one throwaway session with the flag set and a grep over the rows
+  answers the question without a real terminal.
 - F-keys and three-modifier chords are not encodable portably, so they stay
   manual. Headless ptys may also report a zero window size: the model guards
   against a non-positive `WindowSizeMsg` (keep that guard) and the harness always

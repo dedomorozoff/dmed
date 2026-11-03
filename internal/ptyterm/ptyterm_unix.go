@@ -9,6 +9,9 @@ import (
 	"github.com/creack/pty"
 )
 
+// envFoldKeys: on Unix HOME and Home are two different variables.
+const envFoldKeys = false
+
 func start(opts Options) (*Terminal, error) {
 	shell := opts.Command
 	if shell == "" {
@@ -19,7 +22,7 @@ func start(opts Options) (*Terminal, error) {
 	}
 	cmd := exec.Command(shell, opts.Args...)
 	cmd.Dir = opts.Dir
-	cmd.Env = append(os.Environ(), opts.Env...)
+	cmd.Env = mergeEnv(opts.Env)
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(opts.Width), Rows: uint16(opts.Height)})
 	if err != nil {
 		return nil, err

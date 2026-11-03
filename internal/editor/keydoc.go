@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -127,8 +128,16 @@ func codeSpan(s string) string {
 // place a chord is decided: a key reference written by hand in a README is a
 // copy that nothing checks, and this makes the copy comparable.
 //
-// format is "md" (a Markdown table) or "roff" (a man page tag list).
+// format is "md" (a Markdown table), "roff" (a man page tag list) or "actions"
+// (the action names a [keys] section addresses, with the chord each ships with).
 func DumpKeys(format string) (string, error) {
+	switch format {
+	case "actions":
+		return dumpActions(), nil
+	case "md", "roff":
+	default:
+		return "", fmt.Errorf("unknown key dump format %q (want md, roff or actions)", format)
+	}
 	m := New()
 	rows := m.helpRows()
 	var b strings.Builder
@@ -150,10 +159,34 @@ func DumpKeys(format string) (string, error) {
 			fmt.Fprintf(&b, ".It Sy %s\n%s\n", r.keys, m.t(r.desc))
 		}
 		b.WriteString(".El\n")
-	default:
-		return "", fmt.Errorf("unknown key dump format %q (want md or roff)", format)
 	}
 	return b.String(), nil
+}
+
+// dumpActions lists the built-in action names rather than the resolved ones: a
+// [keys] section is written against what dmed ships, and a list that moved with
+// the user's own overrides could not be used to write the next line.
+func dumpActions() string {
+	byAct := make(map[keyAct][]string, len(globalBindings)+len(editorBindings))
+	for _, table := range []map[string]bindingDef{globalBindings, editorBindings} {
+		for chord, d := range table {
+			byAct[d.act] = append(byAct[d.act], chord)
+		}
+	}
+	names := make([]string, 0, len(byAct))
+	for act := range byAct {
+		names = append(names, string(act))
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	b.WriteString("# action = chord[, chord] in the [keys] section of .dmed.conf\n")
+	b.WriteString("# a protected chord stays with the action listed here\n")
+	for _, name := range names {
+		chords := byAct[keyAct(name)]
+		sort.Strings(chords)
+		fmt.Fprintf(&b, "%-26s %s\n", name, strings.Join(collapseRun(chords), " "))
+	}
+	return b.String()
 }
 
 // helpRows resolves the cheatsheet against this model's key map, so a rebind is
@@ -241,6 +274,12 @@ var keyWords = map[string]string{
 
 // keyMods are the modifier tokens, in the order a chord writes them.
 var keyMods = map[string]string{"ctrl": "Ctrl", "alt": "Alt", "shift": "Shift"}
+
+// keyModOrder is the same vocabulary as a list, because two things need it in
+// order and one of them cannot read a map: the help screen joins the modifiers
+// in the spelling keyOf produced, and the [keys] parser refuses a chord whose
+// modifiers are written in any other order.
+var keyModOrder = []string{"ctrl", "alt", "shift"}
 
 // displayChord turns one table spelling into the help-screen spelling: the
 // inverse of what keyOf normalizes ("ctrl+shift+f5" → "Ctrl+Shift+F5",

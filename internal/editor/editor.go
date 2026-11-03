@@ -901,12 +901,15 @@ func New(paths ...string) Model {
 		m.tabs = append(m.tabs, tab{buf: buffer.New()})
 	}
 	m.cfg = config.Load(m.root)
-	m.keys = buildKeyMap()
+	m.keys = ResolveKeys(m.cfg)
 	// Create the AI provider up front so chat, inline, and ghost all work even
 	// before the chat panel is first opened (previously ghost silently no-opped
 	// until toggleChat ran).
 	m.ai = m.aiProvider(m.cfg.AI.Model)
 	m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
+	if msg := m.keysRefused(); msg != "" {
+		m.msg = msg
+	}
 	m.syn = syntax.New(m.cfg.Editor.SyntaxTheme)
 	m.initPanes()
 	if restoreActiveTab >= 0 && restoreActiveTab < len(m.tabs) {
@@ -1000,7 +1003,12 @@ func (m *Model) openConfigFile() {
 			"[plugins]\n" +
 			"# repo = dedomorozoff/dmed  # GitHub store for the plugin store\n" +
 			"# dir = plugins\n" +
-			"# branch = main\n"
+			"# branch = main\n\n" +
+			"[keys]\n" +
+			"# action = chord[, chord]  # rebind a command; an empty value unbinds it\n" +
+			"# file.save = ctrl+s, ctrl+1\n" +
+			"# dmed --dump-keys actions lists the action names and the chords they ship\n" +
+			"# with; Esc, Enter, Tab, the movement keys and Ctrl+Q refuse a rebind\n"
 		os.WriteFile(path, []byte(content), 0o644)
 	}
 	m.openPath(path)
@@ -1218,7 +1226,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Hot-reload config when .dmed.conf changes
 		if strings.HasSuffix(path, ".dmed.conf") {
 			m.cfg = config.Load(m.root)
-			m.keys = buildKeyMap()
+			m.keys = ResolveKeys(m.cfg)
 			m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
 			// A new highlighter invalidates the per-tab cached lines.
 			m.syn = syntax.New(m.cfg.Editor.SyntaxTheme)
@@ -1226,6 +1234,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.tabs[i].syntaxCached = nil
 			}
 			m.msg = m.t("msg.config_reloaded")
+			if msg := m.keysRefused(); msg != "" {
+				m.msg = msg
+			}
 			return m, waitForFileEvent(m.fileEvents)
 		}
 		// Hot-reload a changed plugin without restarting the editor.

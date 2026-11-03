@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -18,6 +19,7 @@ type Config struct {
 	Plugins PluginsConfig
 	Debug   DebugConfig
 	LSP     LSPConfig
+	Keys    KeysConfig
 }
 
 // DebugConfig holds DAP debugger settings (M7). Go/Delve is the default
@@ -75,6 +77,18 @@ type LSPConfig struct {
 	// line ("gopls", "pyright-langserver --stdio"). An empty command removes
 	// the language; entries only add or replace, the built-ins stay.
 	Languages map[string]string
+}
+
+// KeysConfig is the [keys] section: the commands the user renamed.
+//
+// The action id is the name a binding is addressed by (see the editor's
+// keymap.go), and the value is the chord or chords it should answer to.
+type KeysConfig struct {
+	// Overrides maps an action id to the chords written for it. The map records
+	// what the file said, so a present key with an empty list is an explicit
+	// unbind (`file.save =`), which a missing key is not. Config stays dumb
+	// about whether a chord is real: only the editor knows the key names.
+	Overrides map[string][]string
 }
 
 // AgentConfig holds settings for background agent tasks (M4).
@@ -222,7 +236,7 @@ func Settings(cfg Config) []Setting {
 	if key != "" {
 		key = "***"
 	}
-	return []Setting{
+	out := []Setting{
 		{"editor", "tab_width", strconv.Itoa(cfg.Editor.TabWidth)},
 		{"editor", "syntax_theme", cfg.Editor.SyntaxTheme},
 		{"editor", "line_numbers", strconv.FormatBool(cfg.Editor.LineNumbers)},
@@ -256,6 +270,23 @@ func Settings(cfg Config) []Setting {
 		{"debug", "auto_detect", strconv.FormatBool(cfg.Debug.AutoDetect)},
 		{"lsp", "enabled", strconv.FormatBool(cfg.LSP.Enabled)},
 	}
+	// The [keys] overrides are open-ended, so they are listed as written: one row
+	// per command the user renamed, which is what makes the section findable by
+	// name in search-everywhere.
+	actions := make([]string, 0, len(cfg.Keys.Overrides))
+	for action := range cfg.Keys.Overrides {
+		actions = append(actions, action)
+	}
+	// Map order is random; a list the user reads has to be the same list twice.
+	sort.Strings(actions)
+	for _, action := range actions {
+		value := strings.Join(cfg.Keys.Overrides[action], ", ")
+		if value == "" {
+			value = "(none)"
+		}
+		out = append(out, Setting{"keys", action, value})
+	}
+	return out
 }
 
 // Defaults returns the default configuration.
@@ -667,6 +698,18 @@ func loadFile(path string, cfg *Config) {
 			if parseBool(v) {
 				cfg.LSP.Disabled[k] = true
 			}
+		}
+	}
+
+	// [keys] — action = chord[, chord…] rebinds a command, an empty value
+	// unbinds it. The names are kept verbatim: whether "ctrl+s" is a key dmed
+	// can ever see is the editor's business, not the loader's.
+	if s, ok := sections["keys"]; ok {
+		if cfg.Keys.Overrides == nil {
+			cfg.Keys.Overrides = make(map[string][]string, len(s))
+		}
+		for action, v := range s {
+			cfg.Keys.Overrides[action] = parseList(v)
 		}
 	}
 }

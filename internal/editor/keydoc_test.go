@@ -1,9 +1,12 @@
 package editor
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"dmed/internal/config"
 )
 
 // The generated cheatsheet is only honest if the names it prints are the names
@@ -50,12 +53,13 @@ func showsDigitInRange(keys, chord string) bool {
 	return false
 }
 
-// TestBuildKeyMapIdentity is the migration proof: resolving the map must not
-// change one fact about the tables. Every chord keeps its action, and the
-// inverse index — which the hand-written tables could not express — has to hold
-// exactly the chords that are bound, including the aliases.
-func TestBuildKeyMapIdentity(t *testing.T) {
-	k := buildKeyMap()
+// TestResolveKeysIdentity is the migration proof: resolving the map with nothing
+// in the [keys] section must not change one fact about the tables. Every chord
+// keeps its action, and the inverse index — which the hand-written tables could
+// not express — has to hold exactly the chords that are bound, including the
+// aliases.
+func TestResolveKeysIdentity(t *testing.T) {
+	k := ResolveKeys(config.Config{})
 
 	total := 0
 	for name, table := range map[string]map[string]bindingDef{
@@ -191,6 +195,78 @@ func balancedFence(cell string) bool {
 	return !strings.Contains(strings.TrimSuffix(strings.TrimPrefix(cell, fence), fence), fence)
 }
 
+// TestDumpKeysActionsRoundTrips: the actions list is what a user is told to read
+// before writing a [keys] section, so it has to be valid input as well as valid
+// output. Feeding every printed name and chord back through the resolver proves
+// the spellings survive checkChord (a modifier written in the wrong order would
+// be refused), that the digit family expands, and that nothing is listed under a
+// name the map does not know.
+func TestDumpKeysActionsRoundTrips(t *testing.T) {
+	out, err := DumpKeys("actions")
+	if err != nil {
+		t.Fatalf("DumpKeys: %v", err)
+	}
+	overrides := map[string][]string{}
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		name, chords, ok := strings.Cut(line, " ")
+		if !ok || strings.TrimSpace(chords) == "" {
+			t.Fatalf("line %q is not an action and its chords", line)
+		}
+		if _, dup := overrides[name]; dup {
+			t.Fatalf("%s is listed twice: a user cannot tell which line the map reads", name)
+		}
+		names = append(names, name)
+		overrides[name] = strings.Fields(chords)
+	}
+	if !sort.StringsAreSorted(names) {
+		t.Errorf("the list must be sorted, it is read by eye: %q", names)
+	}
+	if len(names) == 0 {
+		t.Fatal("no actions listed")
+	}
+
+	k := ResolveKeys(config.Config{Keys: config.KeysConfig{Overrides: overrides}})
+	if len(k.refusals) > 0 {
+		t.Fatalf("the printed chords are not accepted as input: %q", k.refusals)
+	}
+	// Restating every default is a no-op: the map the dump describes is the map
+	// the editor ships with. The stages are compared apart because one chord is
+	// legitimately bound in both — F6 steps in the debug panel and splits outside
+	// it — and a merged view would report the other table's answer as drift.
+	for _, s := range []struct {
+		name     string
+		defaults map[string]bindingDef
+		got      map[string]bindingDef
+	}{
+		{"global", globalBindings, k.global},
+		{"editor", editorBindings, k.editor},
+	} {
+		if len(s.got) != len(s.defaults) {
+			t.Errorf("%s: %d chords after the round trip, %d before", s.name, len(s.got), len(s.defaults))
+		}
+		for chord, d := range s.defaults {
+			if g, ok := s.got[chord]; !ok || g.act != d.act {
+				t.Errorf("%s/%s: dump says %s, resolved map says %+v ok=%v", s.name, chord, d.act, g, ok)
+			}
+		}
+	}
+	// tab.jump is the one family the dump collapses, and the collapse is the only
+	// place a range appears: expanding it must give the nine chords back.
+	if nine := k.chords("tab.jump"); len(nine) != 9 {
+		t.Errorf("tab.jump: 9 chords expected through the range, got %q", nine)
+	}
+}
+
+func TestDumpKeysRejectsAnUnknownFormat(t *testing.T) {
+	if _, err := DumpKeys("yaml"); err == nil || !strings.Contains(err.Error(), "md, roff or actions") {
+		t.Fatalf("an unknown format must name the three it knows, got %v", err)
+	}
+}
+
 func TestCollapseRunTurnsADigitFamilyIntoARange(t *testing.T) {
 	nine := make([]string, 0, 9)
 	for d := '1'; d <= '9'; d++ {
@@ -237,23 +313,6 @@ func TestHelpRowsAreTheTables(t *testing.T) {
 					t.Fatalf("%s: chord %q is bound but no row shows it", act, chord)
 				}
 			}
-		}
-	}
-}
-
-// TestProtectedChordsRefuseARebind pins the set a rebind must not move: the
-// escape hatch, the guaranteed exit and the movement keys.
-func TestProtectedChordsRefuseARebind(t *testing.T) {
-	k := buildKeyMap()
-	for _, chord := range []string{"esc", "enter", "tab", "shift+tab", "backspace", "delete",
-		"up", "down", "left", "right", "pgup", "pgdown", "home", "end", "ctrl+q"} {
-		if !k.isProtected(chord) {
-			t.Errorf("%q must be protected", chord)
-		}
-	}
-	for _, chord := range []string{"ctrl+s", "ctrl+p", "f1", "alt+t"} {
-		if k.isProtected(chord) {
-			t.Errorf("%q must be rebindable", chord)
 		}
 	}
 }

@@ -852,9 +852,34 @@ cross-build. The cheap part first:
         `TestHelpRowsAreTheTables` fails if a generated row ever shows a chord that
         is not bound. The stale tree row, whose i18n key existed in neither catalog,
         is gone.
-  - [ ] `[keys]` overrides: `action = chord[, chord…]` in `.dmed.conf`, an unbind
-        with an empty value, `ResolveKeys` joining them to the defaults and hot
-        reload re-keying the running editor.
+  - [x] **`[keys]` overrides.** `action = chord[, chord…]` in `.dmed.conf`: a list
+        value is the alias set, an empty value unbinds, and `ResolveKeys` joins the
+        section to the defaults on one model-owned map, so a hot reload re-keys the
+        running editor and macro playback follows it for free (a replay feeds the
+        same `dispatchKey`). The resolver refuses, rather than half-applying, the
+        four lines that would leave the user holding a chord that does nothing: an
+        unknown action, a chord that cannot arrive as written (`shift+g` *is* `G`,
+        and `ctrl+shift+f5` must be spelled in the order the key names are built), a
+        protected target, and a chord an action *outside* the section still owns.
+        Applying is two passes — every named action is cleared, then the new chords
+        are written — because one pass cannot express a swap: `file.save = ctrl+k`
+        would be refused over a Ctrl+K that `lsp.hover = ctrl+s` had not released
+        yet. Because one chord can only be claimed once, the lines are applied in
+        sorted order: two actions asking for the same key produce the same map every
+        run, and the loser is the one that reports. Refusals land on the status bar
+        instead of in a log nobody reads, and `dmed --dump-keys actions` prints the
+        names to write — which the resolver must accept as input, a test feeds the
+        whole list back to prove. That property cost one carve-out: F6 and F7 ship
+        in *both* tables under different actions, because the global one declines
+        outside the debug panel, so a chord with two shipped owners is a restatement
+        rather than a claim, and either half naming it keeps both instead of
+        silently unbinding the other. `alt+1..9` keeps its meaning as sugar in the
+        value, not as a case in the dispatcher. Proven in the shipped binary by the
+        `tests/tui`
+        harness, which also found the pty bug that hid it: ConPTY is handed an env
+        block whose repeated names Windows resolves to the *first* entry, so the
+        harness's `HOME=<tempdir>` was shadowed by the developer's own and no
+        scenario had ever read a config file it wrote (`ptyterm.mergeEnv`).
   - [ ] The overlay and pane handlers, which still match chord literals inside
         their own `switch s`, move into per-pane tables so nothing is left
         unremappable.

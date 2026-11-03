@@ -709,3 +709,95 @@ func TestWriteLangCreatesSectionInEmptyFile(t *testing.T) {
 		t.Errorf("missing [ui] lang:\n%s", s)
 	}
 }
+
+func TestLoadKeysSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[editor]
+tab_width = 2
+
+[keys]
+# a comment
+file.save = ctrl+1
+palette.open = ctrl+p, f4
+app.quit =
+`
+	os.WriteFile(path, []byte(content), 0o644)
+
+	cfg := Defaults()
+	loadFile(path, &cfg)
+
+	if cfg.Editor.TabWidth != 2 {
+		t.Errorf("[keys] ate the sections around it: tab_width = %d", cfg.Editor.TabWidth)
+	}
+	if got := cfg.Keys.Overrides["file.save"]; len(got) != 1 || got[0] != "ctrl+1" {
+		t.Errorf("file.save = %q, want [ctrl+1]", got)
+	}
+	if got := cfg.Keys.Overrides["palette.open"]; len(got) != 2 || got[1] != "f4" {
+		t.Errorf("palette.open = %q, want [ctrl+p f4]", got)
+	}
+	// The comment line is not an action.
+	if _, ok := cfg.Keys.Overrides["# a comment"]; ok {
+		t.Error("a comment was parsed as a key binding")
+	}
+	if len(cfg.Keys.Overrides) != 3 {
+		t.Errorf("overrides = %d entries, want 3: %+v", len(cfg.Keys.Overrides), cfg.Keys.Overrides)
+	}
+}
+
+// An unbind and "the user said nothing" are different statements: one has to
+// clear the default chord, the other must leave it alone.
+func TestKeysUnbindDiffersFromAbsence(t *testing.T) {
+	cfg := Defaults()
+	if _, ok := cfg.Keys.Overrides["app.quit"]; ok {
+		t.Fatal("Defaults() must not claim every action")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	os.WriteFile(path, []byte("[keys]\napp.quit =\n"), 0o644)
+	loadFile(path, &cfg)
+
+	chords, ok := cfg.Keys.Overrides["app.quit"]
+	if !ok {
+		t.Fatal("the unbind was dropped instead of recorded")
+	}
+	if len(chords) != 0 {
+		t.Errorf("app.quit = %q, want an empty list", chords)
+	}
+}
+
+func TestSettingsListsKeyOverrides(t *testing.T) {
+	cfg := Defaults()
+	cfg.Keys.Overrides = map[string][]string{
+		"file.save": {"ctrl+1"},
+		"app.quit":  nil,
+		"palette.open": {
+			"ctrl+p", "f4",
+		},
+	}
+
+	rows := Settings(cfg)
+	seen := map[string]string{}
+	var order []string
+	for _, s := range rows {
+		if s.Section == "keys" {
+			seen[s.Key] = s.Value
+			order = append(order, s.Key)
+		}
+	}
+	if len(seen) != 3 {
+		t.Fatalf("keys rows = %d, want 3: %+v", len(seen), rows)
+	}
+	if seen["file.save"] != "ctrl+1" || seen["palette.open"] != "ctrl+p, f4" {
+		t.Errorf("keys rows = %+v", seen)
+	}
+	// An unbind is listed, not hidden — search-everywhere has to find the line
+	// the user wrote in order to tell them what it does.
+	if seen["app.quit"] != "(none)" {
+		t.Errorf("app.quit = %q, want (none)", seen["app.quit"])
+	}
+	if !slices.IsSorted(order) {
+		t.Errorf("keys rows are not in a stable order: %q", order)
+	}
+}

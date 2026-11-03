@@ -1303,7 +1303,8 @@ func (m *Model) handleTailBindings(s string, msg tea.KeyPressMsg) (tea.Cmd, bool
 		// is handed, and alt+digit must not be one of the keys it swallows.
 		return m.runBinding(m.keys.editor, s, msg)
 	}
-	// Plugins get first crack at unhandled keys so they can override built-ins.
+	// Plugins claim keys the global stage and the owning panel left unhandled, so
+	// they can override the text pane but never the escape hatch or the palette.
 	if m.plugins != nil && m.plugins.HasBinding(s) {
 		if m.plugins.RunBinding(m, s) {
 			return nil, true

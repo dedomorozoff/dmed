@@ -1,4 +1,4 @@
-.Dd September 18, 2026
+.Dd November 3, 2026
 .Dt DMED 1
 .Os
 .Sh NAME
@@ -13,6 +13,8 @@
 .Op Ar directory
 .Nm
 .Ic setup-ai
+.Nm
+.Ic --dump-keys Ar format
 .Sh DESCRIPTION
 .Nm
 is a terminal-native code editor with AI agents as first-class participants.
@@ -44,8 +46,28 @@ presets, tests the connection, and writes the result to
 Show help message and exit.
 .It Fl v , -version
 Print the version and exit.
+.It Fl -dump-keys Ar format
+Print the key cheat sheet the editor shows, generated from the binding tables
+instead of copied out of them:
+.Ar md
+for Markdown,
+.Ar roff
+for this page,
+.Ar actions
+for the action names the
+.Sy [keys]
+section rebinds.
+The action dump is what a document that cannot run
+.Nm
+still quotes correctly.
 .El
 .Sh KEYBINDINGS
+These chords are the defaults.
+Each one is an action with a name, so
+.Sy [keys]
+in
+.Pa .dmed.conf
+moves it; the protected keys listed there do not.
 .Ss Navigation
 .Bl -tag -width "Alt+1..9"
 .It Sy Arrows
@@ -373,6 +395,29 @@ Chat panel width as percentage of screen (default: 40).
 .It Sy lang Ns = Ns Ar code
 UI language: en or ru (default: en).
 .El
+.Ss [keys]
+Each key is an action name and each value the chord, or chords, it should
+answer to:
+.Dl file.save = ctrl+s, ctrl+1
+.Pp
+An empty value unbinds the action and a list replaces the chords it answered to,
+so two lines naming each other's chord are a swap.
+Copying the list back into the file changes nothing: a chord the editor ships with
+two meanings \(em F6 steps in the debug panel and splits outside it \(em keeps both
+when either half restates it.
+The action names and the chords they ship with are listed by
+.Ic "dmed --dump-keys" Ar actions .
+A line naming an unknown action, a malformed chord or a chord another action
+already owns is refused and reported on the status bar instead of being applied
+silently.
+Esc, Enter, Tab, Backspace, Delete, the arrow and page keys, Home, End and
+.Sy ctrl+q
+are protected and cannot be moved: overlays, prompts and the review panel are
+built around them, and
+.Sy ctrl+q
+is the exit that is guaranteed when the mouse is unavailable.
+Rebinding also re-keys macro playback, because a replayed macro runs the same
+dispatch chain as a live key.
 .Sh FILES
 .Bl -tag -width "~/.dmed.conf"
 .It Pa ~/.dmed.conf

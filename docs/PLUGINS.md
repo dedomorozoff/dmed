@@ -59,7 +59,11 @@ end)
 ```
 
 Bindings use bubbletea key names (`ctrl+x`, `alt+d`, `f1`, `enter`, ...).
-Plugin bindings are checked before built-in keys, so they can override them.
+A plugin binding is checked after the global chords and after whichever pane or
+overlay owns the keyboard, but before the text pane — so a plugin can take over
+an editing key, and cannot take `Ctrl+Q`, `Ctrl+P`, `F1` or the keys a panel is
+answering with. The same order applies to a `[keys]` rebind: the config moves
+built-in chords, a plugin reaches only what is left.
 
 ### Palette commands
 

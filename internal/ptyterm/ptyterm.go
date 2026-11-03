@@ -5,6 +5,7 @@ package ptyterm
 import (
 	"io"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -12,9 +13,43 @@ type Options struct {
 	Command string   // executable path; empty selects the platform default shell
 	Args    []string // arguments passed to Command
 	Dir     string   // working directory; empty is inherited
-	Env     []string // extra KEY=value entries appended to the environment
+	Env     []string // extra KEY=value entries, winning over the inherited ones
 	Width   int      // initial terminal columns
 	Height  int      // initial terminal rows
+}
+
+// mergeEnv returns the environment the child is given: the parent's, with the
+// caller's entries applied over it. Order matters more than it looks. Windows
+// resolves a repeated name to the FIRST entry of the block handed to
+// CreateProcess, so simply appending HOME=<dir> to os.Environ() left the
+// parent's HOME in force and every later override a silent no-op. os/exec
+// dedupes on Unix by itself, but both platforms are built from this list so the
+// two mean exactly the same thing.
+func mergeEnv(extra []string) []string {
+	out := make([]string, 0, len(os.Environ())+len(extra))
+	at := make(map[string]int, cap(out))
+	add := func(kv string) {
+		name, _, ok := strings.Cut(kv, "=")
+		if !ok || name == "" {
+			return
+		}
+		if envFoldKeys {
+			name = strings.ToUpper(name)
+		}
+		if i, seen := at[name]; seen {
+			out[i] = kv
+			return
+		}
+		at[name] = len(out)
+		out = append(out, kv)
+	}
+	for _, kv := range os.Environ() {
+		add(kv)
+	}
+	for _, kv := range extra {
+		add(kv)
+	}
+	return out
 }
 
 // Terminal is a live pseudo-terminal session.

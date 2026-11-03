@@ -10,6 +10,10 @@ import (
 	"github.com/UserExistsError/conpty"
 )
 
+// envFoldKeys: Windows environment names are case-insensitive, so HOME, Home
+// and home are one entry as far as the child is concerned.
+const envFoldKeys = true
+
 func start(opts Options) (*Terminal, error) {
 	shell := opts.Command
 	if shell == "" {
@@ -25,7 +29,7 @@ func start(opts Options) (*Terminal, error) {
 	cpty, err := conpty.Start(command,
 		conpty.ConPtyDimensions(opts.Width, opts.Height),
 		conpty.ConPtyWorkDir(opts.Dir),
-		conpty.ConPtyEnv(append(os.Environ(), opts.Env...)),
+		conpty.ConPtyEnv(mergeEnv(opts.Env)),
 	)
 	if err != nil {
 		return nil, err

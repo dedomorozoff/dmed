@@ -214,6 +214,32 @@ The status bar icons (`▤` tree, `⎇` git, `✦` AI, `◉` debug, `❯` termin
 | `Ctrl+Q` | Quit (a dirty buffer asks first) |
 | `Ctrl+C` | Copy the selection (never quits) |
 
+### Remapping
+
+Every chord above is a name, so `.dmed.conf` can address the command instead of
+the keystroke:
+
+```ini
+[keys]
+file.save = ctrl+s, ctrl+1   # an action may answer to several chords
+palette.open = f2            # the default Ctrl+P is freed by the move
+debug.panel =                # empty value unbinds it
+```
+
+`dmed --dump-keys actions` lists the action names with the chords they ship with.
+A value replaces the action's chords rather than adding to them, so dropping one
+alias means not writing it, and two lines that name each other's chord are a swap
+(`file.save = ctrl+k`, `lsp.hover = ctrl+s`). Copying the dumped defaults back is a
+no-op: a chord the editor ships with two meanings — `F6` steps in the debug panel
+and splits outside it — keeps both when either half restates it. A refused line —
+an unknown action, a chord that cannot arrive as written, or a chord an action
+outside the section still owns — is reported on the status bar rather than applied
+in silence.
+Esc, Enter, Tab, Backspace, Delete, the arrow and page keys, Home/End and `Ctrl+Q`
+are protected and stay where they are: the escape hatch, the guaranteed exit and
+the movement keys are what the rest of the editor is built around. A remap applies
+to macro playback too, since a replay runs the same dispatch chain as a live key.
+
 ## Configuration
 
 `.dmed.conf` in your home directory (global) or project root (project wins), hot-reload on save.
@@ -259,6 +285,10 @@ lang = en                    # en | ru
 repo = dedomorozoff/dmed
 dir = plugins
 branch = main
+
+[keys]                       # rebind a command by its action name (see Remapping)
+# file.save = ctrl+s, ctrl+1
+# debug.panel =
 
 [debug]                      # DAP debugger (Go/Delve by default)
 mode = debug                 # launch mode passed to the adapter (debug/test/exec for Delve)
