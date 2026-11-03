@@ -310,7 +310,9 @@ The configuration file uses INI format with the following sections:
 .Ss [editor]
 .Bl -tag -width "syntax_theme"
 .It Sy tab_width Ns = Ns Ar N
-Tab display width (default: 4).
+Tab display width (default: 4), for a file no
+.Pa .editorconfig
+says anything about.
 .It Sy syntax_theme Ns = Ns Ar name
 Chroma syntax theme name (default: monokai).
 .It Sy line_numbers Ns = Ns Ar bool
@@ -418,12 +420,51 @@ built around them, and
 is the exit that is guaranteed when the mouse is unavailable.
 Rebinding also re-keys macro playback, because a replayed macro runs the same
 dispatch chain as a live key.
+.Ss .editorconfig
+A
+.Pa .editorconfig
+beside a file answers for that file and wins over
+.Sy [editor] :
+.Ar indent_style ,
+.Ar indent_size ,
+.Ar tab_width ,
+.Ar trim_trailing_whitespace
+and
+.Ar insert_final_newline .
+The nearest file wins, and inside it the last section that matches;
+.Sy root = true
+ends the walk.
+.Ar tab_width
+and
+.Ar indent_size
+default each other, so a space file with only a tab stop indents to that stop and
+a tab file with only an indent size displays its tabs that wide.
+The tab stop is what wrapping, folding and a click to a column are measured in.
+The two save rules are applied when the file is written \(em the trim is one undo
+step, so
+.Sy ctrl+Z
+puts the spaces back \(em and to an agent's proposal before it is reviewed, so the
+diff that is approved is the file that lands.
+Patterns use the editorconfig glob
+.Pf ( "* ? [seq] ** {a,b} {1..9}" ) ,
+matched case-insensitively on Windows and macOS, and a pattern with no slash
+matches the basename.
+.Ar end_of_line ,
+.Ar charset
+and
+.Ar max_line_length
+are not honoured: the editor writes the line endings and the encoding a file
+already uses, and wrapping is a property of the pane.
 .Sh FILES
 .Bl -tag -width "~/.dmed.conf"
 .It Pa ~/.dmed.conf
 Global configuration file.
 .It Pa ./.dmed.conf
 Project-level configuration (overrides global).
+.It Pa .editorconfig
+Per-file indentation and save rules, in any directory a file lives in or above
+it (overrides
+.Sy [editor] ) .
 .It Pa ./.dmed-session.json
 Session state (open tabs, cursor positions).
 .El

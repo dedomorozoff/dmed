@@ -66,7 +66,7 @@ func newSubAgentTools(root string, cfg config.Config) *subAgentTools {
 	return &subAgentTools{env: newToolEnv(root, configAI{
 		SkippedDirs:    cfg.Editor.SkippedDirs,
 		RestrictToRoot: cfg.AI.RestrictToRoot,
-	})}
+	}, fileFinisher(root, cfg.FileOpts()))}
 }
 
 // subAgentAllowed lists the sub-agent's tools. Kept as a positive list on

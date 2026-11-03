@@ -3,7 +3,6 @@ package editor
 import (
 	"os"
 	"path/filepath"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -332,10 +331,7 @@ func (m *Model) saveActive() {
 		m.msg = m.t("msg.cannot_save")
 		return
 	}
-	text := t.buf.Text()
-	if t.lineEnding == "crlf" {
-		text = strings.ReplaceAll(text, "\n", "\r\n")
-	}
+	text := m.textForDisk(t)
 	if err := os.WriteFile(t.path, []byte(text), 0o644); err != nil {
 		m.msg = m.t("msg.save_failed", err.Error())
 		return

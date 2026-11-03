@@ -268,7 +268,7 @@ func (m *Model) foldCloseAtCursor() {
 		return
 	}
 	ln := t.buf.CurLine()
-	tabW := m.cfg.Editor.TabWidth
+	tabW := m.tabStop(t)
 	r, ok := t.foldTargetAt(ln, tabW)
 	if !ok {
 		m.msg = m.t("msg.no_fold")
@@ -294,7 +294,7 @@ func (m *Model) foldOpenAtCursor() {
 		return
 	}
 	ln := t.buf.CurLine()
-	tabW := m.cfg.Editor.TabWidth
+	tabW := m.tabStop(t)
 	_, foldedHere := t.foldStateAt(ln, tabW)
 	_, _, hidden := t.foldHidden(ln, tabW)
 	switch {
@@ -324,7 +324,7 @@ func (m *Model) toggleFoldAtCursor() {
 	if t == nil {
 		return
 	}
-	tabW := m.cfg.Editor.TabWidth
+	tabW := m.tabStop(t)
 	r, ok := t.foldTargetAt(t.buf.CurLine(), tabW)
 	if !ok {
 		m.msg = m.t("msg.no_fold")
@@ -344,7 +344,7 @@ func (m *Model) toggleFoldAll() {
 	if t == nil {
 		return
 	}
-	tabW := m.cfg.Editor.TabWidth
+	tabW := m.tabStop(t)
 	if len(t.folds) >= len(t.foldRanges(tabW)) && len(t.folds) > 0 {
 		t.unfoldAll()
 		m.msg = m.t("msg.unfold_all")
@@ -363,7 +363,7 @@ func (m *Model) foldSkip(dir int) {
 	if t == nil || t.buf.HasSelection() {
 		return
 	}
-	st, en, hid := t.foldHidden(t.buf.CurLine(), m.cfg.Editor.TabWidth)
+	st, en, hid := t.foldHidden(t.buf.CurLine(), m.tabStop(t))
 	if !hid {
 		return
 	}
@@ -425,7 +425,7 @@ func (s *foldScanner) at(line int) (hidden, foldedStart bool) {
 func (m Model) dispRows(paneIdx, contentW int) []dispRow {
 	p := &m.panes[paneIdx]
 	t := &m.tabs[p.tabIdx]
-	tabW := m.cfg.Editor.TabWidth
+	tabW := m.tabStop(t)
 	rs := t.foldRanges(tabW)
 
 	// The currently folded blocks, ascending by start line. Markers whose

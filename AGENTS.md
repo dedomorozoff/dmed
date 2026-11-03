@@ -86,7 +86,10 @@ The code is split into focused internal packages:
   `SelectRange`, never `DragSelect`: the latter re-clamps the column through the
   sticky goal column and silently moves the end it was handed.
   Must stay free of TUI imports; behavior changes belong
-  in the corresponding `_test.go`. Undo grouping: consecutive inserts at
+  in the corresponding `_test.go`. `IndentLines`/`UnindentLines` take the indent
+  *unit* as a string (a tab, or N spaces) rather than a width, which is what keeps
+  per-file `.editorconfig` knowledge out of the buffer. Undo grouping: consecutive
+  inserts at
   adjacent positions form one undo step; any other operation breaks the group
   (`beginChange`/`breakGroup`). `pushUndo` is also the only place that learns
   where text last changed: it stores the caret its snapshot takes, and `LastEdit`
@@ -149,7 +152,10 @@ The code is split into focused internal packages:
   A new binding is a table entry, not a `case` in a switch; a chord that means
   different things in different states returns `handled == false` to fall
   through to the next stage. The rest is split by concern: `view.go`
-  (rendering), `tabs.go` (open/close/switch/save/quit confirmation, and the MRU
+  (rendering), `fileopts.go` (the `.editorconfig` answer for one tab: the tab
+  stop, the typed indent unit, the bytes `textForDisk` writes, and the cache
+  invalidation a changed `.editorconfig` triggers), `tabs.go`
+  (open/close/switch/save/quit confirmation, and the MRU
   `Ctrl+Tab` cycle over the pane's recency order — the walk freezes the order it
   derived on the first press and focuses through `setPaneTabQuiet`, because a walk
   that recorded each tab it left would reorder the list under itself and ping-pong
@@ -249,6 +255,15 @@ The code is split into focused internal packages:
   the spelling — only the editor knows which keys exist, so `ResolveKeys` validates
   and reports. An unknown key in a section with an open-ended grammar (`lang.<id>`,
   an action) is kept, not dropped.
+  `editorconfig.go` is the per-file half of the same job: `LoadEditorConfig(root,
+  path, def)` walks from the file's directory to the root (nearest file wins, last
+  matching section wins, `root = true` ends the walk, outside the root the walk is
+  unbounded) into a `FileOpts` — tab stop, indent unit, trim, final newline — with
+  whatever the file left unset answered by the caller's defaults, so a project with
+  no `.editorconfig` behaves exactly as it did. Its glob (`ecglob.go`) is the
+  editorconfig subset and must **not** be shared with or replaced by
+  `tools_fs.go`'s `globMatchSegments`: a different grammar, no braces. A pattern
+  that will not compile matches nothing, never everything.
   `WriteAI` deliberately does not write `tools_enabled`/`tools_disabled`: they
   are a hand-curated list and the wizard must not clobber it.
   `AIConfig.Unconfigured()` is the gate for the keyless fallback: only a
@@ -338,16 +353,34 @@ Conventions:
 - Every goroutine spawned by the app runs its body under
   `debug.CapturePanicReport` (`internal/debug`), so a panic is logged to
   stderr instead of terminating the whole process with a Windows exit code 2.
-- Files are stored with a trailing newline; dirty check compares against the
-  normalized saved snapshot (`MarkSaved`/`Dirty`).
+- Files are stored with a trailing newline unless the file's `.editorconfig`
+  says otherwise; dirty check compares against the normalized saved snapshot
+  (`MarkSaved`/`Dirty`). The buffer *always* carries its final newline — whether
+  the bytes on disk do is a property of the file being written, so it is decided
+  at the save and not in the document. One `textForDisk` answers for Ctrl+S and
+  Save As both, and the end-of-file newline is stripped **before** CRLF is
+  re-written (after, a `insert_final_newline = false` file would end in a bare
+  `\r`). Per-file settings are tab-owned, never package-owned: `m.tabStop(t)` and
+  `m.indentUnit(t)` are the only ways the view and the edit commands ask for them,
+  cached on the tab keyed by its **path** (Save As moves a file into another
+  directory) and dropped by the watcher branch when a `.editorconfig` changes. The
+  wrap and fold caches need no invalidation — both are keyed on the tab stop they
+  were built with.
 - Agent edits go through `internal/agent.Applier`: validate all
   `Change.Orig` against current content, then write atomically with rollback;
   an approved series becomes one git commit (`agent: <prompt first line>`).
-  Do not bypass this for AI-produced edits. Replace in Project is the human's
+  Do not bypass this for AI-produced edits. The file's own `.editorconfig` save
+  policy is applied where a `Change` is **created** (`toolEnv.finishFile`), never
+  inside the Applier: a rewrite after approval would make the reviewed diff a lie.
+  Only the two whitespace rules go there — converting the indent unit would rewrite
+  every line of a whole-file proposal, including the lines the model did not touch —
+  and `Change.Orig` stays the raw bytes on disk, because that is what `Validate`
+  compares against. Replace in Project is the human's
   use of the very same pipeline (preview, diff review, `Applier.Apply`), and
   its series is deliberately *not* committed: the `agent:` subject is what
   `undoLastAgentApply` looks for, and a bulk rename is ordinary working-tree
-  work.
+  work. Its bytes stay exact: no save policy, since appending a newline to 200
+  files is a change nobody reviewed.
 - Chat tools return one `ToolResult` (text + optional `Change` + optional
   `Park`). Anything that needs a human decision *parks* the loop instead of
   writing a marker into the transcript: the result carries a readable

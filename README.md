@@ -30,7 +30,7 @@ AI is part of the workflow, not the point of it: agents read, propose and run �
 - **Word wrap** (`Alt+Z`), sticky goal column, move lines (`Alt+↑/↓`), duplicate/delete line, `Ctrl+/` toggle comment
 - **Fuzzy file finder** (`Ctrl+O`/`F3`) over the project tree
 - **Search everywhere** (`Alt+P`, `Ctrl+Shift+P`, double `Shift`): commands, project files *and* settings in one JetBrains-style list; `Ctrl+P` searches commands alone
-- Files are stored with a trailing newline; dirty state is exact (normalized snapshots)
+- Files are stored with a trailing newline unless the file's `.editorconfig` says otherwise; dirty state is exact (normalized snapshots)
 
 ### Files & Project
 
@@ -38,6 +38,7 @@ AI is part of the workflow, not the point of it: agents read, propose and run �
 - **fsnotify watcher**: external changes offer reload/auto-merge; renamed files keep tabs
 - **Sessions**: open files restore across restarts
 - Config wired through `.dmed.conf` (INI, hot-reload on save)
+- **`.editorconfig`**: per-file indent style and width, trailing-whitespace trim and final newline — read on the save path and on an agent's proposal, hot-reloaded too
 
 ### Git (pure Go — no git binary)
 
@@ -322,6 +323,38 @@ launch_json = {"justMyCode": false}
 ```
 
 The VS Code "JavaScript Debugger" (`ms-vscode.js-debug`, adapter script `src/dap.js`) is auto-detected for `.js/.ts` files from `~/.vscode*/extensions`, `~/.cursor/extensions` and `~/node_modules`; `DMED_JS_DEBUG` pins it explicitly. Attaching to `node --inspect-brk app.js`: `launch_request = attach`, `launch_json = {"port": 9229}`.
+
+### `.editorconfig`
+
+A `.editorconfig` next to a file answers for that file, and wins over `[editor]`:
+
+```ini
+root = true
+
+[*]
+indent_style = space
+indent_size = 2
+tab_width = 2
+trim_trailing_whitespace = true
+insert_final_newline = false
+
+[Makefile]
+indent_style = tab
+```
+
+The nearest file wins, and inside it the last section that matches. `tab_width`
+and `indent_size` default each other, so a space file with only a tab stop
+indents to that stop and a tab file with only an indent size displays its tabs
+that wide. `indent_style = space` makes Tab type spaces and Shift+Tab take them
+back; the tab stop is what every column calculation uses, so wrapping, folds and
+a click to a column follow the file too. `trim_trailing_whitespace` and
+`insert_final_newline` are applied when the file is written — the trim is one
+undo step, so `Ctrl+Z` after a save puts the spaces back — and to an agent's
+proposal before it is reviewed, so the diff you approve is the file you get.
+Patterns use the editorconfig glob (`* ? [seq] ** {a,b} {1..9}`); one with no
+`/` matches the basename. `end_of_line`, `charset` and `max_line_length` are
+left alone: dmed writes the endings and the encoding a file already uses, and
+wrapping is a display property of the pane.
 
 ## Documentation
 

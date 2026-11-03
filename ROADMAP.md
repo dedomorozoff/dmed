@@ -910,6 +910,61 @@ cross-build. The cheap part first:
 - Themes: user palettes for syntax_theme in `.dmed.conf` or a separate
   file, live preview in the wizard.
 - `.editorconfig`: indent_style/size, trim trailing whitespace, final newline.
+  - [x] **The file answers for one file.** `config.LoadEditorConfig(root, path,
+        def)` walks from the file's directory up to the project root — nearest
+        file wins, last matching section wins, `root = true` ends the walk — and
+        `FileOpts` carries what dmed can act on: `tab_width`, `indent_size`,
+        `indent_style`, `trim_trailing_whitespace`, `insert_final_newline`. The
+        caller's defaults fill every key the file leaves unset, and the two
+        widths default *each other* in both directions, since the spec says a
+        space file's level is `tab_width` when `indent_size` is absent and a tab
+        file's tabs are `indent_size` columns wide. The glob is the editorconfig
+        subset (`* ? [seq] ** {a,b} {1..9}`, backslash escapes) compiled in
+        `ecglob.go` and deliberately *not* shared with `globMatchSegments`, which
+        is a different grammar with no braces; sharing it would quietly change
+        what the agent's GLOB tool matches. Matching is case-insensitive on
+        Windows and macOS only, and a pattern with no `/` is matched against the
+        basename, which is why `[Makefile]` works. A pattern that will not
+        compile matches nothing rather than everything: a broken rule must not
+        reach files it never mentioned.
+  - [x] **Every column calculation agrees with the file.** The ~20 reads of
+        `cfg.Editor.TabWidth` became `m.tabStop(t)`, and the `"\t"` literals in
+        the indent commands became `m.indentUnit(t)`. The buffer needed no new
+        API for that — `IndentLines` already takes the unit as a string, so
+        `internal/buffer` stayed both TUI-free and unit-agnostic. The result is
+        cached on the tab keyed by its *path* rather than a "known" flag, because
+        Save As moves a file into another directory and the old rules must not
+        follow it; a changed `.editorconfig` drops every cache from the watcher
+        branch, and the wrap and fold caches need nothing because both are keyed
+        on the tab stop they were built with. A Tab still enters one rune at a
+        time, so it joins the typing run it sits in instead of becoming its own
+        undo step.
+  - [x] **Save writes what the file asked for.** One `textForDisk` for Ctrl+S
+        and Save As both: the trim is the buffer's own `TrimTrailing` — so it is
+        one undo step that puts the spaces back, rather than bytes that vanished
+        with no way home — then the final newline, then the line endings the file
+        already used. The end-of-file newline is stripped before CRLF is written,
+        not after, or a file with `insert_final_newline = false` would end in a
+        bare carriage return.
+  - [x] **An agent proposes the bytes that land.** The `.editorconfig` save
+        policy is applied where a `Change` is *created* (`toolEnv.finishFile`,
+        wired for the chat and for a background sub-agent), so the diff a human
+        reviews is the file that appears on disk. Applying it inside the Applier
+        after approval was rejected on purpose: a post-approval rewrite makes the
+        reviewed diff a lie. Only the two whitespace rules run there — converting
+        the indent unit would rewrite every line of a whole-file proposal,
+        including the lines the model did not touch. `Change.Orig` stays the raw
+        bytes, because that is what `Applier.Validate` compares against the disk,
+        and a trimmed `Orig` would be a snapshot of a file that never existed.
+  - Not honoured, and why: `end_of_line` and `charset` (dmed reads and writes
+        UTF-8 and re-writes the endings a file already uses, so a rule would only
+        be able to fight that), `max_line_length` (the buffer is rune-based and
+        the wrap is a display property), `tab_width` of a file no tab holds and
+        Replace in Project's own bytes (its contract is exact-occurrence
+        replacement across however many files, and appending a newline to 200 of
+        them is a change nobody reviewed). A file outside the project root is
+        still served: the walk upward has no boundary there, exactly as the
+        spec's does, and stops at the first `root = true`.
 - [x] TUI regression harness in CI: `tests/tui` (Go, no Python) spawns the built
       binary in a real pseudo-terminal through the editor's own `internal/ptyterm`
       — ConPTY on Windows, creack/pty on Linux — types into it, and asserts on the

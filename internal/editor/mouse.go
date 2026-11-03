@@ -486,7 +486,7 @@ func (m *Model) clickBuffer(x, y int, btn tea.MouseButton, mod tea.KeyMod) tea.C
 	if gx := x - leftW; gx >= 0 && gx < gw {
 		ln, _, d := m.clickPosToLineCol(m.activePane, editorRow, x)
 		m.lastClickValid = false // a rapid second click must not toggle twice
-		tabW := m.cfg.Editor.TabWidth
+		tabW := m.tabStop(t)
 		// The gutter's last cell is the fold column whenever the buffer has
 		// anything to fold. It only ever toggles a fold: a blank chevron cell
 		// (a line that starts no block) must not fall through to the
@@ -510,7 +510,7 @@ func (m *Model) clickBuffer(x, y int, btn tea.MouseButton, mod tea.KeyMod) tea.C
 
 	// A content click on a fold summary expands the block it stands for.
 	if d.summary {
-		t.toggleFoldAt(d.ln, m.cfg.Editor.TabWidth)
+		t.toggleFoldAt(d.ln, m.tabStop(t))
 		t.buf.SetCursor(d.ln, 0)
 		return nil
 	}
@@ -564,7 +564,7 @@ func (m Model) clickPosToLineCol(paneIdx, editorRow, x int) (int, int, dispRow) 
 	t := &m.tabs[p.tabIdx]
 	leftW := m.leftRailWidth()
 	gw := m.gutterWidthForTab(t)
-	tabW := m.cfg.Editor.TabWidth
+	tabW := m.tabStop(t)
 
 	disp := m.dispRows(paneIdx, m.paneContentWidth(paneIdx))
 	if len(disp) == 0 {

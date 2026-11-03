@@ -44,6 +44,8 @@ type tab struct {
 	syntaxComplete bool   // the cached highlight covers the whole text
 	langTag        string // cached syntax language of the file
 	langKnown      bool
+	ecPath         string // path the options below were read for
+	ecOpts         config.FileOpts
 	// inc is the per-document incremental token cache (internal/syntax): a
 	// pass reuses the lines whose text and lexer state are unchanged and
 	// tokenizes only the changed region plus its re-sync window. Recreated
@@ -981,7 +983,10 @@ func (m *Model) openConfigFile() {
 			"# tab_width = 4\n" +
 			"# syntax_theme = monokai\n" +
 			"# line_numbers = true\n" +
-			"# skipped_dirs = .git,node_modules\n\n" +
+			"# skipped_dirs = .git,node_modules\n" +
+			"# A .editorconfig beside a file overrides tab_width for that file:\n" +
+			"# indent_style, indent_size, tab_width, trim_trailing_whitespace and\n" +
+			"# insert_final_newline are read per file, and re-read when the file changes\n\n" +
 			"[ai]\n" +
 			"# provider = ollama  # ollama | openai\n" +
 			"# model =\n" +
@@ -1240,6 +1245,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.msg = msg
 			}
 			return m, waitForFileEvent(m.fileEvents)
+		}
+		// A changed .editorconfig is read again on the next frame: the per-tab
+		// cache is keyed on the path, so dropping the key is the whole reload.
+		// The wrap and fold caches need nothing here, both are keyed on the tab
+		// stop they were built with and a different stop rebuilds them.
+		if filepath.Base(path) == config.EditorConfigFile {
+			m.dropFileOptsCaches()
 		}
 		// Hot-reload a changed plugin without restarting the editor.
 		if m.plugins != nil && m.isPluginPath(path) {
@@ -1690,7 +1702,7 @@ func (m *Model) clampScroll() {
 	}
 	h := m.paneViewHeight(m.activePane)
 	cur := t.buf.CurLine()
-	tabW := m.cfg.Editor.TabWidth
+	tabW := m.tabStop(t)
 	// Folding: rows are display rows (folded blocks collapsed to one hint
 	// line). A cursor that ended up on a hidden line — buffer edits shifting
 	// things around — unfolds the block that hides it first.
@@ -1917,7 +1929,7 @@ func (m *Model) handleMouseMotion(msg tea.MouseMotionMsg) tea.Cmd {
 		// Drag started on a fold summary: expand the block and drag from its
 		// start line.
 		t := m.cur()
-		if t.toggleFoldAt(d.ln, m.cfg.Editor.TabWidth) {
+		if t.toggleFoldAt(d.ln, m.tabStop(t)) {
 			m.clampScroll()
 		}
 		ln = d.ln
@@ -2016,9 +2028,10 @@ func (m Model) cursorScreenPos() (int, int) {
 	// Expand cursor column for tabs.
 	raw := t.buf.LineAt(curLine)
 	expCol := 0
+	tabW := m.tabStop(t)
 	for i := 0; i < curRawCol && i < len(raw); i++ {
 		if raw[i] == '\t' {
-			expCol += m.cfg.Editor.TabWidth
+			expCol += tabW
 		} else {
 			expCol++
 		}

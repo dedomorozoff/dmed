@@ -101,7 +101,7 @@ func (m *Model) smartIndent() string {
 		}
 		switch r {
 		case '(', '[', '{':
-			indent += "\t"
+			indent += m.indentUnit(t)
 		}
 		break
 	}

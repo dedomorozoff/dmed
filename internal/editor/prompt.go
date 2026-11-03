@@ -123,10 +123,7 @@ func (m *Model) handleSavePrompt(s string, msg tea.KeyPressMsg) tea.Cmd {
 					m.msg = m.t("msg.watch_failed", path, err.Error())
 				}
 			}
-			text := t.buf.Text()
-			if t.lineEnding == "crlf" {
-				text = strings.ReplaceAll(text, "\n", "\r\n")
-			}
+			text := m.textForDisk(t)
 			if err := os.WriteFile(t.path, []byte(text), 0o644); err != nil {
 				m.msg = m.t("msg.save_failed", err.Error())
 				return nil

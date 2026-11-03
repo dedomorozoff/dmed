@@ -20,20 +20,32 @@ type toolEnv struct {
 	root     string
 	skip     projectSkip
 	restrict bool
+	// finishFile applies the file's own .editorconfig save policy to content
+	// before it becomes a Change. It is a function the caller supplies rather
+	// than a config the tools read, so this file keeps its rule of not
+	// importing the config package and a background task gets the same answer
+	// as the chat.
+	finishFile func(path, content string) string
 }
 
 // toolEnv returns the chat's tool context.
 func (m *Model) toolEnv() toolEnv {
 	return toolEnv{
-		root:     m.root,
-		skip:     m.newProjectSkip(),
-		restrict: m.cfg.AI.RestrictToRoot,
+		root:       m.root,
+		skip:       m.newProjectSkip(),
+		restrict:   m.cfg.AI.RestrictToRoot,
+		finishFile: fileFinisher(m.baseDir(), m.cfg.FileOpts()),
 	}
 }
 
 // newToolEnv builds a context for a background task that has no Model.
-func newToolEnv(root string, cfg configAI) toolEnv {
-	return toolEnv{root: root, skip: newProjectSkipFor(cfg.SkippedDirs), restrict: cfg.RestrictToRoot}
+func newToolEnv(root string, cfg configAI, finishFile func(path, content string) string) toolEnv {
+	return toolEnv{
+		root:       root,
+		skip:       newProjectSkipFor(cfg.SkippedDirs),
+		restrict:   cfg.RestrictToRoot,
+		finishFile: finishFile,
+	}
 }
 
 // configAI is the slice of the configuration a toolEnv needs. It exists so
@@ -144,10 +156,7 @@ func (e toolEnv) replace(path, block, with string) (string, *agent.Change) {
 	if !strings.Contains(orig, block) {
 		return "[REPLACE error] search block not found in " + shortenPath(e.root, full), nil
 	}
-	newContent := strings.ReplaceAll(orig, block, with)
-	if !strings.HasSuffix(newContent, "\n") {
-		newContent += "\n"
-	}
+	newContent := e.finishFile(full, strings.ReplaceAll(orig, block, with))
 	if newContent == orig {
 		return "[REPLACE] no change for " + shortenPath(e.root, full), nil
 	}
@@ -168,17 +177,18 @@ func (e toolEnv) edit(path, content string) (string, *agent.Change) {
 	} else if !os.IsNotExist(err) {
 		return "[EDIT error] " + err.Error(), nil
 	}
-	if !strings.HasSuffix(origStr, "\n") && origStr != "" {
-		origStr += "\n"
-	}
-	if !strings.HasSuffix(content, "\n") && content != "" {
-		content += "\n"
-	}
-	if origStr == content {
+	// Only the proposal takes the file's policy. Orig stays the bytes as they
+	// are on disk, because that is exactly what Applier.Validate compares the
+	// file against when the human approves — a trimmed Orig would be a snapshot
+	// of a file that never existed, and the apply would refuse it as stale. The
+	// comparison still finishes both sides, so a proposal that differs from disk
+	// only in whitespace the file does not want stays the "no change" it is.
+	newStr := e.finishFile(full, content)
+	if e.finishFile(full, origStr) == newStr {
 		return "[EDIT] no change for " + shortenPath(e.root, full), nil
 	}
 	return "[EDIT] proposed update to " + shortenPath(e.root, full),
-		&agent.Change{Path: full, Orig: origStr, New: content}
+		&agent.Change{Path: full, Orig: origStr, New: newStr}
 }
 
 // listDir returns the entries of one directory: name, kind and size.

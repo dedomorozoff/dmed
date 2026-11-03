@@ -53,10 +53,11 @@ func (m *Model) trimTrailingActive() {
 }
 
 func (m *Model) alignIndentActive() {
-	b := m.cur().buf
+	t := m.cur()
+	b := t.buf
 	from, to := b.SelectionLines()
 	b.ClearCursors()
-	m.msg = m.transformMsg("msg.aligned_lines", b.AlignIndent(from, to, m.cfg.Editor.TabWidth))
+	m.msg = m.transformMsg("msg.aligned_lines", b.AlignIndent(from, to, m.tabStop(t)))
 }
 
 func (m *Model) numberLinesActive() {

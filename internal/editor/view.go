@@ -310,7 +310,7 @@ func (m Model) gutterWidthForTab(t *tab) int {
 	}
 	// Folding code gains one chevron column (▾ open block / ▸ folded), click
 	// and it expands/collapses the block.
-	if t.hasFolds(m.cfg.Editor.TabWidth) {
+	if t.hasFolds(m.tabStop(t)) {
 		w++
 	}
 	return w
@@ -593,7 +593,7 @@ func (m Model) renderPaneRows(paneIdx, h, totalW int) []string {
 
 	wrap := p.wordWrap && contentW > 0
 	disp := m.dispRows(paneIdx, contentW)
-	tabW := m.cfg.Editor.TabWidth
+	tabW := m.tabStop(t)
 	// The painted gutter must be exactly gw cells wide: the line number block
 	// (right-aligned before the markers), the three shared marker columns and
 	// the optional fold chevron. The number block has to give the chevron its
@@ -2423,6 +2423,7 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 		m.dapCurPath == t.path && m.dapCurLine > 0 && ln == m.dapCurLine-1
 
 	// Expand tabs
+	tabW := m.tabStop(t)
 	exp := make([]rune, 0, len(raw))
 	expStyles := make([]lipgloss.Style, 0, len(raw))
 	expTokens := make([]syntax.Token, 0, len(raw))
@@ -2451,7 +2452,7 @@ func (m Model) renderLine(p *pane, t *tab, ln, w int, activePane bool, syntaxLin
 			st = lastStyle
 		}
 		if r == '\t' {
-			for k := 0; k < m.cfg.Editor.TabWidth; k++ {
+			for k := 0; k < tabW; k++ {
 				exp = append(exp, ' ')
 				expStyles = append(expStyles, st)
 				expTokens = append(expTokens, tok)

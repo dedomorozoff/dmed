@@ -1013,20 +1013,27 @@ var editorBindings = map[string]bindingDef{
 		return nil, true
 	}, protected},
 	"tab": {actEditIndent, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
-		if m.cur().buf.HasMultipleCursors() {
-			m.cur().buf.MultiInsertRune('\t')
-		} else if m.cur().buf.HasSelection() {
+		t := m.cur()
+		unit := m.indentUnit(t)
+		if t.buf.HasMultipleCursors() {
+			t.buf.MultiInsertText(unit)
+		} else if t.buf.HasSelection() {
 			// Indent the selected lines as a block, like every editor.
-			m.cur().buf.IndentLines("\t")
+			t.buf.IndentLines(unit)
 		} else {
-			m.cur().buf.Insert('\t')
+			// One Insert per rune, not InsertText: a Tab has to join the typing
+			// run it sits in, or every press becomes its own undo step.
+			for _, r := range unit {
+				t.buf.Insert(r)
+			}
 		}
 		m.msg = ""
 		return nil, true
 	}, protected},
 	"shift+tab": {actEditUnindent, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
-		if !m.cur().buf.HasMultipleCursors() {
-			m.cur().buf.UnindentLines("\t")
+		t := m.cur()
+		if !t.buf.HasMultipleCursors() {
+			t.buf.UnindentLines(m.indentUnit(t))
 		}
 		m.msg = ""
 		return nil, true
