@@ -20,6 +20,23 @@ type Config struct {
 	Debug   DebugConfig
 	LSP     LSPConfig
 	Keys    KeysConfig
+	Theme   ThemeConfig
+}
+
+// ThemeConfig is the [theme] section: the user's colours on top of a chroma
+// style. The style itself stays where it always was, [editor] syntax_theme; this
+// section holds only what a user changes about it.
+//
+// The key is a chroma token name and the value a style entry ("#ff79c6 bold
+// bg:#101014"). Both are kept verbatim and unvalidated: whether "Keyword" is a
+// token and whether "#ff79c6" is a colour is the syntax package's business, and
+// config has never known about either — the same open-ended grammar as [keys],
+// where only the editor can say if a chord exists.
+type ThemeConfig struct {
+	// Tokens maps a written token name to the style written for it. A key with an
+	// empty value drops that token's override, which is how a rule is switched off
+	// without deleting its line.
+	Tokens map[string]string
 }
 
 // DebugConfig holds DAP debugger settings (M7). Go/Delve is the default
@@ -286,6 +303,21 @@ func Settings(cfg Config) []Setting {
 		}
 		out = append(out, Setting{"keys", action, value})
 	}
+	// The [theme] rules are open-ended for the same reason, so they too are listed
+	// as written. A rule with an empty value shows as switched off rather than
+	// vanishing: the line is still in the file and still searchable.
+	tokens := make([]string, 0, len(cfg.Theme.Tokens))
+	for token := range cfg.Theme.Tokens {
+		tokens = append(tokens, token)
+	}
+	sort.Strings(tokens)
+	for _, token := range tokens {
+		value := cfg.Theme.Tokens[token]
+		if value == "" {
+			value = "(off)"
+		}
+		out = append(out, Setting{"theme", token, value})
+	}
 	return out
 }
 
@@ -440,6 +472,15 @@ func Load(projectRoot string) Config {
 // other content. If the file or the [ui] section is missing it is appended.
 func WriteLang(path, lang string) error {
 	_, err := writeSection(path, "ui", [][2]string{{"lang", lang}})
+	return err
+}
+
+// WriteSyntaxTheme sets the `[editor] syntax_theme` value in the INI file at
+// path, preserving every other key and comment. The base style has exactly one
+// spelling in dmed, and this is the writer for it; [theme] holds what a user
+// changes about the answer, never the answer's name.
+func WriteSyntaxTheme(path, name string) error {
+	_, err := writeSection(path, "editor", [][2]string{{"syntax_theme", name}})
 	return err
 }
 
@@ -712,6 +753,17 @@ func loadFile(path string, cfg *Config) {
 			cfg.Keys.Overrides[action] = parseList(v)
 		}
 	}
+
+	// [theme] — token = style entry, the user's colours over the chroma style.
+	// Open-ended keys again, and kept as written for the same reason.
+	if s, ok := sections["theme"]; ok {
+		if cfg.Theme.Tokens == nil {
+			cfg.Theme.Tokens = make(map[string]string, len(s))
+		}
+		for token, v := range s {
+			cfg.Theme.Tokens[token] = v
+		}
+	}
 }
 
 // parseINI reads an INI file and returns section -> key -> value.
@@ -919,6 +971,31 @@ func WriteLSP(path string, l LSPConfig) (int, error) {
 		}
 	}
 	return writeSection(path, "lsp", known)
+}
+
+// WriteTheme merges the given token rules into the [theme] section of the INI
+// file at path, updating the rules it names and leaving every other line —
+// including a rule the picker knows nothing about — exactly as written. A rule
+// with an empty value is still written, so a token switched off keeps its line
+// and the colour comes back when the value is typed in again.
+func WriteTheme(path string, tokens map[string]string) (int, error) {
+	rules := make(map[string]string, len(tokens))
+	for name, spec := range tokens {
+		// Lower-cased on purpose: that is the form parseINI hands back and the
+		// form writeSection matches an existing line against, so writing a
+		// displayed name would leave both spellings in the file.
+		rules[strings.ToLower(name)] = spec
+	}
+	names := make([]string, 0, len(rules))
+	for name := range rules {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	known := make([][2]string, 0, len(names))
+	for _, name := range names {
+		known = append(known, [2]string{name, rules[name]})
+	}
+	return writeSection(path, "theme", known)
 }
 
 // LSPLanguages lists every language id the editor knows how to power through

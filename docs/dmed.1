@@ -15,6 +15,8 @@
 .Ic setup-ai
 .Nm
 .Ic --dump-keys Ar format
+.Nm
+.Ic --dump-tokens
 .Sh DESCRIPTION
 .Nm
 is a terminal-native code editor with AI agents as first-class participants.
@@ -60,6 +62,12 @@ section rebinds.
 The action dump is what a document that cannot run
 .Nm
 still quotes correctly.
+.It Fl -dump-tokens
+Print the syntax token names a
+.Sy [theme]
+rule may name, and below them the names that style a wrapper no terminal paints
+and are therefore refused.
+The same list the editor quotes when it refuses a line.
 .El
 .Sh KEYBINDINGS
 These chords are the defaults.
@@ -315,6 +323,10 @@ Tab display width (default: 4), for a file no
 says anything about.
 .It Sy syntax_theme Ns = Ns Ar name
 Chroma syntax theme name (default: monokai).
+A name the registry does not know is a typo, and a typo paints monokai rather than
+nothing; the
+.Sy [theme]
+section recolours single tokens over whichever style is named.
 .It Sy line_numbers Ns = Ns Ar bool
 Show line numbers (default: true).
 .It Sy word_wrap Ns = Ns Ar bool
@@ -420,6 +432,51 @@ built around them, and
 is the exit that is guaranteed when the mouse is unavailable.
 Rebinding also re-keys macro playback, because a replayed macro runs the same
 dispatch chain as a live key.
+.Ss [theme]
+Each key is a syntax token name and each value the style that token should be
+painted with, laid over the style named by
+.Sy [editor] syntax_theme :
+.Dl keyword = #ff79c6
+.Dl comment = #6272a4 italic bg=#101014
+.Dl generic.strong = nobold
+.Pp
+The grammar is chroma's own: a
+.Sy #rrggbb
+(a short hex is padded, so
+.Sy #f00
+is red),
+.Sy bg:#rrggbb
+, and
+.Ar bold ,
+.Ar italic ,
+.Ar underline
+with
+.Ar no Ns -
+prefixes to take them off.
+An empty value switches the rule off and keeps the line.
+A rule is merged after the style has resolved a token through its parents, which
+is what lets
+.Sy nobold
+above un-bold a token the style bolded; a token the file says nothing about keeps
+the style's own answer.
+Names are read in any spelling they are met in
+.Pf ( KeywordConstant ,
+ keyword.constant ,
+ keyword_constant )
+and listed by
+.Ic "dmed --dump-tokens" .
+A line that names no token, or styles a wrapper no terminal paints, is refused and
+counted on the status bar rather than kept as a colour that does nothing.
+.Pp
+The palette command
+.Sy Theme: Syntax Colours...
+is the same section with a preview: the arrow keys walk the bundled styles, the
+token and the entry are typed, and the sample under the rows is painted from what
+the rows say, so the file is untouched until
+.Sy ctrl+s .
+Saving the file from outside is hot-reloaded; the buffers are not re-tokenized for
+a colour change, because the cache holds token kinds and the style is asked per
+painted run.
 .Ss .editorconfig
 A
 .Pa .editorconfig

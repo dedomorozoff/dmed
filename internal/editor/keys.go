@@ -1207,6 +1207,9 @@ func (m *Model) dispatchPanes(s string, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if m.dapCfgOpen {
 		return m.handleDAPCfg(s, msg), true
 	}
+	if m.themeCfgOpen {
+		return m.handleThemeCfg(s, msg), true
+	}
 	if m.helpOpen {
 		return m.handleHelp(s), true
 	}

@@ -590,6 +590,19 @@ type Model struct {
 	dapCfgEdit  bool
 	dapCfgIn    []rune
 
+	// Theme panel (the [theme] section and the base style, with a sample painted
+	// from what the rows say before any of it is written)
+	themeCfgOpen  bool
+	themeCfgField int
+	themeCfgEdit  bool
+	themeCfgIn    []rune
+	themeName     string            // the base chroma style the panel is holding
+	themeTok      string            // token name being given a rule
+	themeSpec     string            // style entry written for that token
+	themeRules    map[string]string // staged [theme] rules, not yet in the file
+	themePreview  []string          // the sample, painted with the staged rules
+	themeRefused  []string          // rules the file holds that read as nothing
+
 	// Command palette & Clipboard
 	paletteOpen   bool
 	paletteQ      []rune
@@ -909,10 +922,10 @@ func New(paths ...string) Model {
 	// until toggleChat ran).
 	m.ai = m.aiProvider(m.cfg.AI.Model)
 	m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
-	if msg := m.keysRefused(); msg != "" {
+	m.syn, m.themeRefused = syntaxFor(m.cfg)
+	if msg := m.configRefusals(); msg != "" {
 		m.msg = msg
 	}
-	m.syn = syntax.New(m.cfg.Editor.SyntaxTheme)
 	m.initPanes()
 	if restoreActiveTab >= 0 && restoreActiveTab < len(m.tabs) {
 		m.setActiveTab(restoreActiveTab)
@@ -1013,7 +1026,15 @@ func (m *Model) openConfigFile() {
 			"# action = chord[, chord]  # rebind a command; an empty value unbinds it\n" +
 			"# file.save = ctrl+s, ctrl+1\n" +
 			"# dmed --dump-keys actions lists the action names and the chords they ship\n" +
-			"# with; Esc, Enter, Tab, the movement keys and Ctrl+Q refuse a rebind\n"
+			"# with; Esc, Enter, Tab, the movement keys and Ctrl+Q refuse a rebind\n\n" +
+			"[theme]\n" +
+			"# token = style  # recolour one syntax token over the base theme\n" +
+			"# keyword = #ff79c6 bold\n" +
+			"# comment = #6272a4 italic bg:#101014\n" +
+			"# An empty value keeps the line and switches the rule off.\n" +
+			"# dmed --dump-tokens lists the token names; the style is chroma's grammar:\n" +
+			"# a hex colour, bg:#rrggbb, and bold / italic / underline, each of which a\n" +
+			"# no-prefix turns back off (nobold)\n"
 		os.WriteFile(path, []byte(content), 0o644)
 	}
 	m.openPath(path)
@@ -1235,13 +1256,21 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cfg = config.Load(m.root)
 			m.keys = ResolveKeys(m.cfg)
 			m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
-			// A new highlighter invalidates the per-tab cached lines.
-			m.syn = syntax.New(m.cfg.Editor.SyntaxTheme)
-			for i := range m.tabs {
-				m.tabs[i].syntaxCached = nil
+			// A new highlighter is built from the style and the [theme] rules. The
+			// per-tab caches are kept: they hold token kinds, and a theme changes
+			// only which style a kind paints as, which the view asks for per run.
+			syn, refused := syntaxFor(m.cfg)
+			m.syn = syn
+			m.themeRefused = refused
+			if m.themeCfgOpen {
+				// The panel is showing the file, so a change made in the file has to
+				// be reflected in it rather than left behind as a stale preview.
+				m.themeName = m.cfg.Editor.SyntaxTheme
+				m.themeRules = themeRulesOf(m.cfg)
+				m.refreshThemePreview()
 			}
 			m.msg = m.t("msg.config_reloaded")
-			if msg := m.keysRefused(); msg != "" {
+			if msg := m.configRefusals(); msg != "" {
 				m.msg = msg
 			}
 			return m, waitForFileEvent(m.fileEvents)

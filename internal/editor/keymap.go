@@ -370,6 +370,28 @@ func (m *Model) keysRefused() string {
 	return m.t("msg.keys_refused", n, m.keys.refusals[0])
 }
 
+// themeRefusedMsg is the status line for the [theme] lines the highlighter would not
+// read. The same reason as above: a colour the user believes they set is otherwise
+// indistinguishable from a bug in the palette, and the count says how much of the
+// section to reread.
+func (m *Model) themeRefusedMsg() string {
+	n := len(m.themeRefused)
+	if n == 0 {
+		return ""
+	}
+	return m.t("msg.theme_refused", n, m.themeRefused[0])
+}
+
+// configRefusals is what one read of one config file has to say. The bar holds a
+// sentence, and a user with both sections wrong reads the keys line first: the
+// keystroke is what they were reaching for when the screen stayed the same.
+func (m *Model) configRefusals() string {
+	if msg := m.keysRefused(); msg != "" {
+		return msg
+	}
+	return m.themeRefusedMsg()
+}
+
 // The modifier bits are one per name in keyModOrder, in that order.
 const (
 	modCtrl = 1 << iota

@@ -417,7 +417,7 @@ func (m Model) overlayChatTooltip(rows []string) []string {
 	}
 	switch {
 	case m.diffViewOpen, m.sqlOpen, m.aiReviewMode, m.aiFixReviewMode, m.agentReviewMode,
-		m.chatReviewMode, m.projReplReview, m.conflictOpen, m.aiCfgOpen, m.dapCfgOpen, m.helpOpen:
+		m.chatReviewMode, m.projReplReview, m.conflictOpen, m.aiCfgOpen, m.dapCfgOpen, m.themeCfgOpen, m.helpOpen:
 		return rows
 	}
 	row := m.chatButtonsRow() - 1

@@ -461,6 +461,7 @@ var enCatalog = map[string]string{
 	"cmd.ai_settings_t": "AI: Preferences...", "cmd.ai_settings_d": "Configure provider, model, URL, API key",
 	"cmd.ai_mode_t": "AI: Toggle Plan/Act Mode", "cmd.ai_mode_d": "Plan mode gives the model read-only tools",
 	"cmd.dap_settings_t": "Debug: DAP Settings...", "cmd.dap_settings_d": "Configure DAP adapter, launch request, program, args",
+	"cmd.theme_settings_t": "Theme: Syntax Colours...", "cmd.theme_settings_d": "Pick a base theme and recolour single tokens, with a live preview",
 	"cmd.agent_tasks_t": "Agent: Task Panel", "cmd.agent_tasks_d": "Alt+L — Background agent task list",
 	"cmd.agent_new_t": "Agent: New Task", "cmd.agent_new_d": "Run a background refactoring task",
 	"cmd.agent_undo_t": "Agent: Undo Last Apply", "cmd.agent_undo_d": "Revert the most recent agent commit (u in the panel)",
@@ -514,6 +515,24 @@ var enCatalog = map[string]string{
 	"dap.settings_save": "(Ctrl+S save, Esc close)",
 	"dap.choice":        "(\u2190/\u2192 choose)",
 	"msg.dap_saved":     "DAP settings saved",
+
+	// Theme panel: the base style, the [theme] rules staged from it, and the
+	// sample they are judged against.
+	"theme.settings":      " Theme ",
+	"theme.settings_hint": "(\u2191/\u2193 move, Enter edit or run, \u2190/\u2192 theme, Ctrl+S save, Esc close)",
+	"theme.cycle":         "(\u2190/\u2192 choose)",
+	"theme.enter_run":     "(Enter)",
+	"theme.preview":       "preview",
+	"theme.set_hint":      "stage the token and style above",
+	"theme.revert_hint":   "drop the staged edits",
+	"theme.rules":         "rule(s)",
+	"theme.need_token":    "type a token name first (dmed --dump-tokens lists them)",
+	"theme.rule_staged":   "staged %s = %s (Ctrl+S writes it)",
+	"theme.rule_off":      "switched %s off (Ctrl+S writes it)",
+	"theme.saved":         "theme saved, %d rule(s)",
+	"theme.reverted":      "staged edits dropped",
+	"theme.write_failed":  "theme write failed: %s",
+	"msg.theme_refused":   "%d [theme] line(s) refused: %s",
 
 	// Help panel
 	"help.title":        "dmed — keys",
@@ -968,6 +987,7 @@ var ruCatalog = map[string]string{
 	"cmd.ai_settings_t": "AI: Настройки...", "cmd.ai_settings_d": "Настроить провайдер, модель, URL, API-ключ",
 	"cmd.ai_mode_t": "AI: Режим план/работа", "cmd.ai_mode_d": "В режиме плана у модели только инструменты чтения",
 	"cmd.dap_settings_t": "Отладка: DAP-настройки...", "cmd.dap_settings_d": "Настроить адаптер DAP, launch-запрос, программу, аргументы",
+	"cmd.theme_settings_t": "Тема: цвета синтаксиса...", "cmd.theme_settings_d": "Выбрать базовую тему и перекрасить отдельные токены, с живым превью",
 	"cmd.agent_tasks_t": "Агент: Панель задач", "cmd.agent_tasks_d": "Alt+L — список фоновых задач агента",
 	"cmd.agent_new_t": "Агент: Новая задача", "cmd.agent_new_d": "Запустить фоновую задачу рефакторинга",
 	"cmd.agent_undo_t": "Агент: Откатить последнее", "cmd.agent_undo_d": "Откат последнего агентского коммита (u в панели)",
@@ -1021,6 +1041,23 @@ var ruCatalog = map[string]string{
 	"dap.settings_save": "(Ctrl+S сохранить, Esc закрыть)",
 	"dap.choice":        "(←/→ выбор)",
 	"msg.dap_saved":     "DAP-настройки сохранены",
+
+	// Theme panel
+	"theme.settings":      " Тема ",
+	"theme.settings_hint": "(↑/↓ движение, Enter правка или запуск, ←/→ тема, Ctrl+S сохранить, Esc закрыть)",
+	"theme.cycle":         "(←/→ выбор)",
+	"theme.enter_run":     "(Enter)",
+	"theme.preview":       "превью",
+	"theme.set_hint":      "положить правило сверху в файл",
+	"theme.revert_hint":   "забыть подготовленные правки",
+	"theme.rules":         "правил",
+	"theme.need_token":    "сначала введите имя токена (dmed --dump-tokens)",
+	"theme.rule_staged":   "подготовлено %s = %s (Ctrl+S запишет)",
+	"theme.rule_off":      "%s выключено (Ctrl+S запишет)",
+	"theme.saved":         "тема сохранена, %d правил",
+	"theme.reverted":      "подготовленные правки забыты",
+	"theme.write_failed":  "не удалось записать тему: %s",
+	"msg.theme_refused":   "%d строк [theme] отклонено: %s",
 
 	// Help panel
 	"help.title":        "dmed — клавиши",

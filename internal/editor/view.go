@@ -350,6 +350,8 @@ func (m Model) View() tea.View {
 		rows = append(rows, m.aiSettingsPanel(h)...)
 	} else if m.dapCfgOpen {
 		rows = append(rows, m.dapCfgPanel(h)...)
+	} else if m.themeCfgOpen {
+		rows = append(rows, m.themeCfgPanel(h)...)
 	} else if m.helpOpen {
 		rows = append(rows, m.helpPanel(h)...)
 	} else {

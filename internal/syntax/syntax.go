@@ -26,6 +26,10 @@ type Highlighter struct {
 	styleName  string
 	style      *chroma.Style
 	styleCache map[chroma.TokenType]lipgloss.Style
+	// overrides is what a user's [theme] section added to the style. It is
+	// written once, at construction, and never again, so it is read without the
+	// lock that guards the cache.
+	overrides map[Token]Override
 }
 
 // New builds a Highlighter for the named chroma style. An unknown name falls
@@ -37,18 +41,30 @@ type Highlighter struct {
 // mutable that the project rules forbid and that -race would flag the moment
 // the config hot-reload landed on another path.
 func New(styleName string) *Highlighter {
-	s := styles.Get(styleName)
-	if s == nil {
-		s = styles.Get("monokai")
+	return NewWith(styleName, nil)
+}
+
+// NewWith builds the same thing with a user's per-token overrides on top.
+//
+// The name is looked up in the registry, not in styles.Get, because Get answers an
+// unknown name with a built-in fallback style: a typo in [editor] syntax_theme would
+// then paint in a style nobody named while every part of the editor that reports the
+// theme says the name the user typed.
+func NewWith(styleName string, ov map[Token]Override) *Highlighter {
+	if _, ok := styles.Registry[strings.ToLower(styleName)]; !ok {
 		styleName = "monokai"
 	}
-	h := &Highlighter{
+	return &Highlighter{
 		styleName:  styleName,
-		style:      s,
+		style:      styles.Get(styleName),
 		styleCache: make(map[chroma.TokenType]lipgloss.Style),
+		overrides:  ov,
 	}
-	return h
 }
+
+// StyleName is the chroma style this Highlighter paints with — after the
+// fallback, so it is the name a theme panel should show as the one in effect.
+func (h *Highlighter) StyleName() string { return h.styleName }
 
 // StyleFor returns the style of a token kind. The styles are built once and
 // cached, so this is a lookup.
@@ -71,9 +87,17 @@ func (h *Highlighter) getStyle(tt chroma.TokenType) lipgloss.Style {
 	}
 
 	entry := h.style.Get(tt)
+	if ov, ok := h.overrides[tt]; ok {
+		entry = mergeOnto(entry, ov)
+	}
 	res := lipgloss.NewStyle()
 	if entry.Colour.IsSet() {
 		res = res.Foreground(lipgloss.Color(entry.Colour.String()))
+	}
+	// A palette that could not set a background is not a palette: this is the
+	// chroma entry every bundled style carries and the one dmed used to drop.
+	if entry.Background.IsSet() {
+		res = res.Background(lipgloss.Color(entry.Background.String()))
 	}
 	if entry.Bold == chroma.Yes {
 		res = res.Bold(true)

@@ -501,6 +501,25 @@ var paneCommands = map[paneID][]paneCommand{
 		{act: "dap-cfg-field.run", chords: []string{"enter"}},
 		{act: "dap-cfg-field.erase", chords: []string{"backspace"}, flags: protected},
 	},
+	// theme-cfg — the theme panel. The rows are the same shape as the settings
+	// wizards: j/k between them, Enter into the one that is editable, Ctrl+S to
+	// write it. The preview is painted from what the rows say, so no row has to be
+	// saved before it can be judged.
+	"theme-cfg": {
+		{act: "theme-cfg.close", chords: []string{"esc"}, flags: protected},
+		{act: "theme-cfg.next", chords: []string{"j", "down"}},
+		{act: "theme-cfg.prev", chords: []string{"k", "up"}},
+		{act: "theme-cfg.choice-prev", chords: []string{"left"}},
+		{act: "theme-cfg.choice-next", chords: []string{"right"}},
+		{act: "theme-cfg.open", chords: []string{"enter"}},
+		{act: "theme-cfg.save", chords: []string{"ctrl+s"}},
+	},
+	// theme-cfg-field
+	"theme-cfg-field": {
+		{act: "theme-cfg-field.close", chords: []string{"esc"}, flags: protected},
+		{act: "theme-cfg-field.run", chords: []string{"enter"}},
+		{act: "theme-cfg-field.erase", chords: []string{"backspace"}, flags: protected},
+	},
 	// ai-cfg
 	"ai-cfg": {
 		{act: "ai-cfg.close", chords: []string{"esc"}, flags: protected},

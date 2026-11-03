@@ -909,6 +909,46 @@ cross-build. The cheap part first:
         a panel.
 - Themes: user palettes for syntax_theme in `.dmed.conf` or a separate
   file, live preview in the wizard.
+  - [x] **`[theme]` recolours one token at a time.** The section sits over
+        `[editor] syntax_theme` in the same `.dmed.conf`, and the preview lives in
+        its own panel (palette → *Theme: Syntax Colours…*) rather than in the AI
+        settings wizard, which is a form about a server. A separate file was
+        rejected on the way: this is one more block of the INI the watcher already
+        reads, and a second file would need precedence rules of its own against a
+        project config that already beats the global one.
+  - [x] **The grammar is chroma's, not an invented one.** `Override` *is* a
+        `chroma.StyleEntry` and a rule is parsed by chroma, so `#ff79c6
+        bold bg:#101014`, `nobold` and `bg:` alone (clears) mean what the Pygments
+        docs say and a short hex is padded rather than refused. The merge happens
+        *after* the style resolves a token through its parents, which is the only
+        reason `generic.strong = nobold` can outvote a bold monokai inherited. One
+        name has three spellings a user may have met (`KeywordConstant`,
+        `keyword.constant`, `keyword_constant`) and all three reach one token;
+        `dmed --dump-tokens` — the list a refusal message points at — prints both
+        halves, the usable names and the HTML/SVG wrappers no terminal paints,
+        refused with the reason rather than cached as an unread colour. That list
+        also caught a pre-existing bug: `styles.Get` answers an unknown style with
+        monokai but never returns nil, so the shipped fallback was dead code and the
+        editor reported a name nobody typed; the name is looked up in the registry
+        now.
+  - [x] **The preview waits for nothing, so nothing is written by a keystroke.**
+        The panel is synchronous — there is no probe to run, and with it none of the
+        documented trap about a pick path starting a `tea.Cmd` it cannot return: a
+        fixed Go sample is painted from the rows as they stand, and typing a readable
+        colour previews it before it is staged. Staging is the panel's own map, so
+        `Esc` leaves the file byte-for-byte as it was and `Ctrl+S` is the only write.
+        A save swaps in a new `Highlighter` and drops nothing from the per-tab caches:
+        they hold token *kinds* and the style of a kind is asked per painted run, so
+        recolouring a file does not re-tokenize it — the same is true of a hot reload
+        of the config from outside, which is the other half of the claim.
+        Refused lines are counted on the status bar both at startup and on every
+        reload, and repeated inside the panel that exists to explain them.
+  - [x] **The highlighter stayed the model's.** `syntaxFor(cfg)` is the one place a
+        config becomes colours, called by `New()` and by the `.dmed.conf` branch of
+        the watcher; the overrides are written once at construction and read without
+        the cache lock, because a package-level default highlighter is exactly the
+        global mutable the rules forbid (the history of `SetDefault` in the Update
+        loop is why `syntax.New` has no default at all).
 - `.editorconfig`: indent_style/size, trim trailing whitespace, final newline.
   - [x] **The file answers for one file.** `config.LoadEditorConfig(root, path,
         def)` walks from the file's directory up to the project root — nearest

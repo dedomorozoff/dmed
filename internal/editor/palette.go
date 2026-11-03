@@ -134,6 +134,7 @@ func (m *Model) getPaletteCommands() []commandItem {
 		{id: "help", title: "cmd.help_t", desc: "cmd.help_d", action: func(m *Model) tea.Cmd { m.helpOpen = true; m.helpScroll = 0; return nil }},
 		{id: "quit", title: "cmd.quit_t", desc: "cmd.quit_d", action: func(m *Model) tea.Cmd { return m.requestQuit() }},
 		{id: "lang_select", title: "cmd.lang_select_t", desc: "cmd.lang_select_d", action: func(m *Model) tea.Cmd { m.openLangChooser(); return nil }},
+		{id: "theme_settings", title: "cmd.theme_settings_t", desc: "cmd.theme_settings_d", action: func(m *Model) tea.Cmd { m.startThemeCfg(); return nil }},
 		{id: "plugin_store", title: "cmd.plugin_store_t", desc: "cmd.plugin_store_d", action: func(m *Model) tea.Cmd { return m.openPluginStore() }},
 	}
 	for _, c := range m.plugins.Commands() {

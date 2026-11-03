@@ -9,6 +9,7 @@ import (
 
 	"dmed/internal/editor"
 	"dmed/internal/setup"
+	"dmed/internal/syntax"
 )
 
 // version is set via ldflags: -X main.version=0.3.0
@@ -57,6 +58,7 @@ func main() {
 			fmt.Println("usage: dmed [dir | files...]")
 			fmt.Println("       dmed setup-ai     interactive AI provider setup (writes ~/.dmed.conf)")
 			fmt.Println("       dmed --dump-keys  print the key cheat sheet the editor shows (md|roff|actions)")
+			fmt.Println("       dmed --dump-tokens  print the syntax token names a [theme] rule may name")
 			return
 		case "--dump-keys":
 			format := "md"
@@ -69,6 +71,9 @@ func main() {
 				os.Exit(1)
 			}
 			fmt.Print(out)
+			return
+		case "--dump-tokens":
+			fmt.Print(syntax.DumpTokens())
 			return
 		case "-v", "--version":
 			fmt.Printf("dmed %s\n", version)

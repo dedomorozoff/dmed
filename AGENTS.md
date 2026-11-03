@@ -191,7 +191,11 @@ The code is split into focused internal packages:
   `imageview.go` (picture tabs: ASCII/half-block render via
   `internal/imgprev`, empty buffer + decoded frames, read-only key
   handling, scroll, GIF tick chain), `plugins.go`, `plugin_store.go`, `lsp.go`,
-  `ai_settings.go`, `transform.go` (the selection-transformation commands pick
+  `ai_settings.go`, `theme_picker.go` (the `[theme]` panel and `syntaxFor`: it rows
+  are staged in the model's own map and painted over a fixed sample, synchronously —
+  there is no server to probe, so no reply to stamp and no `tea.Cmd` a pick path
+  cannot return — and only `Ctrl+S` writes, so `Esc` leaves the file untouched),
+  `transform.go` (the selection-transformation commands pick
   the target — selection lines, or the whole buffer for a trim — and the
   status-bar message; the text work is the buffer's), `delimiter.go` (the
   bracket jump and select-inside commands: the same thin shape, and pure caret
@@ -249,11 +253,15 @@ The code is split into focused internal packages:
   both `NewProvider` and `WriteAI`, or the probe will 404 and be reported as a
   connection failure.
 - `internal/config/` — INI `.dmed.conf` loader (`[editor]`, `[ai]`, `[agent]`,
-  `[ui]`, `[plugins]`, `[debug]`, `[lsp]`, `[keys]`); priority defaults < global <
-  project < env vars; hot-reload on save; `WriteAI`/`WriteLang` merge helpers.
+  `[ui]`, `[plugins]`, `[debug]`, `[lsp]`, `[keys]`, `[theme]`); priority defaults <
+  global < project < env vars; hot-reload on save; `WriteAI`/`WriteLang` merge
+  helpers.
   `[keys]` maps an *action name* to chords and config deliberately does not check
   the spelling — only the editor knows which keys exist, so `ResolveKeys` validates
-  and reports. An unknown key in a section with an open-ended grammar (`lang.<id>`,
+  and reports. `[theme]` is the same open-ended case one layer on: a key is a chroma
+  token name and the value a chroma style entry, which only `internal/syntax` can
+  read, so config keeps both as written and `ResolveTheme` reports what it refused.
+  An unknown key in a section with an open-ended grammar (`lang.<id>`,
   an action) is kept, not dropped.
   `editorconfig.go` is the per-file half of the same job: `LoadEditorConfig(root,
   path, def)` walks from the file's directory to the root (nearest file wins, last
@@ -320,7 +328,20 @@ The code is split into focused internal packages:
   ← agents.
 - `internal/bundled/` — built-in plugins shipped with the binary (emmet,
   snippets). `internal/i18n/` — en/ru strings. `internal/session/` —
-  save/restore open files across restarts. `internal/syntax/` — highlighting.
+  save/restore open files across restarts. `internal/syntax/` — highlighting:
+  a `Highlighter` is one chroma style plus a user's `[theme]` overrides, and the
+  overrides are written once at construction (`NewWith`) so they are read without
+  the style cache's lock. There is still no package-level default highlighter —
+  the editor owns `m.syn` and `syntaxFor(cfg)` is the one place a config becomes
+  colours. `theme.go` turns a written name into a style: `ResolveTheme` folds the
+  three spellings one token has (`KeywordConstant`, `keyword.constant`,
+  `keyword_constant`), refuses a name that styles an HTML/SVG wrapper no terminal
+  paints, and lays the entry over what the style resolved *after* chroma's
+  inheritance walk — which is what lets `nobold` outvote a bold the token
+  inherited. `dmed --dump-tokens` prints the same table, usable names and refused
+  ones. A style name the registry does not know falls back to monokai: `styles.Get`
+  answers a typo with a built-in style and never returns nil, so the fallback has to
+  be a registry lookup, not a nil check.
 - `internal/terminal/` — the persistent built-in terminal (`internal/ptyterm/`
   underneath is the per-OS pty plumbing: ConPTY on Windows, creack/pty
   elsewhere; platform tests split the two).
@@ -425,7 +446,11 @@ Conventions:
 - The cached highlight stores one syntax *token* per character, not a style:
   a lipgloss.Style per character cost ~800 bytes, a token 8. The styles are
   resolved through `Highlighter.StyleFor` when a line is painted (the tokens
-  of a line come in runs, so the lookup happens once per run).
+  of a line come in runs, so the lookup happens once per run). It follows that
+  a theme change invalidates nothing: a reload swaps the model's `Highlighter`
+  and the next frame asks the new style for the same tokens — re-tokenizing a
+  buffer to change a colour would be the slow way to do the one thing `[theme]`
+  exists for.
 - The git diff of the buffer (the gutter markers) is a whole-file job too and
   runs in the background as well — see `internal/editor/gdiff.go`. It follows
   the same shape as the highlighting: a wait for the typing to settle, a

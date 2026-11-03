@@ -801,3 +801,186 @@ func TestSettingsListsKeyOverrides(t *testing.T) {
 		t.Errorf("keys rows are not in a stable order: %q", order)
 	}
 }
+
+// The [theme] grammar is open-ended, so what config owes the user is that the
+// words they wrote arrive unchanged: the token name folded the way every other
+// key is folded, the style entry kept character for character.
+func TestLoadThemeSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[editor]
+tab_width = 2
+syntax_theme = dracula
+
+[theme]
+# a comment
+Keyword = #ff79c6 bold
+generic.strong = nobold
+comment =
+`
+	os.WriteFile(path, []byte(content), 0o644)
+
+	cfg := Defaults()
+	loadFile(path, &cfg)
+
+	if cfg.Editor.TabWidth != 2 || cfg.Editor.SyntaxTheme != "dracula" {
+		t.Errorf("[theme] ate the sections around it: tab_width = %d, syntax_theme = %q",
+			cfg.Editor.TabWidth, cfg.Editor.SyntaxTheme)
+	}
+	if _, ok := cfg.Theme.Tokens["# a comment"]; ok {
+		t.Error("a comment was parsed as a token rule")
+	}
+	if len(cfg.Theme.Tokens) != 3 {
+		t.Errorf("tokens = %d entries, want 3: %+v", len(cfg.Theme.Tokens), cfg.Theme.Tokens)
+	}
+	// The key is folded like every other key is; the value is not touched, because
+	// "#ff79c6" and "#FF79C6" are the same colour but "nobold" is not the same word
+	// as anything else and a hex is read by its own library.
+	if got := cfg.Theme.Tokens["keyword"]; got != "#ff79c6 bold" {
+		t.Errorf("keyword = %q, want the entry exactly as written", got)
+	}
+	if got := cfg.Theme.Tokens["generic.strong"]; got != "nobold" {
+		t.Errorf("generic.strong = %q, want nobold", got)
+	}
+	// An empty value is the absence of a rule, not an error: the line stays in the
+	// file so the colour comes back when the value is typed in again.
+	if got, ok := cfg.Theme.Tokens["comment"]; !ok || got != "" {
+		t.Errorf("comment = %q, ok = %v, want a recorded empty value", got, ok)
+	}
+}
+
+func TestWriteThemeUpdatesAndKeepsOthers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	if err := os.WriteFile(path, []byte("[editor]\nsyntax_theme = monokai\n[theme]\nkeyword = #111111\nconstant = #222222\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A displayed name is what the picker holds; the file has to end up with the
+	// folded spelling parseINI answers to, or one token would have two lines.
+	n, err := WriteTheme(path, map[string]string{"Keyword": "#ff0000", "Generic.Strong": "bold"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("WriteTheme wrote %d rules, want 2", n)
+	}
+	s := readFile(t, path)
+	if !strings.Contains(s, "keyword = #ff0000") {
+		t.Errorf("the existing rule was not updated:\n%s", s)
+	}
+	if strings.Contains(s, "Keyword =") {
+		t.Errorf("the displayed spelling was written beside the folded one:\n%s", s)
+	}
+	if strings.Count(s, "keyword =") != 1 {
+		t.Errorf("keyword written twice:\n%s", s)
+	}
+	if !strings.Contains(s, "generic.strong = bold") {
+		t.Errorf("a new rule was not added:\n%s", s)
+	}
+	// The rule the picker knows nothing about is left alone — this is the whole
+	// difference between a merge and a rewrite of the user's palette.
+	if !strings.Contains(s, "constant = #222222") {
+		t.Errorf("an untouched rule was dropped:\n%s", s)
+	}
+	if !strings.Contains(s, "syntax_theme = monokai") || strings.Contains(s, "[theme]\n[theme]") {
+		t.Errorf("the rest of the file was clobbered:\n%s", s)
+	}
+}
+
+func TestWriteThemeCreatesSectionInEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	if _, err := WriteTheme(path, map[string]string{"keyword": "#ff0000"}); err != nil {
+		t.Fatal(err)
+	}
+	s := readFile(t, path)
+	if !strings.Contains(s, "[theme]") || !strings.Contains(s, "keyword = #ff0000") {
+		t.Errorf("missing [theme]:\n%s", s)
+	}
+}
+
+// A rule switched off keeps its line: the value is empty, the token is still
+// listed, and the colour comes back the moment a spec is typed into it again.
+func TestWriteThemeKeepsAnOffSwitch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	if _, err := WriteTheme(path, map[string]string{"keyword": ""}); err != nil {
+		t.Fatal(err)
+	}
+	if s := readFile(t, path); !strings.Contains(s, "keyword = ") {
+		t.Errorf("the off-switch was not written:\n%s", s)
+	}
+	cfg := Defaults()
+	loadFile(path, &cfg)
+	if got, ok := cfg.Theme.Tokens["keyword"]; !ok || got != "" {
+		t.Errorf("round trip = %q/%v, want the empty value back", got, ok)
+	}
+}
+
+func TestWriteSyntaxTheme(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	if err := os.WriteFile(path, []byte("[editor]\ntab_width = 2\n[theme]\nkeyword = #111111\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSyntaxTheme(path, "dracula"); err != nil {
+		t.Fatal(err)
+	}
+	s := readFile(t, path)
+	if !strings.Contains(s, "syntax_theme = dracula") || strings.Count(s, "syntax_theme =") != 1 {
+		t.Errorf("syntax_theme:\n%s", s)
+	}
+	if !strings.Contains(s, "tab_width = 2") || !strings.Contains(s, "keyword = #111111") {
+		t.Errorf("choosing a style rewrote the palette:\n%s", s)
+	}
+	if err := WriteSyntaxTheme(path, "monokai"); err != nil {
+		t.Fatal(err)
+	}
+	if s := readFile(t, path); strings.Count(s, "syntax_theme =") != 1 {
+		t.Errorf("the base name is stored twice:\n%s", s)
+	}
+}
+
+func TestSettingsListsThemeRules(t *testing.T) {
+	cfg := Defaults()
+	cfg.Theme.Tokens = map[string]string{
+		"keyword":        "#ff0000",
+		"comment":        "",
+		"generic.strong": "bold",
+	}
+
+	var got []string
+	values := map[string]string{}
+	for _, s := range Settings(cfg) {
+		if s.Section == "theme" {
+			got = append(got, s.Key)
+			values[s.Key] = s.Value
+		}
+	}
+	if len(got) != 3 {
+		t.Fatalf("theme rows = %d, want 3: %+v", len(got), got)
+	}
+	if values["keyword"] != "#ff0000" || values["generic.strong"] != "bold" {
+		t.Errorf("theme rows = %+v", values)
+	}
+	// A rule switched off is listed as off, not hidden: search-everywhere has to
+	// find the line the user wrote and say what it currently does.
+	if values["comment"] != "(off)" {
+		t.Errorf("comment = %q, want (off)", values["comment"])
+	}
+	if !slices.IsSorted(got) {
+		t.Errorf("theme rows are not in a stable order: %q", got)
+	}
+}
+
+// readFile is the whole config file as one string: a writer test asserts on the
+// text, because what it promises is that the lines it did not touch stay there.
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}

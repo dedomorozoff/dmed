@@ -24,7 +24,8 @@ AI is part of the workflow, not the point of it: agents read, propose and run �
 - Rope-backed buffer with full **undo/redo** (`Ctrl+Z`/`Ctrl+R`), cheap on large files
 - **Multi-cursor**: `Alt+D` adds a cursor at the next word occurrence, `Alt+Click` anywhere, `Esc` exits
 - **Tabs and splits** (vertical `Ctrl+\`/`F6`, horizontal `Ctrl+Alt+H`/`F7`, focus/paste across panes)
-- **Syntax highlighting** (Chroma) for 100+ languages, styles configurable (`syntax_theme`), streamed in the background
+- **Syntax highlighting** (Chroma) for 100+ languages, styles configurable (`syntax_theme`)
+  and recolourable token by token (`[theme]`, with a live preview), streamed in the background
 - **Code folding** (`Alt+C`/`Alt+O`, gutter chevrons, mouse-driven, hidden-line counts)
 - **Find & replace** in file (`Ctrl+F`/`Ctrl+H`) with regex; `F3`/`Shift+F3` walk matches
 - **Word wrap** (`Alt+Z`), sticky goal column, move lines (`Alt+↑/↓`), duplicate/delete line, `Ctrl+/` toggle comment
@@ -114,6 +115,9 @@ go install github.com/dedomorozoff/dmed@latest
 dmed path/to/file.txt          # open file (creates if missing)
 dmed dir/                      # open folder — shows project tree
 dmed a.txt b.txt               # multiple files → tabs
+dmed setup-ai                  # AI provider setup wizard, writes ~/.dmed.conf
+dmed --dump-keys md            # the key cheat sheet the editor shows (md|roff|actions)
+dmed --dump-tokens             # the syntax token names a [theme] rule may name
 ```
 
 Open a file (`Ctrl+O` fuzzy finder or `Ctrl+T`), edit, `Ctrl+S` to save. `Ctrl+G` for git, `Alt+T` for the terminal, `Alt+A` for AI, `Ctrl+P` for everything else.
@@ -300,6 +304,10 @@ branch = main
 # file.save = ctrl+s, ctrl+1
 # debug.panel =
 
+[theme]                      # colours over the chroma style (see Syntax colours)
+# keyword = #ff79c6 bold
+# comment = #6272a4 noitalic
+
 [debug]                      # DAP debugger (Go/Delve by default)
 mode = debug                 # launch mode passed to the adapter (debug/test/exec for Delve)
 program =                    # package dir / executable; empty = active file dir
@@ -355,6 +363,36 @@ Patterns use the editorconfig glob (`* ? [seq] ** {a,b} {1..9}`); one with no
 `/` matches the basename. `end_of_line`, `charset` and `max_line_length` are
 left alone: dmed writes the endings and the encoding a file already uses, and
 wrapping is a display property of the pane.
+
+### Syntax colours
+
+`[editor] syntax_theme` picks a whole chroma style; `[theme]` changes one token at a
+time and wins over it:
+
+```ini
+[theme]
+keyword = #ff79c6
+generic.strong = nobold          # un-bolds what the style bolded
+comment = #6272a4 italic bg=#101014
+literal.string =                 # empty switches the rule off, the line stays
+```
+
+The grammar is chroma's own: a `#rrggbb`, `bg:#rrggbb` (`bg:` alone clears the
+background), and `bold`/`nobold`, `italic`/`noitalic`, `underline`/`nounderline`. A
+short hex is padded, so `#f00` is red. `dmed --dump-tokens` lists the names, which
+are read in any spelling you have met — `KeywordConstant`, `keyword.constant`,
+`keyword_constant`. A `nobold` here outvotes the bold a style inherited, because the
+rule is laid over the resolved answer rather than into the table it came from.
+Names that style an HTML or SVG wrapper (`Background`, `LineNumbersTable`, `Pre…`)
+are refused with the reason, and the count of refused lines is on the status bar —
+a colour that silently did nothing reads as a bug in the palette.
+
+Palette → **Theme: Syntax Colours…** is the same thing with a preview: ←/→ walk the
+bundled styles, the token and the style entry are typed, and the sample under the
+rows is painted from what the rows say, so nothing is written until `Ctrl+S`.
+`Esc` leaves the file untouched, and saving the config from an editor changes the
+colours without a restart — the caches hold token *kinds*, so no buffer is
+re-tokenized to recolour it.
 
 ## Documentation
 
