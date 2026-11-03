@@ -1,0 +1,259 @@
+package editor
+
+import (
+	"strconv"
+	"strings"
+	"testing"
+)
+
+// The generated cheatsheet is only honest if the names it prints are the names
+// the tables bind. These tests are that check.
+
+// helpIndexOf reports the row whose keys column shows the given chord, or -1.
+// A test asks for a chord rather than a whole column, so the order the aliases
+// are listed in stays a detail of the renderer instead of an assertion.
+func helpIndexOf(rows []helpRow, chord string) int {
+	want := displayChord(chord)
+	for i, r := range rows {
+		if contains(strings.Split(r.keys, " / "), want) {
+			return i
+		}
+		if showsDigitInRange(r.keys, chord) {
+			return i
+		}
+	}
+	return -1
+}
+
+// showsDigitInRange reports whether a column prints the chord as part of a
+// collapsed family: tab.jump is nine chords and one range, Alt+1..9.
+func showsDigitInRange(keys, chord string) bool {
+	last := chord[len(chord)-1]
+	if len(chord) < 2 || last < '0' || last > '9' {
+		return false
+	}
+	prefix := strings.TrimSuffix(displayChord(chord), string(last))
+	for _, k := range strings.Split(keys, " / ") {
+		if !strings.HasPrefix(k, prefix) || !strings.Contains(k, "..") {
+			continue
+		}
+		head, tail, ok := strings.Cut(k[len(prefix):], "..")
+		if !ok {
+			continue
+		}
+		lo, err1 := strconv.Atoi(head)
+		hi, err2 := strconv.Atoi(tail)
+		if err1 == nil && err2 == nil && int(last-'0') >= lo && int(last-'0') <= hi {
+			return true
+		}
+	}
+	return false
+}
+
+// TestBuildKeyMapIdentity is the migration proof: resolving the map must not
+// change one fact about the tables. Every chord keeps its action, and the
+// inverse index — which the hand-written tables could not express — has to hold
+// exactly the chords that are bound, including the aliases.
+func TestBuildKeyMapIdentity(t *testing.T) {
+	k := buildKeyMap()
+
+	total := 0
+	for name, table := range map[string]map[string]bindingDef{
+		"global": globalBindings,
+		"editor": editorBindings,
+	} {
+		resolved := k.global
+		if name == "editor" {
+			resolved = k.editor
+		}
+		total += len(table)
+		if len(resolved) != len(table) {
+			t.Fatalf("%s: resolved %d chords, table has %d", name, len(resolved), len(table))
+		}
+		for chord, d := range table {
+			if got := resolved[chord]; got.act != d.act || got.flags != d.flags {
+				t.Fatalf("%s: chord %q resolved to act %q/flags %d, want %q/%d",
+					name, chord, got.act, got.flags, d.act, d.flags)
+			}
+			// The same chord must appear under exactly that action in the index.
+			if !contains(k.chords(d.act), chord) {
+				t.Fatalf("%s: %s does not list chord %q", name, d.act, chord)
+			}
+		}
+	}
+	// The index holds nothing the tables did not bind.
+	n := 0
+	for _, list := range k.acts {
+		n += len(list)
+	}
+	if n != total {
+		t.Fatalf("the inverse index holds %d chords, the tables bind %d", n, total)
+	}
+
+	// Aliases, spelled out: these are the pairs the tables have always carried
+	// twice, now named once.
+	for act, want := range map[keyAct][]string{
+		actHelpToggle:    {"ctrl+e", "f1"},
+		actPaletteOpen:   {"ctrl+p", "f2"},
+		actDelimiterJump: {"ctrl+]", "ctrl+}"},
+		actSearchNext:    {"f3"},
+	} {
+		if got := k.chords(act); strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("%s: chords %q, want %q", act, got, want)
+		}
+	}
+	if n := len(k.chords(actTabJump)); n != 9 {
+		t.Fatalf("tab.jump must carry nine chords, got %d", n)
+	}
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func TestDisplayChordSpelling(t *testing.T) {
+	cases := []struct{ chord, want string }{
+		{"ctrl+s", "Ctrl+S"},
+		{"ctrl+shift+f5", "Ctrl+Shift+F5"},
+		{"alt+down", "Alt+↓"},
+		{"shift+tab", "Shift+Tab"},
+		{"ctrl+alt+left", "Ctrl+Alt+←"},
+		{"pgdown", "PgDn"},
+		{"delete", "Del"},
+		{"ctrl+\\", "Ctrl+\\"},
+		{"alt+`", "Alt+`"},
+		{"ctrl++", "Ctrl++"},
+		{"alt+1..9", "Alt+1..9"},
+	}
+	for _, c := range cases {
+		if got := displayChord(c.chord); got != c.want {
+			t.Errorf("displayChord(%q) = %q, want %q", c.chord, got, c.want)
+		}
+	}
+}
+
+// Alt+` is a bound chord, so a generated table that fenced every keys cell with
+// one backtick would print a span that closes in the middle of the key.
+func TestCodeSpanFencesABacktickChord(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"Ctrl+S", "`Ctrl+S`"},
+		{"Alt+` / Ctrl+Tab", "``Alt+` / Ctrl+Tab``"},
+		{"`Tab", "`` `Tab ``"},
+		{"``", "``` `` ```"},
+	}
+	for _, c := range cases {
+		if got := codeSpan(c.in); got != c.want {
+			t.Errorf("codeSpan(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+
+	md, err := DumpKeys("md")
+	if err != nil {
+		t.Fatalf("DumpKeys: %v", err)
+	}
+	if !strings.Contains(md, "``Alt+` / Ctrl+Tab``") {
+		t.Errorf("the MRU row must be fenced with a double backtick, got:\n%s", md)
+	}
+	for _, line := range strings.Split(md, "\n") {
+		cell := strings.Split(strings.TrimPrefix(line, "| "), " |")
+		if len(cell) != 2 || cell[0] == "" {
+			continue
+		}
+		// A keys cell is its fence, its text and the same fence: an odd number
+		// of runs means a chord broke the span open.
+		if !balancedFence(cell[0]) {
+			t.Errorf("keys cell %q is not a closed code span in line %q", cell[0], line)
+		}
+	}
+}
+
+// balancedFence reports whether the cell is one code span: it opens with a run
+// of backticks and the same run closes it, with nothing else of that length
+// inside.
+func balancedFence(cell string) bool {
+	cell = strings.TrimSpace(cell)
+	if !strings.HasPrefix(cell, "`") {
+		return true // a cell that is not fenced at all
+	}
+	n := 0
+	for n < len(cell) && cell[n] == '`' {
+		n++
+	}
+	if len(cell) < 2*n || !strings.HasSuffix(cell, strings.Repeat("`", n)) {
+		return false
+	}
+	fence := strings.Repeat("`", n)
+	return !strings.Contains(strings.TrimSuffix(strings.TrimPrefix(cell, fence), fence), fence)
+}
+
+func TestCollapseRunTurnsADigitFamilyIntoARange(t *testing.T) {
+	nine := make([]string, 0, 9)
+	for d := '1'; d <= '9'; d++ {
+		nine = append(nine, "alt+"+string(d))
+	}
+	if got := collapseRun(nine); len(got) != 1 || got[0] != "alt+1..9" {
+		t.Fatalf("nine digit chords must collapse to one range, got %q", got)
+	}
+	// Anything that is not a consecutive digit run under one prefix is left
+	// alone: an alias pair and a broken run.
+	for _, keep := range [][]string{{"f1", "ctrl+e"}, {"alt+1", "alt+3"}, {"ctrl+1", "alt+2", "shift+3"}} {
+		if got := collapseRun(keep); strings.Join(got, ",") != strings.Join(keep, ",") {
+			t.Fatalf("%q must not collapse, got %q", keep, got)
+		}
+	}
+}
+
+// TestHelpRowsAreTheTables closes the hole the hand-copied list allowed: a
+// generated row may only show chords its actions are actually bound to, and a
+// chord that is bound under a documented action may not go missing.
+func TestHelpRowsAreTheTables(t *testing.T) {
+	m := New()
+	rows := m.helpRows()
+	k := m.keys
+
+	for _, s := range helpSpecs {
+		if len(s.acts) == 0 || s.keys != "" {
+			continue // a separator, or a column drawn by hand
+		}
+		first := k.chords(s.acts[0])
+		if len(first) == 0 {
+			t.Fatalf("%s: an action in the help has no chord at all", s.acts[0])
+		}
+		at := helpIndexOf(rows, first[0])
+		if at < 0 {
+			t.Fatalf("%v: no row shows %q", s.acts, first[0])
+		}
+		if rows[at].desc != s.desc {
+			t.Fatalf("%v: row is %q, want %q", s.acts, rows[at].desc, s.desc)
+		}
+		for _, act := range s.acts {
+			for _, chord := range k.chords(act) {
+				if helpIndexOf(rows, chord) < 0 {
+					t.Fatalf("%s: chord %q is bound but no row shows it", act, chord)
+				}
+			}
+		}
+	}
+}
+
+// TestProtectedChordsRefuseARebind pins the set a rebind must not move: the
+// escape hatch, the guaranteed exit and the movement keys.
+func TestProtectedChordsRefuseARebind(t *testing.T) {
+	k := buildKeyMap()
+	for _, chord := range []string{"esc", "enter", "tab", "shift+tab", "backspace", "delete",
+		"up", "down", "left", "right", "pgup", "pgdown", "home", "end", "ctrl+q"} {
+		if !k.isProtected(chord) {
+			t.Errorf("%q must be protected", chord)
+		}
+	}
+	for _, chord := range []string{"ctrl+s", "ctrl+p", "f1", "alt+t"} {
+		if k.isProtected(chord) {
+			t.Errorf("%q must be rebindable", chord)
+		}
+	}
+}

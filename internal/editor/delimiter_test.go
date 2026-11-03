@@ -288,27 +288,20 @@ func TestBracketPaletteCommands(t *testing.T) {
 }
 
 func TestHelpListsBracketRows(t *testing.T) {
-	wantKeys := []string{"Ctrl+]", "Ctrl+Shift+]"}
-	found := map[string]bool{}
-	for _, e := range helpEntries {
-		found[e.keys] = true
-	}
-	for _, k := range wantKeys {
-		if !found[k] {
-			t.Fatalf("helpEntries is missing the %q row", k)
+	wantChords := []string{"ctrl+]", "ctrl+shift+]"}
+
+	m := New()
+	for _, c := range wantChords {
+		if helpIndexOf(m.helpRows(), c) < 0 {
+			t.Fatalf("the help is missing the %q chord", c)
 		}
 	}
 
-	m := New()
 	m.width, m.height = 120, 24
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyF1})
 	// The rows are in the middle of the list, so scroll the window to them
 	// rather than to the end of it.
-	for i, e := range helpEntries {
-		if e.keys == "Ctrl+]" {
-			m.helpScroll = i
-		}
-	}
+	m.helpScroll = helpIndexOf(m.helpRows(), "ctrl+]")
 	out := m.View().Content
 	for _, want := range []string{
 		"Ctrl+]", "Ctrl+Shift+]", m.t("help.jump_bracket"), m.t("help.select_inside"),

@@ -52,79 +52,6 @@ var (
 	bracketMatchStyle = lipgloss.NewStyle().Background(lipgloss.Color("239")).Foreground(lipgloss.Color("226")).Bold(true).Underline(true)
 )
 
-type helpEntry struct {
-	keys string
-	desc string // i18n key
-}
-
-var helpEntries = []helpEntry{
-	{"Ctrl+S", "help.save"},
-	{"", ""},
-	{"Ctrl+P / F2", "help.palette"},
-	{"Alt+P / Ctrl+Shift+P", "help.everywhere"},
-	{"Shift+Arrows", "help.select"},
-	{"Ctrl+C / Ctrl+X / Ctrl+V", "help.clipboard"},
-	{"", ""},
-	{"Ctrl+F", "help.search"},
-	{"Ctrl+Shift+F", "help.proj_search"},
-	{"Ctrl+Shift+R", "help.proj_replace"},
-	{"Ctrl+H", "help.replace"},
-	{"Ctrl+L", "help.goto_line"},
-	{"Ctrl+Alt+L", "help.format"},
-	{"Alt+Z", "help.word_wrap"},
-	{"Alt+B", "help.blame"},
-	{"Ctrl+G", "help.git_panel"},
-	{"Ctrl+Alt+D", "help.debug"},
-	{"F4 / F5 / F6 / F7 / S+F5 / S+F7", "help.debug_keys"},
-	{"↑↓/PgUp/PgDn/Home/End, +/-", "help.debug_panel"},
-	{"F12 / Ctrl+Click", "help.goto_def"},
-	{"D (in Git panel)", "help.git_diff"},
-	{"Alt+[ / Alt+]", "help.hunk"},
-	{"Ctrl+Shift+O / T / B", "help.merge_resolve"},
-	{"Ctrl+]", "help.jump_bracket"},
-	{"Ctrl+Shift+]", "help.select_inside"},
-	{"Ctrl+Alt+← / →", "help.jump_list"},
-	{"Ctrl+Shift+Backspace", "help.last_edit"},
-	{"Alt+M / Alt+N / S+Alt+N", "help.bookmark"},
-	{"Ctrl+O", "help.finder"},
-	{"Ctrl+T", "help.open"},
-	{"Alt+T", "help.terminal"},
-	{"Alt+A", "help.chat"},
-	{"Alt+I", "help.inline"},
-	{"Alt+G", "help.ghost"},
-	{"Alt+L", "help.agent"},
-	{"Ctrl+B / F9", "help.tree"},
-	{"↑↓/Enter/←→ in tree", "help.tree_nav"},
-	{"n / N / r / d / Del / t in tree", "help.tree_ops"},
-	{"Alt+←/→", "help.tab_switch"},
-	{"Alt+1..9", "help.tab_jump"},
-	{"Ctrl+Tab / Alt+`", "help.tab_mru"},
-	{"Ctrl+\\ / F6", "help.split_vert"},
-	{"Ctrl+Alt+H / F7", "help.split_horiz"},
-	{"Ctrl+Alt+P / F8", "help.split_focus"},
-	{"Ctrl+Alt+W", "help.split_close"},
-	{"Ctrl+W / Ctrl+X", "help.tab_close"},
-	{"", ""},
-	{"Arrows/Home/End/PgUp/PgDn", "help.move"},
-	{"Enter/Backspace/Delete/Tab", "help.edit"},
-	{"Ctrl+Z / Ctrl+R", "help.undo"},
-	{"Ctrl+Y / Ctrl+D", "help.lines"},
-	{"Ctrl+U", "help.uppercase"},
-	{"Ctrl+Shift+U", "help.lowercase"},
-	{"Alt+Shift+S", "help.sort_lines"},
-	{"Alt+Shift+T", "help.trim_lines"},
-	{"Ctrl+Alt+J", "help.align_indent"},
-	{"Ctrl+Alt+N", "help.number_lines"},
-	{"Alt+D", "help.multicursor_word"},
-	{"Alt+Click", "help.multicursor_click"},
-	{"Esc", "help.multicursor_esc"},
-	{"Alt+↑ / Alt+↓", "help.move_line"},
-	{"Alt+C / Alt+O", "help.fold"},
-	{"", ""},
-	{"F1 or Ctrl+E", "help.toggle_help"},
-	{"Ctrl+Q", "help.quit"},
-}
-
 func (m Model) finderExtraRows() int {
 	if !m.finderOpen {
 		return 0
@@ -1113,13 +1040,14 @@ func padTo(s string, w int) string {
 }
 
 func (m Model) helpPanel(h int) []string {
-	all := make([]string, 0, len(helpEntries)+1)
+	rows := m.helpRows()
+	all := make([]string, 0, len(rows)+1)
 	title := statusHiStyle.Render(m.t("help.title")) + " " + hintStyle.Render(m.t("help.close_hint"))
 	if m.helpMaxScroll() > 0 {
 		title += hintStyle.Render(m.t("help.scroll_hint"))
 	}
 	all = append(all, title)
-	for _, e := range helpEntries {
+	for _, e := range rows {
 		if e.keys == "" {
 			all = append(all, "")
 			continue
@@ -1143,11 +1071,11 @@ func (m Model) helpPanel(h int) []string {
 	if end > len(all) {
 		end = len(all)
 	}
-	rows := all[off:end]
-	for len(rows) < h {
-		rows = append(rows, "")
+	out := all[off:end]
+	for len(out) < h {
+		out = append(out, "")
 	}
-	return rows
+	return out
 }
 
 func (m Model) promptLine() string {

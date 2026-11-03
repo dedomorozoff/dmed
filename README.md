@@ -119,6 +119,12 @@ Open a file (`Ctrl+O` fuzzy finder or `Ctrl+T`), edit, `Ctrl+S` to save. `Ctrl+G
 
 ## Keybindings
 
+`F1` in the editor lists these, and that list is generated from the binding
+tables themselves — a chord is decided in one place, so a table below cannot
+quietly disagree with the running editor. `dmed --dump-keys md` (or `roff`)
+prints the same list for a document. The descriptions below stay hand-written
+because they explain behaviour, not just keys.
+
 ### Navigation
 
 | Keys | Action |

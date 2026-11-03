@@ -100,7 +100,19 @@ The code is split into focused internal packages:
   from the code when `Text` carries a raw control byte, bundled Text chords),
   then `globalBindings` (chords that always answer first: quit, copy, panels,
   debugging) → `dispatchPanes` (the pane/overlay that owns the keyboard) →
-  `editorBindings` (the text pane) → `typingFallback`. Every pane handler takes
+  `editorBindings` (the text pane) → `typingFallback`. An entry is a
+  `bindingDef{act, fn, flags}`: the chord is the map key and the action id
+  (`keyAct`, `"file.save"`) is in the value, so aliases are one identity, the
+  F1 cheatsheet is generated from the tables (`keydoc.go`, `dmed --dump-keys
+  md|roff`) and a `[keys]` section can address the command rather than the
+  keystroke. `keymap.go` resolves the defaults into the map one model reads
+  (`m.keys`); the package tables are immutable defaults, never a state, and a
+  chord flagged `protected` (Esc, Enter, Tab, the movement keys, `ctrl+q`, the
+  review `y`/`n`) refuses a rebind because the machinery around it depends on
+  it. `type binding func(m *Model, msg tea.KeyPressMsg) (tea.Cmd, bool)`;
+  a `handled == false` return falls through to
+  the next stage (this is how f6/f7 mean step-over in the debug panel and split
+  outside it). Every pane handler takes
   that name as `handleX(s string, msg tea.KeyPressMsg)` and matches on `s`,
   never on `msg.String()`; text entry reads `msg.Text`, which `keyOf` hands
   back unrestored, so a typed character is never replaced by its binding name.

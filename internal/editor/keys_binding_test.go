@@ -11,16 +11,21 @@ import (
 // and the key normalization are now checked without a terminal.
 
 func TestBindingTablesAreWellFormed(t *testing.T) {
-	for name, table := range map[string]map[string]binding{
+	for name, table := range map[string]map[string]bindingDef{
 		"globalBindings": globalBindings,
 		"editorBindings": editorBindings,
 	} {
-		for chord, fn := range table {
+		for chord, d := range table {
 			if chord == "" {
 				t.Fatalf("%s: an entry is bound to the empty key name", name)
 			}
-			if fn == nil {
+			if d.fn == nil {
 				t.Fatalf("%s: chord %q has no binding", name, chord)
+			}
+			// Every action has a name before a config file can address it: an
+			// unnamed entry is invisible to the help screen and to [keys].
+			if d.act == "" {
+				t.Fatalf("%s: chord %q has no action name", name, chord)
 			}
 			// The tables are keyed by the names keyOf produces, and those are
 			// lowercase for every bound chord; an uppercase key here could

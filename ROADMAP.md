@@ -833,12 +833,31 @@ cross-build. The cheap part first:
   be one predictable flow with a shared navigation stack.
 
 ### M13 — configuration and experience
-- Rebindable keys: a `[keys]` section of `action = key`. The lookup is a table
-  now (`globalBindings` / `editorBindings` in `keys.go`) and every pane handler
-  matches on the very same `keyOf` name, so re-keying the tables re-keys the
-  overlays in one go — the work left is naming each action and letting the
-  config rewrite the tables at startup, plus generating the F1 cheatsheet from
-  the same source so help cannot drift from the bindings.
+- Rebindable keys: a `[keys]` section of `action = key`.
+  - [x] **The action has a name.** An entry of `globalBindings` / `editorBindings`
+        is a `bindingDef{act, fn, flags}` now: the chord stays the map key and the
+        action id (`keyAct`, `"file.save"`) lives in the value, so the two entries
+        that always meant the same command (`f1` and `ctrl+e`) are one identity and
+        an alias set is a fact read off the tables instead of a coincidence. The
+        model owns the resolved map (`KeyMap` in `keymap.go`), the package tables
+        stay immutable defaults, and `alt+1..9` became nine real `tab.jump` entries
+        rather than a chord the dispatcher parsed. The chords that other machinery
+        depends on — Esc, Enter, Tab, the movement keys, `ctrl+q`, the `y`/`n` the
+        agent review answers — are flagged `protected` and refuse a rebind.
+  - [x] **The help is generated.** `helpRows()` builds the F1 cheatsheet from the
+        resolved map, so a rebind repaints the help and a stale copy of a chord is
+        no longer possible (`dmed --dump-keys md|roff` prints the same list for a
+        document). Nine rows whose shape the tables cannot express — the mouse, the
+        debug stepping keys, the pane's own letters — name their keys by hand, and
+        `TestHelpRowsAreTheTables` fails if a generated row ever shows a chord that
+        is not bound. The stale tree row, whose i18n key existed in neither catalog,
+        is gone.
+  - [ ] `[keys]` overrides: `action = chord[, chord…]` in `.dmed.conf`, an unbind
+        with an empty value, `ResolveKeys` joining them to the defaults and hot
+        reload re-keying the running editor.
+  - [ ] The overlay and pane handlers, which still match chord literals inside
+        their own `switch s`, move into per-pane tables so nothing is left
+        unremappable.
 - Themes: user palettes for syntax_theme in `.dmed.conf` or a separate
   file, live preview in the wizard.
 - `.editorconfig`: indent_style/size, trim trailing whitespace, final newline.

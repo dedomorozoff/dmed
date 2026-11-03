@@ -229,21 +229,18 @@ func TestTransformPaletteCommands(t *testing.T) {
 // every transformation row is bound in the keys, listed in the help and must
 // actually render.
 func TestHelpListsTransformRows(t *testing.T) {
-	rows := map[string]bool{
-		"Ctrl+Shift+U": false,
-		"Alt+Shift+S":  false,
-		"Alt+Shift+T":  false,
-		"Ctrl+Alt+J":   false,
-		"Ctrl+Alt+N":   false,
+	wantChords := []string{"ctrl+shift+u", "alt+shift+s", "alt+shift+t", "ctrl+alt+j", "ctrl+alt+n"}
+	var missing []string
+	m := New()
+	for _, c := range wantChords {
+		if helpIndexOf(m.helpRows(), c) < 0 {
+			missing = append(missing, c)
+		}
 	}
-	for _, e := range helpEntries {
-		delete(rows, e.keys)
-	}
-	if len(rows) > 0 {
-		t.Fatalf("helpEntries is missing rows for %v", keysOf(rows))
+	if len(missing) > 0 {
+		t.Fatalf("the help is missing rows for %v", missing)
 	}
 
-	m := New()
 	m.width, m.height = 120, 24
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyF1})
 	m = press(m, tea.KeyPressMsg{Text: "G"}) // jump to the end of the list
@@ -257,12 +254,4 @@ func TestHelpListsTransformRows(t *testing.T) {
 			t.Fatalf("the scrolled help must show %q", want)
 		}
 	}
-}
-
-func keysOf(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
 }

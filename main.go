@@ -55,7 +55,20 @@ func main() {
 		switch os.Args[1] {
 		case "-h", "--help":
 			fmt.Println("usage: dmed [dir | files...]")
-			fmt.Println("       dmed setup-ai    interactive AI provider setup (writes ~/.dmed.conf)")
+			fmt.Println("       dmed setup-ai     interactive AI provider setup (writes ~/.dmed.conf)")
+			fmt.Println("       dmed --dump-keys  print the key cheat sheet the editor shows (md|roff)")
+			return
+		case "--dump-keys":
+			format := "md"
+			if len(os.Args) > 2 {
+				format = os.Args[2]
+			}
+			out, err := editor.DumpKeys(format)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			fmt.Print(out)
 			return
 		case "-v", "--version":
 			fmt.Printf("dmed %s\n", version)

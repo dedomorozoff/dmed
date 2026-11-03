@@ -3,7 +3,6 @@ package editor
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 	"unicode"
 
@@ -156,13 +155,211 @@ func keyOf(msg tea.KeyPressMsg) (tea.KeyPressMsg, string) {
 // outside it) stays expressible in a table.
 type binding func(m *Model, msg tea.KeyPressMsg) (tea.Cmd, bool)
 
+// keyAct names what a binding *does*, independently of the chord that triggers
+// it. The chord is the map key and the name is inside the value, so an action
+// has one identity shared by every chord bound to it: an alias in the table
+// (f1 and ctrl+e are help.toggle) and an alias in a config file address the
+// same thing, and the help screen, the palette and [keys] all read that one name
+// instead of each keeping its own copy of the chord.
+type keyAct string
+
+// bindFlags carries what a binding needs beyond the function: whether the chord
+// is refused to a rebind.
+type bindFlags uint8
+
+const (
+	// protected chords are the ones other machinery depends on: the escape
+	// hatch, the exit, the letters a mouse-free user cannot click for, and the
+	// y/n that the agent review is documented to answer. They show up in help
+	// and refuse to be rebound.
+	protected bindFlags = 1 << iota
+)
+
+// bindingDef is one table entry: the action it runs, the closure that runs it
+// and the flags describing it.
+type bindingDef struct {
+	act   keyAct
+	fn    binding
+	flags bindFlags
+}
+
+// Actions, grouped by the subsystem that owns them. The name is the id a
+// [keys] section writes, so it is data, not a Go identifier: lower case,
+// dotted, and stable across a rename of the handler.
+const (
+	// ai
+	actAiFix          keyAct = "ai.fix"
+	actAiGhostDismiss keyAct = "ai.ghost-dismiss"
+	actAiInline       keyAct = "ai.inline"
+
+	// app
+	actAppQuit keyAct = "app.quit"
+
+	// bookmark
+	actBookmarkNext   keyAct = "bookmark.next"
+	actBookmarkPrev   keyAct = "bookmark.prev"
+	actBookmarkToggle keyAct = "bookmark.toggle"
+
+	// complete
+	actCompleteTrigger keyAct = "complete.trigger"
+
+	// cursor
+	actCursorClearExtra     keyAct = "cursor.clear-extra"
+	actCursorNextOccurrence keyAct = "cursor.next-occurrence"
+
+	// debug
+	actDebugBreakpoint keyAct = "debug.breakpoint"
+	actDebugPanel      keyAct = "debug.panel"
+	actDebugRun        keyAct = "debug.run"
+	actDebugStepIn     keyAct = "debug.step-in"
+	actDebugStepOut    keyAct = "debug.step-out"
+	actDebugStepOver   keyAct = "debug.step-over"
+	actDebugStop       keyAct = "debug.stop"
+
+	// delimiter
+	actDelimiterJump         keyAct = "delimiter.jump"
+	actDelimiterSelectInside keyAct = "delimiter.select-inside"
+
+	// diagnostic
+	actDiagnosticNext keyAct = "diagnostic.next"
+	actDiagnosticPrev keyAct = "diagnostic.prev"
+
+	// edit
+	actEditAlignIndent   keyAct = "edit.align-indent"
+	actEditBackspace     keyAct = "edit.backspace"
+	actEditCopy          keyAct = "edit.copy"
+	actEditCut           keyAct = "edit.cut"
+	actEditDelete        keyAct = "edit.delete"
+	actEditDeleteLine    keyAct = "edit.delete-line"
+	actEditDuplicateLine keyAct = "edit.duplicate-line"
+	actEditIndent        keyAct = "edit.indent"
+	actEditLastChange    keyAct = "edit.last-change"
+	actEditLowercase     keyAct = "edit.lowercase"
+	actEditNewline       keyAct = "edit.newline"
+	actEditNumberLines   keyAct = "edit.number-lines"
+	actEditPaste         keyAct = "edit.paste"
+	actEditRedo          keyAct = "edit.redo"
+	actEditSortLines     keyAct = "edit.sort-lines"
+	actEditToggleComment keyAct = "edit.toggle-comment"
+	actEditTrimTrailing  keyAct = "edit.trim-trailing"
+	actEditUndo          keyAct = "edit.undo"
+	actEditUnindent      keyAct = "edit.unindent"
+	actEditUppercase     keyAct = "edit.uppercase"
+
+	// file
+	actFileOpenPrompt keyAct = "file.open-prompt"
+	actFileSave       keyAct = "file.save"
+
+	// finder
+	actFinderOpen keyAct = "finder.open"
+
+	// fold
+	actFoldClose keyAct = "fold.close"
+	actFoldOpen  keyAct = "fold.open"
+
+	// git
+	actGitBlame    keyAct = "git.blame"
+	actGitHunkNext keyAct = "git.hunk-next"
+	actGitHunkPrev keyAct = "git.hunk-prev"
+
+	// goto
+	actGotoLine keyAct = "goto.line"
+
+	// help
+	actHelpToggle keyAct = "help.toggle"
+
+	// jump
+	actJumpBack    keyAct = "jump.back"
+	actJumpForward keyAct = "jump.forward"
+
+	// line
+	actLineDuplicateUp keyAct = "line.duplicate-up"
+	actLineMoveDown    keyAct = "line.move-down"
+	actLineMoveUp      keyAct = "line.move-up"
+
+	// lsp
+	actLspActions    keyAct = "lsp.actions"
+	actLspDefinition keyAct = "lsp.definition"
+	actLspFormat     keyAct = "lsp.format"
+	actLspHover      keyAct = "lsp.hover"
+	actLspOutline    keyAct = "lsp.outline"
+	actLspReferences keyAct = "lsp.references"
+	actLspRename     keyAct = "lsp.rename"
+
+	// merge
+	actMergeBoth   keyAct = "merge.both"
+	actMergeOurs   keyAct = "merge.ours"
+	actMergeTheirs keyAct = "merge.theirs"
+
+	// nav
+	actNavDown      keyAct = "nav.down"
+	actNavLeft      keyAct = "nav.left"
+	actNavLineEnd   keyAct = "nav.line-end"
+	actNavLineStart keyAct = "nav.line-start"
+	actNavPageDown  keyAct = "nav.page-down"
+	actNavPageUp    keyAct = "nav.page-up"
+	actNavRight     keyAct = "nav.right"
+	actNavUp        keyAct = "nav.up"
+
+	// palette
+	actPaletteEverywhere keyAct = "palette.everywhere"
+	actPaletteOpen       keyAct = "palette.open"
+
+	// pane
+	actPaneClose      keyAct = "pane.close"
+	actPaneFocusOther keyAct = "pane.focus-other"
+
+	// project
+	actProjectReplace keyAct = "project.replace"
+	actProjectSearch  keyAct = "project.search"
+
+	// replace
+	actReplaceOpen keyAct = "replace.open"
+
+	// search
+	actSearchNext keyAct = "search.next"
+	actSearchOpen keyAct = "search.open"
+	actSearchPrev keyAct = "search.prev"
+
+	// select
+	actSelectCharLeft    keyAct = "select.char-left"
+	actSelectCharRight   keyAct = "select.char-right"
+	actSelectColumnDown  keyAct = "select.column-down"
+	actSelectColumnLeft  keyAct = "select.column-left"
+	actSelectColumnRight keyAct = "select.column-right"
+	actSelectColumnUp    keyAct = "select.column-up"
+	actSelectLineDown    keyAct = "select.line-down"
+	actSelectLineEnd     keyAct = "select.line-end"
+	actSelectLineStart   keyAct = "select.line-start"
+	actSelectLineUp      keyAct = "select.line-up"
+
+	// split
+	actSplitHorizontal keyAct = "split.horizontal"
+	actSplitVertical   keyAct = "split.vertical"
+
+	// tab
+	actTabClose keyAct = "tab.close"
+	actTabJump  keyAct = "tab.jump"
+	actTabMru   keyAct = "tab.mru"
+	actTabNext  keyAct = "tab.next"
+	actTabPrev  keyAct = "tab.prev"
+
+	// view
+	actViewAgent    keyAct = "view.agent"
+	actViewChat     keyAct = "view.chat"
+	actViewGit      keyAct = "view.git"
+	actViewTerminal keyAct = "view.terminal"
+	actViewTree     keyAct = "view.tree"
+	actViewWordWrap keyAct = "view.word-wrap"
+)
+
 // globalBindings answer regardless of which pane or overlay has focus: the
 // chords that must always reach the editor (quit, copy, panels, debugging).
-var globalBindings = map[string]binding{
-	"ctrl+q": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+var globalBindings = map[string]bindingDef{
+	"ctrl+q": {actAppQuit, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.requestQuit(), true
-	},
-	"ctrl+c": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, protected},
+	"ctrl+c": {actEditCopy, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.cur().buf.HasSelection() {
 			m.copySelection()
 			return nil, true
@@ -171,18 +368,18 @@ var globalBindings = map[string]binding{
 		// uses to interrupt a program is a trap. Ctrl+Q is the way out.
 		m.msg = m.t("msg.quit_hint")
 		return nil, true
-	},
-	"ctrl+w": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+w": {actTabClose, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.closeActiveTab(), true
-	},
-	"ctrl+x": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+x": {actEditCut, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.cur().buf.HasSelection() {
 			m.cutSelection()
 			return nil, true
 		}
 		return m.closeActiveTab(), true
-	},
-	"ctrl+shift+p": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+shift+p": {actPaletteEverywhere, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// Search everywhere: commands, files and settings. The double Shift
 		// does the same, but most terminals never report a bare modifier
 		// press, and on legacy terminals Ctrl+Shift+P collapses into the
@@ -190,99 +387,99 @@ var globalBindings = map[string]binding{
 		// there, so this is the binding that always works.
 		m.startSearchEverywhere()
 		return nil, true
-	},
-	"alt+p": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+p": {actPaletteEverywhere, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.startSearchEverywhere()
 		return nil, true
-	},
-	"ctrl+p": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+p": {actPaletteOpen, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.startPalette()
 		return nil, true
-	},
-	"f2": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"f2": {actPaletteOpen, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.startPalette()
 		return nil, true
-	},
-	"ctrl+t": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+t": {actFileOpenPrompt, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.startPrompt()
 		return nil, true
-	},
-	"alt+t": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+t": {actViewTerminal, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.toggleTerminal(), true
-	},
-	"alt+a": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+a": {actViewChat, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.toggleChat()
 		return nil, true
-	},
-	"alt+l": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+l": {actViewAgent, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.toggleAgentPanel(), true
-	},
-	"alt+i": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+i": {actAiInline, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.startInlineRequest()
 		return nil, true
-	},
-	"alt+f": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+f": {actAiFix, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.startFixRequest()
 		return nil, true
-	},
-	"alt+g": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+g": {actAiGhostDismiss, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.dismissGhost()
 		return m.ghostTrigger(), true
-	},
-	"ctrl+o": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+o": {actFinderOpen, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.startFinder()
 		return nil, true
-	},
-	"f3": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"f3": {actSearchNext, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.updateSearchMatches(true)
 		return nil, true
-	},
-	"shift+f3": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"shift+f3": {actSearchPrev, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.findPrev()
 		return nil, true
-	},
-	"ctrl+f": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+f": {actSearchOpen, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.startSearch()
 		return nil, true
-	},
-	"ctrl+shift+f": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+shift+f": {actProjectSearch, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// On legacy terminals Ctrl+Shift+F arrives as Ctrl+F (both are the
 		// control byte), so this only fires where the terminal can tell them
 		// apart; the palette command covers the rest.
 		m.startProjectSearch()
 		return nil, true
-	},
-	"ctrl+shift+r": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+shift+r": {actProjectReplace, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// Same caveat as Ctrl+Shift+F, with a worse collision: on a legacy
 		// terminal this arrives as Ctrl+R, which is redo, so the palette command
 		// "Replace in Project" is the portable way in.
 		m.startProjectReplace()
 		return nil, true
-	},
-	"ctrl+alt+r": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+r": {actLspRename, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.startLspRename()
 		return nil, true
-	},
-	"ctrl+alt+q": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+q": {actLspActions, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.startLspActions(), true
-	},
-	"ctrl+alt+l": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+l": {actLspFormat, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// JetBrains-style reformat chord (+ note: alt+l alone toggles the
 		// agent panel). Layout is the language server's job, not a reindent:
 		// reach textDocument/formatting where the terminal lets ctrl+alt
 		// through, palette command covers the rest.
 		return m.lspFormatCmd(), true
-	},
-	"ctrl+alt+f": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+f": {actLspFormat, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// Same reformat, the pre-JetBrains chord kept as a fallback for
 		// terminals that mangle ctrl+alt+L (ctrl+L alone is goto-line).
 		return m.lspFormatCmd(), true
-	},
-	"ctrl+h": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+h": {actReplaceOpen, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.startReplace()
 		return nil, true
-	},
-	"ctrl+g": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+g": {actViewGit, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.gitOpen {
 			m.gitOpen = false
 			m.gitFocus = false
@@ -291,54 +488,54 @@ var globalBindings = map[string]binding{
 			m.openGitPanel()
 		}
 		return nil, true
-	},
-	"f1": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"f1": {actHelpToggle, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.helpOpen = !m.helpOpen
 		if m.helpOpen {
 			m.helpScroll = 0
 		}
 		return nil, true
-	},
-	"ctrl+e": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+e": {actHelpToggle, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.helpOpen = !m.helpOpen
 		if m.helpOpen {
 			m.helpScroll = 0
 		}
 		return nil, true
-	},
-	"ctrl+b": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+b": {actViewTree, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.toggleTree()
 		return nil, true
-	},
-	"f9": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"f9": {actViewTree, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.toggleTree()
 		return nil, true
-	},
-	"f12": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"f12": {actLspDefinition, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.gotoDefinition(), true
-	},
-	"f4": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"f4": {actDebugBreakpoint, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.toggleDebugBreakpoint(), true
-	},
-	"alt+m": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+m": {actBookmarkToggle, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.toggleBookmarkAt(m.cur().buf.CurLine())
 		return nil, true
-	},
-	"alt+n": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+n": {actBookmarkNext, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.jumpBookmark(1)
 		return nil, true
-	},
-	"alt+shift+n": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+shift+n": {actBookmarkPrev, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.jumpBookmark(-1)
 		return nil, true
-	},
-	"f5": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"f5": {actDebugRun, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.startDebugging(), true
-	},
-	"shift+f5": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"shift+f5": {actDebugStop, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.stopDebugging(), true
-	},
-	"f6": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"f6": {actDebugStepOver, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// With the debug panel open the F-keys step (F10/F11 are far from the
 		// home row); with the panel closed F6 falls through to the vertical
 		// split binding.
@@ -349,8 +546,8 @@ var globalBindings = map[string]binding{
 			return nil, true
 		}
 		return nil, false
-	},
-	"f7": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"f7": {actDebugStepIn, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.dapOpen {
 			if m.dapRunState == dapStopped {
 				return m.dapStepCmd("stepIn"), true
@@ -358,8 +555,8 @@ var globalBindings = map[string]binding{
 			return nil, true
 		}
 		return nil, false
-	},
-	"shift+f7": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"shift+f7": {actDebugStepOut, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.dapOpen {
 			if m.dapRunState == dapStopped {
 				return m.dapStepCmd("stepOut"), true
@@ -367,19 +564,19 @@ var globalBindings = map[string]binding{
 			return nil, true
 		}
 		return nil, false
-	},
-	"ctrl+alt+d": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+d": {actDebugPanel, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.toggleDebugPanel(), true
-	},
+	}, 0},
 }
 
 // editorBindings are the keys of the text pane itself: they are reached only
 // when no pane claimed the key.
-var editorBindings = map[string]binding{
-	"ctrl+space": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+var editorBindings = map[string]bindingDef{
+	"ctrl+space": {actCompleteTrigger, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.triggerCompletion(true), true
-	},
-	"alt+d": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+d": {actCursorNextOccurrence, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		b := m.cur().buf
 		if !b.AddNextOccurrence() {
 			m.msg = m.t("msg.no_more_occurrences")
@@ -389,13 +586,13 @@ var editorBindings = map[string]binding{
 			m.msg = ""
 		}
 		return nil, true
-	},
-	"esc": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"esc": {actCursorClearExtra, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.ClearCursors()
 		m.msg = ""
 		return nil, true
-	},
-	"ctrl+s": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, protected},
+	"ctrl+s": {actFileSave, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		t := m.cur()
 		if t.path == "" {
 			m.startSavePrompt()
@@ -403,120 +600,120 @@ var editorBindings = map[string]binding{
 			m.saveActive()
 		}
 		return nil, true
-	},
-	"ctrl+l": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+l": {actGotoLine, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.startGotoPrompt()
 		return nil, true
-	},
-	"ctrl+/": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+/": {actEditToggleComment, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.toggleComment()
 		return nil, true
-	},
-	"ctrl+_": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+_": {actEditToggleComment, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.toggleComment()
 		return nil, true
-	},
-	"alt+z": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+z": {actViewWordWrap, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.toggleWordWrap()
 		return nil, true
-	},
-	"alt+b": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+b": {actGitBlame, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.toggleBlame(), true
-	},
-	"alt+c": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+c": {actFoldClose, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.foldCloseAtCursor()
 		return nil, true
-	},
-	"alt+o": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+o": {actFoldOpen, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.foldOpenAtCursor()
 		return nil, true
-	},
-	"ctrl+z": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+z": {actEditUndo, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.cur().buf.Undo() {
 			m.msg = ""
 		}
 		return nil, true
-	},
-	"ctrl+y": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+y": {actEditDeleteLine, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.DeleteLine()
 		m.msg = ""
 		return nil, true
-	},
-	"ctrl+d": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+d": {actEditDuplicateLine, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.DuplicateLine()
 		m.msg = ""
 		return nil, true
-	},
-	"ctrl+u": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+u": {actEditUppercase, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.uppercaseActive()
 		return nil, true
-	},
-	"ctrl+shift+u": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+shift+u": {actEditLowercase, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// On legacy terminals Ctrl+Shift+U arrives as Ctrl+U (both are the
 		// control byte), so there it uppercases instead of lowercasing — the
 		// same family, nothing destroyed. The palette command "Edit: Lowercase"
 		// is the portable route.
 		m.lowercaseActive()
 		return nil, true
-	},
-	"alt+shift+s": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+shift+s": {actEditSortLines, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.sortLinesActive()
 		return nil, true
-	},
-	"alt+shift+t": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+shift+t": {actEditTrimTrailing, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// A terminal that cannot separate the chord from Alt+T toggles the
 		// built-in terminal instead; "Edit: Trim Trailing Whitespace" in the
 		// palette does the job everywhere.
 		m.trimTrailingActive()
 		return nil, true
-	},
-	"ctrl+alt+j": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+j": {actEditAlignIndent, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.alignIndentActive()
 		return nil, true
-	},
-	"ctrl+alt+n": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+n": {actEditNumberLines, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.numberLinesActive()
 		return nil, true
-	},
-	"ctrl+r": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+r": {actEditRedo, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.cur().buf.Redo() {
 			m.msg = ""
 		}
 		return nil, true
-	},
-	"ctrl+shift+o": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+shift+o": {actMergeOurs, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// On legacy terminals Ctrl+Shift+O arrives as Ctrl+O (both are the
 		// control byte), so this only fires where the terminal can tell them
 		// apart; the palette command "Merge: Take Ours" covers the rest.
 		m.resolveMergeConflict(conflictOurs)
 		return nil, true
-	},
-	"ctrl+shift+t": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+shift+t": {actMergeTheirs, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// Same caveat as Ctrl+Shift+O; the colliding Ctrl+T opens a file prompt.
 		m.resolveMergeConflict(conflictTheirs)
 		return nil, true
-	},
-	"ctrl+shift+b": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+shift+b": {actMergeBoth, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// Same caveat as Ctrl+Shift+O; the colliding Ctrl+B shows the tree.
 		m.resolveMergeConflict(conflictBoth)
 		return nil, true
-	},
-	"alt+[": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+[": {actGitHunkPrev, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.jumpChange(-1)
 		return nil, true
-	},
-	"alt+]": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+]": {actGitHunkNext, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.jumpChange(1)
 		return nil, true
-	},
-	"ctrl+]": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+]": {actDelimiterJump, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// No backward chord next to it on purpose: Ctrl+[ *is* Escape, the two
 		// are indistinguishable on every terminal. The jump always lands on a
 		// delimiter instead, so pressing this one chord twice walks the pair.
 		m.jumpToMatchingDelimiterActive()
 		return nil, true
-	},
-	"ctrl+}": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+}": {actDelimiterJump, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// Ctrl+] arrives as the control byte 0x1d on legacy terminals, and
 		// controlByteKey re-encodes that as ctrl+} — ] and } share the byte. The
 		// alias keeps the chord from falling through unclaimed; the palette
@@ -524,63 +721,63 @@ var editorBindings = map[string]binding{
 		// the shifted chord below.
 		m.jumpToMatchingDelimiterActive()
 		return nil, true
-	},
-	"ctrl+shift+]": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+shift+]": {actDelimiterSelectInside, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.selectInsideBracketsActive()
 		return nil, true
-	},
-	"ctrl+shift+}": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+shift+}": {actDelimiterSelectInside, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// Same chord on terminals that report the shifted glyph (}) as the key
 		// instead of the physical one (]).
 		m.selectInsideBracketsActive()
 		return nil, true
-	},
-	"ctrl+\\": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+\\": {actSplitVertical, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.toggleSplitVert()
 		return nil, true
-	},
-	"f6": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"f6": {actSplitVertical, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.toggleSplitVert()
 		return nil, true
-	},
-	"ctrl+alt+h": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+h": {actSplitHorizontal, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.toggleSplitHoriz()
 		return nil, true
-	},
-	"f7": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"f7": {actSplitHorizontal, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.toggleSplitHoriz()
 		return nil, true
-	},
-	"ctrl+alt+p": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+p": {actPaneFocusOther, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.focusOtherPane()
 		return nil, true
-	},
-	"f8": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"f8": {actPaneFocusOther, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.focusOtherPane()
 		return nil, true
-	},
-	"alt+e": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+e": {actDiagnosticNext, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.nextDiagnostic(1)
 		return nil, true
-	},
-	"alt+shift+e": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+shift+e": {actDiagnosticPrev, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.nextDiagnostic(-1)
 		return nil, true
-	},
-	"ctrl+k": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+k": {actLspHover, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.startHoverCmd(), true
-	},
-	"shift+f12": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"shift+f12": {actLspReferences, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.startRefsCmd(), true
-	},
-	"ctrl+alt+o": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+o": {actLspOutline, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.startOutlineCmd(), true
-	},
-	"ctrl+alt+w": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+w": {actPaneClose, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.closePane()
 		return nil, true
-	},
-	"ctrl+v": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+v": {actEditPaste, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if sysClip, err := clipboard.ReadAll(); err == nil && sysClip != "" {
 			sysClip = normalizePaste(sysClip)
 			// External text took the clipboard over: it cannot be a block this
@@ -593,102 +790,141 @@ var editorBindings = map[string]binding{
 		m.pasteClipboard(m.clipboard)
 		m.msg = ""
 		return nil, true
-	},
-	"alt+left": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+left": {actTabPrev, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.switchTab(-1)
 		return nil, true
-	},
-	"alt+right": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+right": {actTabNext, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.switchTab(1)
 		return nil, true
-	},
-	"ctrl+alt+left": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	// Alt+digit is a family, not a pattern: the nine chords are nine entries that
+	// share one action, so the tab jump is a rebindable named command like every
+	// other tab command, and the dispatch chain never parses the chord itself.
+	"alt+1": {actTabJump, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.jumpTab(0)
+		return nil, true
+	}, 0},
+	"alt+2": {actTabJump, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.jumpTab(1)
+		return nil, true
+	}, 0},
+	"alt+3": {actTabJump, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.jumpTab(2)
+		return nil, true
+	}, 0},
+	"alt+4": {actTabJump, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.jumpTab(3)
+		return nil, true
+	}, 0},
+	"alt+5": {actTabJump, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.jumpTab(4)
+		return nil, true
+	}, 0},
+	"alt+6": {actTabJump, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.jumpTab(5)
+		return nil, true
+	}, 0},
+	"alt+7": {actTabJump, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.jumpTab(6)
+		return nil, true
+	}, 0},
+	"alt+8": {actTabJump, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.jumpTab(7)
+		return nil, true
+	}, 0},
+	"alt+9": {actTabJump, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+		m.jumpTab(8)
+		return nil, true
+	}, 0},
+	"ctrl+alt+left": {actJumpBack, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// The jump list. A terminal that cannot tell this chord from Alt+←
 		// hands the key to the tab switch above, so the palette's
 		// "Jump Back" / "Jump Forward" are the portable route.
 		m.jumpBack()
 		return nil, true
-	},
-	"ctrl+alt+right": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+right": {actJumpForward, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.jumpForward()
 		return nil, true
-	},
-	"ctrl+tab": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+tab": {actTabMru, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// The MRU tab cycle. A terminal that cannot tell this chord from Tab
 		// hands the key to the indent below, and Windows Terminal sends Ctrl+Tab
 		// to its own tab bar, so Alt+` is the alias that always arrives (ESC +
 		// backquote) and the palette command the portable route.
 		m.mruTab()
 		return nil, true
-	},
-	"alt+`": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+`": {actTabMru, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.mruTab()
 		return nil, true
-	},
-	"ctrl+shift+backspace": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+shift+backspace": {actEditLastChange, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		// Go to the last change. On a terminal that cannot report the chord the
 		// control byte arrives as Ctrl+H — Find & Replace, an overlay Esc
 		// closes. The palette command is the route that never collapses.
 		m.goToLastEdit()
 		return nil, true
-	},
-	"alt+up": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+up": {actLineMoveUp, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.MoveLineUp()
 		return nil, true
-	},
-	"alt+down": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+down": {actLineMoveDown, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.MoveLineDown()
 		return nil, true
-	},
-	"alt+shift+down": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+shift+down": {actEditDuplicateLine, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.DuplicateLine()
 		return nil, true
-	},
-	"alt+shift+up": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"alt+shift+up": {actLineDuplicateUp, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.DuplicateLineUp()
 		return nil, true
-	},
-	"shift+up": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"shift+up": {actSelectLineUp, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.MoveUpWithSelect()
 		return nil, true
-	},
-	"shift+down": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"shift+down": {actSelectLineDown, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.MoveDownWithSelect()
 		return nil, true
-	},
-	"shift+left": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"shift+left": {actSelectCharLeft, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.MoveLeftWithSelect()
 		return nil, true
-	},
-	"shift+right": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"shift+right": {actSelectCharRight, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.MoveRightWithSelect()
 		return nil, true
-	},
-	"ctrl+alt+shift+up": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+shift+up": {actSelectColumnUp, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.growColumnSelection(-1, 0)
 		return nil, true
-	},
-	"ctrl+alt+shift+down": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+shift+down": {actSelectColumnDown, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.growColumnSelection(1, 0)
 		return nil, true
-	},
-	"ctrl+alt+shift+left": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+shift+left": {actSelectColumnLeft, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.growColumnSelection(0, -1)
 		return nil, true
-	},
-	"ctrl+alt+shift+right": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"ctrl+alt+shift+right": {actSelectColumnRight, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.growColumnSelection(0, 1)
 		return nil, true
-	},
-	"shift+home": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"shift+home": {actSelectLineStart, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.LineStartWithSelect()
 		return nil, true
-	},
-	"shift+end": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"shift+end": {actSelectLineEnd, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.LineEndWithSelect()
 		return nil, true
-	},
-	"up": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, 0},
+	"up": {actNavUp, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MoveAllUp()
 		} else {
@@ -696,8 +932,8 @@ var editorBindings = map[string]binding{
 		}
 		m.foldSkip(-1)
 		return nil, true
-	},
-	"down": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, protected},
+	"down": {actNavDown, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MoveAllDown()
 		} else {
@@ -705,48 +941,48 @@ var editorBindings = map[string]binding{
 		}
 		m.foldSkip(1)
 		return nil, true
-	},
-	"left": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, protected},
+	"left": {actNavLeft, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MoveAllLeft()
 		} else {
 			m.cur().buf.MoveLeft()
 		}
 		return nil, true
-	},
-	"right": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, protected},
+	"right": {actNavRight, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MoveAllRight()
 		} else {
 			m.cur().buf.MoveRight()
 		}
 		return nil, true
-	},
-	"home": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, protected},
+	"home": {actNavLineStart, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.LineStart()
 		return nil, true
-	},
-	"end": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, protected},
+	"end": {actNavLineEnd, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.cur().buf.LineEnd()
 		return nil, true
-	},
-	"pgup": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, protected},
+	"pgup": {actNavPageUp, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		t := m.cur()
 		for i := 0; i < m.paneViewHeight(m.activePane)-2 && t.buf.CurLine() > 0; i++ {
 			t.buf.MoveUp()
 			m.foldSkip(-1)
 		}
 		return nil, true
-	},
-	"pgdown": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, protected},
+	"pgdown": {actNavPageDown, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		t := m.cur()
 		for i := 0; i < m.paneViewHeight(m.activePane)-2 && t.buf.CurLine() < t.buf.LineCount()-1; i++ {
 			t.buf.MoveDown()
 			m.foldSkip(1)
 		}
 		return nil, true
-	},
-	"enter": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, protected},
+	"enter": {actEditNewline, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MultiNewline()
 		} else {
@@ -757,8 +993,8 @@ var editorBindings = map[string]binding{
 			return m.ghostTrigger(), true
 		}
 		return nil, true
-	},
-	"backspace": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, protected},
+	"backspace": {actEditBackspace, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MultiBackspace()
 		} else if !deletePair(m.cur().buf) {
@@ -766,8 +1002,8 @@ var editorBindings = map[string]binding{
 		}
 		m.msg = ""
 		return m.triggerCompletion(false), true
-	},
-	"delete": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, protected},
+	"delete": {actEditDelete, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MultiDelete()
 		} else {
@@ -775,8 +1011,8 @@ var editorBindings = map[string]binding{
 		}
 		m.msg = ""
 		return nil, true
-	},
-	"tab": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, protected},
+	"tab": {actEditIndent, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.MultiInsertRune('\t')
 		} else if m.cur().buf.HasSelection() {
@@ -787,14 +1023,14 @@ var editorBindings = map[string]binding{
 		}
 		m.msg = ""
 		return nil, true
-	},
-	"shift+tab": func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+	}, protected},
+	"shift+tab": {actEditUnindent, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		if !m.cur().buf.HasMultipleCursors() {
 			m.cur().buf.UnindentLines("\t")
 		}
 		m.msg = ""
 		return nil, true
-	},
+	}, protected},
 }
 
 // typingFallback is the `default:` arm of the old editor switch: anything that
@@ -821,13 +1057,15 @@ func (m *Model) typingFallback(msg tea.KeyPressMsg) tea.Cmd {
 	return m.triggerCompletion(false)
 }
 
-// runBinding looks a key up in a table and runs it when the key is claimed.
-func (m *Model) runBinding(table map[string]binding, s string, msg tea.KeyPressMsg) (tea.Cmd, bool) {
-	fn, ok := table[s]
+// runBinding looks a key up in a resolved table and runs it when the key is
+// claimed. The table comes from the model's own KeyMap, never from the package
+// defaults, so a rebind that reached this model also reaches every stage.
+func (m *Model) runBinding(table map[string]bindingDef, s string, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	d, ok := table[s]
 	if !ok {
 		return nil, false
 	}
-	return fn(m, msg)
+	return d.fn(m, msg)
 }
 
 func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -899,7 +1137,7 @@ func (m *Model) dispatchKey(s string, msg tea.KeyPressMsg) tea.Cmd {
 	if m.complOpen && m.handleCompletionKey(s) {
 		return nil
 	}
-	if cmd, handled := m.runBinding(globalBindings, s, msg); handled {
+	if cmd, handled := m.runBinding(m.keys.global, s, msg); handled {
 		return cmd
 	}
 	if cmd, handled := m.dispatchPanes(s, msg); handled {
@@ -908,7 +1146,7 @@ func (m *Model) dispatchKey(s string, msg tea.KeyPressMsg) tea.Cmd {
 	if cmd, handled := m.handleTailBindings(s, msg); handled {
 		return cmd
 	}
-	if cmd, handled := m.runBinding(editorBindings, s, msg); handled {
+	if cmd, handled := m.runBinding(m.keys.editor, s, msg); handled {
 		return cmd
 	}
 	return m.typingFallback(msg)
@@ -1059,9 +1297,11 @@ func (m *Model) handleTailBindings(s string, msg tea.KeyPressMsg) (tea.Cmd, bool
 	if m.quitConfirm {
 		return m.handleQuitConfirm(s, msg), true
 	}
-	if len(s) == 5 && strings.HasPrefix(s, "alt+") && s[4] >= '1' && s[4] <= '9' {
-		m.jumpTab(int(s[4] - '1'))
-		return nil, true
+	if m.keys.isTabJump(s) {
+		// The tab commands are about the workspace, so they answer here rather
+		// than at the text-pane stage: a focused picture tab claims every key it
+		// is handed, and alt+digit must not be one of the keys it swallows.
+		return m.runBinding(m.keys.editor, s, msg)
 	}
 	// Plugins get first crack at unhandled keys so they can override built-ins.
 	if m.plugins != nil && m.plugins.HasBinding(s) {

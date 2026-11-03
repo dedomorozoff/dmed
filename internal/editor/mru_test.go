@@ -235,29 +235,42 @@ func TestMRUPaletteCommand(t *testing.T) {
 }
 
 func TestHelpListsMRURow(t *testing.T) {
-	const wantKey = "Ctrl+Tab / Alt+`"
-	found := false
-	for _, e := range helpEntries {
-		if e.keys == wantKey {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("helpEntries is missing the %q row", wantKey)
+	m, _ := mruModel(t)
+	const wantChord = "ctrl+tab"
+	if helpIndexOf(m.helpRows(), wantChord) < 0 {
+		t.Fatalf("the help is missing the %q chord", wantChord)
 	}
 
-	m, _ := mruModel(t)
 	m.width, m.height = 120, 24 // the panel truncates a wide description; see TestHelpListsBracketRows
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyF1})
-	for i, e := range helpEntries {
-		if e.keys == wantKey {
-			m.helpScroll = i
-		}
-	}
+	m.helpScroll = helpIndexOf(m.helpRows(), wantChord)
 	out := m.View().Content
-	for _, want := range []string{wantKey, m.t("help.tab_mru")} {
+	for _, want := range []string{"Ctrl+Tab", "Alt+`", m.t("help.tab_mru")} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("the help must show %q", want)
 		}
+	}
+}
+
+// TestAltDigitJumpsToTabByNumber covers the nine chords as what they are now:
+// table entries sharing the tab.jump action, not a pattern the dispatch chain
+// parses out of the key name. A digit past the last tab changes nothing, so a
+// careless press cannot move the focus to a tab that does not exist.
+func TestAltDigitJumpsToTabByNumber(t *testing.T) {
+	m, _ := mruModel(t)
+	for _, c := range []struct {
+		digit rune
+		want  int
+	}{{'1', 0}, {'2', 1}, {'3', 2}, {'4', 3}} {
+		chord := tea.KeyPressMsg{Code: c.digit, Mod: tea.ModAlt}
+		m = press(m, chord)
+		if got := m.activeTabIndex(); got != c.want {
+			t.Fatalf("%s: active tab %d, want %d", chord.String(), got, c.want)
+		}
+	}
+	before := m.activeTabIndex()
+	m = press(m, tea.KeyPressMsg{Code: '9', Mod: tea.ModAlt})
+	if got := m.activeTabIndex(); got != before {
+		t.Fatalf("a digit past the last tab must be refused, active tab %d, want %d", got, before)
 	}
 }

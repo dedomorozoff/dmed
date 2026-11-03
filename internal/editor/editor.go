@@ -298,6 +298,11 @@ func (t *tab) getDiff() vcs.FileDiff {
 type Model struct {
 	root string
 	cfg  config.Config
+	// keys is this model's resolved chord map. The tables in keys.go are the
+	// defaults and stay read-only; the chain below reads only through here, so a
+	// rebind applies to this model and a hot reload swaps the pointer rather
+	// than editing shared data.
+	keys *KeyMap
 	g    glyphSet // active render glyphs (unicode or ASCII fallback)
 	// syn is the syntax highlighter owned by the model. It was a package-level
 	// variable in internal/syntax, written from Update on config hot-reload
@@ -896,6 +901,7 @@ func New(paths ...string) Model {
 		m.tabs = append(m.tabs, tab{buf: buffer.New()})
 	}
 	m.cfg = config.Load(m.root)
+	m.keys = buildKeyMap()
 	// Create the AI provider up front so chat, inline, and ghost all work even
 	// before the chat panel is first opened (previously ghost silently no-opped
 	// until toggleChat ran).
@@ -1143,7 +1149,7 @@ func (m *Model) scrollHelp(d int) {
 // helpMaxScroll is the maximum help scroll offset so the last row stays
 // visible; 0 when everything already fits.
 func (m Model) helpMaxScroll() int {
-	n := len(helpEntries) + 1 // title row + entries
+	n := len(m.helpRows()) + 1 // title row + entries
 	if h := m.viewHeight(); n > h {
 		return n - h
 	}
@@ -1212,6 +1218,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Hot-reload config when .dmed.conf changes
 		if strings.HasSuffix(path, ".dmed.conf") {
 			m.cfg = config.Load(m.root)
+			m.keys = buildKeyMap()
 			m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
 			// A new highlighter invalidates the per-tab cached lines.
 			m.syn = syntax.New(m.cfg.Editor.SyntaxTheme)

@@ -394,29 +394,19 @@ func TestJumpListPaletteCommands(t *testing.T) {
 }
 
 func TestHelpListsJumpListRow(t *testing.T) {
-	wantKey := "Ctrl+Alt+← / →"
-	found := false
-	for _, e := range helpEntries {
-		if e.keys == wantKey {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("helpEntries is missing the %q row", wantKey)
+	m := jumpModel(t, "aaa\n")
+	const wantChord = "ctrl+alt+left"
+	if helpIndexOf(m.helpRows(), wantChord) < 0 {
+		t.Fatalf("the help is missing the %q chord", wantChord)
 	}
 
-	m := jumpModel(t, "aaa\n")
 	m.width, m.height = 120, 24 // the row's description is wide; see TestHelpListsBracketRows
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyF1})
 	// The row sits in the middle of the list, so scroll the window to it rather
 	// than to the end of it.
-	for i, e := range helpEntries {
-		if e.keys == wantKey {
-			m.helpScroll = i
-		}
-	}
+	m.helpScroll = helpIndexOf(m.helpRows(), wantChord)
 	out := m.View().Content
-	for _, want := range []string{wantKey, m.t("help.jump_list")} {
+	for _, want := range []string{"Ctrl+Alt+←", "Ctrl+Alt+→", m.t("help.jump_list")} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("the help must show %q", want)
 		}

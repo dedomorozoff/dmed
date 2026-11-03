@@ -85,7 +85,7 @@ func (m *Model) macroDispatch(s string, msg tea.KeyPressMsg) tea.Cmd {
 	if cmd, handled := m.handleTailBindings(s, msg); handled {
 		return cmd
 	}
-	if cmd, handled := m.runBinding(editorBindings, s, msg); handled {
+	if cmd, handled := m.runBinding(m.keys.editor, s, msg); handled {
 		m.macroKeys = append(m.macroKeys, macroKey{s: s, msg: msg})
 		return cmd
 	}

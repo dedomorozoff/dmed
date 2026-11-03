@@ -248,27 +248,17 @@ func TestLastEditPaletteCommand(t *testing.T) {
 }
 
 func TestHelpListsLastEditRow(t *testing.T) {
-	const wantKey = "Ctrl+Shift+Backspace"
-	found := false
-	for _, e := range helpEntries {
-		if e.keys == wantKey {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("helpEntries is missing the %q row", wantKey)
+	const wantChord = "ctrl+shift+backspace"
+	m := lastEditModel(t, "aaa\n")
+	if helpIndexOf(m.helpRows(), wantChord) < 0 {
+		t.Fatalf("the help is missing the %q chord", wantChord)
 	}
 
-	m := lastEditModel(t, "aaa\n")
 	m.width, m.height = 120, 24
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyF1})
-	for i, e := range helpEntries {
-		if e.keys == wantKey {
-			m.helpScroll = i
-		}
-	}
+	m.helpScroll = helpIndexOf(m.helpRows(), wantChord)
 	out := m.View().Content
-	for _, want := range []string{wantKey, m.t("help.last_edit")} {
+	for _, want := range []string{"Ctrl+Shift+Backspace", m.t("help.last_edit")} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("the help must show %q", want)
 		}
