@@ -62,21 +62,23 @@ func (m *Model) startFixRequest() {
 // handleFixRequest handles keys while the fix prompt is active (before the AI
 // has responded).
 func (m *Model) handleFixRequest(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc":
+	switch m.paneCmd("fix-ask", s) {
+	case "fix-ask.close":
 		m.aiFixOpen = false
 		m.aiFixBusy = false
 		m.aiFixInput = nil
 		m.msg = ""
 		return nil
-	case "backspace":
+	case "fix-ask.erase":
 		if n := len(m.aiFixInput); n > 0 {
 			m.aiFixInput = m.aiFixInput[:n-1]
 		}
-	case "ctrl+u":
+	case "fix-ask.clear":
 		m.aiFixInput = nil
-	case "enter":
+	case "fix-ask.run":
 		return m.submitFixRequest()
+	case paneUnbound:
+		return nil
 	default:
 		if len(msg.Text) > 0 {
 			m.aiFixInput = append(m.aiFixInput, []rune(msg.Text)...)
@@ -215,13 +217,13 @@ func (m *Model) startFixReview() {
 
 // handleFixReview handles keys while the AI fix diff is shown.
 func (m *Model) handleFixReview(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "y", "enter":
+	switch m.paneCmd("fix-review", s) {
+	case "fix-review.accept":
 		m.applyFixProposal()
 		m.aiFixReviewMode = false
 		m.msg = m.t("ai.fix_applied")
 		return nil
-	case "n", "esc", "r":
+	case "fix-review.reject":
 		m.aiFixProposal = ""
 		m.aiFixReviewRows = nil
 		m.aiFixReviewLeft = nil
@@ -229,37 +231,37 @@ func (m *Model) handleFixReview(s string, msg tea.KeyPressMsg) tea.Cmd {
 		m.aiFixReviewMode = false
 		m.msg = m.t("ai.fix_discarded")
 		return nil
-	case "up", "k":
+	case "fix-review.up":
 		if m.aiFixReviewOffY > 0 {
 			m.aiFixReviewOffY--
 		}
-	case "down", "j":
+	case "fix-review.down":
 		if m.aiFixReviewOffY < len(m.aiFixReviewRows)-1 {
 			m.aiFixReviewOffY++
 		}
-	case "pgup":
+	case "fix-review.page-up":
 		m.aiFixReviewOffY -= m.paneViewHeight(m.activePane) / 2
 		if m.aiFixReviewOffY < 0 {
 			m.aiFixReviewOffY = 0
 		}
-	case "pgdown":
+	case "fix-review.page-down":
 		m.aiFixReviewOffY += m.paneViewHeight(m.activePane) / 2
 		if maxOff := len(m.aiFixReviewRows) - 1; m.aiFixReviewOffY > maxOff {
 			m.aiFixReviewOffY = maxOff
 		}
-	case "home", "g":
+	case "fix-review.top":
 		m.aiFixReviewOffY = 0
-	case "end", "G":
+	case "fix-review.bottom":
 		m.aiFixReviewOffY = len(m.aiFixReviewRows) - 1
 		if m.aiFixReviewOffY < 0 {
 			m.aiFixReviewOffY = 0
 		}
-	case "left", "h":
+	case "fix-review.scroll-left":
 		m.aiFixReviewOffX -= 8
 		if m.aiFixReviewOffX < 0 {
 			m.aiFixReviewOffX = 0
 		}
-	case "right", "l":
+	case "fix-review.scroll-right":
 		m.aiFixReviewOffX += 8
 	}
 	return nil

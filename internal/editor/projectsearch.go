@@ -429,25 +429,27 @@ func (m *Model) handleProjSearch(s string, msg tea.KeyPressMsg) tea.Cmd {
 	if m.projSearchInput {
 		return m.handleProjSearchInput(s, msg)
 	}
-	switch s {
-	case "esc", "ctrl+c":
+	switch m.paneCmd("proj-search", s) {
+	case "proj-search.close":
 		m.stopProjectSearch()
-	case "up", "k", "ctrl+p":
+	case "proj-search.up":
 		if n := len(m.projSearchHits); n > 0 {
 			m.jumpProjSel((m.projSearchSel - 1 + n) % n)
 		}
-	case "pgup":
+	case "proj-search.page-up":
 		m.jumpProjSel(m.projSearchSel - projSearchVisible)
-	case "pgdown":
+	case "proj-search.page-down":
 		m.jumpProjSel(m.projSearchSel + projSearchVisible)
-	case "down", "j", "ctrl+n":
+	case "proj-search.down":
 		if n := len(m.projSearchHits); n > 0 {
 			m.jumpProjSel((m.projSearchSel + 1) % n)
 		}
-	case "enter":
+	case "proj-search.open":
 		if i := m.projSearchSel; len(m.projSearchHits) > 0 && i < len(m.projSearchHits) {
 			m.openProjHit(m.projSearchHits[i])
 		}
+	case paneUnbound:
+		return nil
 	default:
 		// Typing over the results goes back into the prompt with the query.
 		if len(msg.Text) > 0 {
@@ -459,17 +461,19 @@ func (m *Model) handleProjSearch(s string, msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *Model) handleProjSearchInput(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc":
+	switch m.paneCmd("proj-search-input", s) {
+	case "proj-search-input.close":
 		m.stopProjectSearch()
-	case "tab":
+	case "proj-search-input.toggle-regex":
 		m.projSearchRegex = !m.projSearchRegex
-	case "enter":
+	case "proj-search-input.run":
 		return m.runProjectSearch()
-	case "backspace":
+	case "proj-search-input.erase":
 		if n := len(m.projSearchQ); n > 0 {
 			m.projSearchQ = m.projSearchQ[:n-1]
 		}
+	case paneUnbound:
+		return nil
 	default:
 		if len(msg.Text) > 0 {
 			m.projSearchQ = append(m.projSearchQ, []rune(msg.Text)...)

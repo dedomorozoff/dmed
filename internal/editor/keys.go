@@ -1339,8 +1339,8 @@ func (m *Model) handleTailBindings(s string, msg tea.KeyPressMsg) (tea.Cmd, bool
 // changed on disk while its buffer was dirty. Merge conflicts are a different
 // thing and are resolved in the buffer itself (see mergeconflict.go).
 func (m *Model) handleConflict(s string) tea.Cmd {
-	switch s {
-	case "r", "R":
+	switch m.paneCmd("conflict", s) {
+	case "conflict.reload":
 		for i := range m.tabs {
 			t := &m.tabs[i]
 			absT, _ := filepath.Abs(t.path)
@@ -1357,43 +1357,43 @@ func (m *Model) handleConflict(s string) tea.Cmd {
 		m.conflictOpen = false
 		m.conflictRows = nil
 		return nil
-	case "i", "I", "esc":
+	case "conflict.keep":
 		m.conflictOpen = false
 		m.conflictRows = nil
 		m.msg = m.t("msg.kept")
 		return nil
-	case "up", "k":
+	case "conflict.up":
 		if m.conflictOffY > 0 {
 			m.conflictOffY--
 		}
-	case "down", "j":
+	case "conflict.down":
 		if m.conflictOffY < len(m.conflictRows)-1 {
 			m.conflictOffY++
 		}
-	case "pgup":
+	case "conflict.page-up":
 		m.conflictOffY -= m.paneViewHeight(m.activePane) / 2
 		if m.conflictOffY < 0 {
 			m.conflictOffY = 0
 		}
-	case "pgdown":
+	case "conflict.page-down":
 		m.conflictOffY += m.paneViewHeight(m.activePane) / 2
 		maxOff := len(m.conflictRows) - 1
 		if m.conflictOffY > maxOff {
 			m.conflictOffY = maxOff
 		}
-	case "home", "g":
+	case "conflict.top":
 		m.conflictOffY = 0
-	case "end", "G":
+	case "conflict.bottom":
 		m.conflictOffY = len(m.conflictRows) - 1
 		if m.conflictOffY < 0 {
 			m.conflictOffY = 0
 		}
-	case "left", "h":
+	case "conflict.scroll-left":
 		m.conflictOffX -= 8
 		if m.conflictOffX < 0 {
 			m.conflictOffX = 0
 		}
-	case "right", "l":
+	case "conflict.scroll-right":
 		m.conflictOffX += 8
 	}
 	return nil

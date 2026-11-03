@@ -23,31 +23,33 @@ func (m *Model) startReplace() {
 }
 
 func (m *Model) handleSearch(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc":
+	switch m.paneCmd("find", s) {
+	case "find.close":
 		m.searchOpen = false
 		m.replaceOpen = false
 		m.msg = ""
-	case "enter", "f3", "down", "ctrl+n":
+	case "find.next":
 		if len(m.searchQuery) > 0 {
 			m.updateSearchMatches(true)
 		}
-	case "shift+f3", "up", "ctrl+p":
+	case "find.prev":
 		if len(m.searchQuery) > 0 {
 			m.findPrev()
 		}
-	case "ctrl+h":
+	case "find.replace":
 		m.startReplace()
-	case "tab":
+	case "find.regex":
 		// Regex mode toggle. Applies to this prompt and to Ctrl+H replace
 		// (same query); the hint row shows the (.* state.
 		m.searchRegex = !m.searchRegex
 		m.updateSearchMatches(false)
-	case "backspace":
+	case "find.erase":
 		if n := len(m.searchQuery); n > 0 {
 			m.searchQuery = m.searchQuery[:n-1]
 			m.updateSearchMatches(false)
 		}
+	case paneUnbound:
+		return nil
 	default:
 		if len(msg.Text) > 0 {
 			m.searchQuery = append(m.searchQuery, []rune(msg.Text)...)
@@ -58,26 +60,26 @@ func (m *Model) handleSearch(s string, msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *Model) handleReplace(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc":
+	switch m.paneCmd("replace", s) {
+	case "replace.close":
 		m.searchOpen = false
 		m.replaceOpen = false
 		m.msg = ""
-	case "tab":
+	case "replace.focus":
 		m.replaceFocusFind = !m.replaceFocusFind
-	case "ctrl+a":
+	case "replace.all":
 		m.doReplaceAll()
-	case "enter":
+	case "replace.accept":
 		if m.replaceFocusFind {
 			m.updateSearchMatches(true)
 		} else {
 			m.doReplace()
 		}
-	case "f3", "down", "ctrl+n":
+	case "replace.next":
 		m.updateSearchMatches(true)
-	case "shift+f3", "up", "ctrl+p":
+	case "replace.prev":
 		m.findPrev()
-	case "backspace":
+	case "replace.erase":
 		if m.replaceFocusFind {
 			if n := len(m.searchQuery); n > 0 {
 				m.searchQuery = m.searchQuery[:n-1]
@@ -88,6 +90,8 @@ func (m *Model) handleReplace(s string, msg tea.KeyPressMsg) tea.Cmd {
 				m.replaceWith = m.replaceWith[:n-1]
 			}
 		}
+	case paneUnbound:
+		return nil
 	default:
 		if len(msg.Text) > 0 {
 			if m.replaceFocusFind {

@@ -203,12 +203,12 @@ func (m Model) hasDirty() bool {
 func (m *Model) handleQuitConfirm(s string, msg tea.KeyPressMsg) tea.Cmd {
 	// keyOf names the physical key, so the y/n answer works in any keyboard
 	// layout (н/т are the Y/N keys on ЙЦУКЕН).
-	switch s {
-	case "esc":
+	switch m.paneCmd("quit-confirm", s) {
+	case "quit-confirm.close":
 		m.quitConfirm = false
 		m.pendingQuit = false
 		m.quitTab = false
-	case "y", "Y":
+	case "quit-confirm.accept":
 		t := m.cur()
 		if t.path == "" {
 			m.pendingQuit = true
@@ -241,7 +241,7 @@ func (m *Model) handleQuitConfirm(s string, msg tea.KeyPressMsg) tea.Cmd {
 		}
 		m.shutdown()
 		return tea.Quit
-	case "n", "N":
+	case "quit-confirm.decline":
 		m.quitConfirm = false
 		m.pendingQuit = false
 		m.quitTab = false

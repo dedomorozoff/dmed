@@ -141,28 +141,28 @@ func (m *Model) acceptCompletion() {
 
 // handleCompletionKey processes navigation keys while the popup is open. It
 // returns true when the key was consumed.
-func (m *Model) handleCompletionKey(key string) bool {
+func (m *Model) handleCompletionKey(s string) bool {
 	n := len(m.complItems)
-	switch key {
-	case "esc":
+	switch m.paneCmd("completion", s) {
+	case "completion.close":
 		m.closeCompletion()
 		return true
-	case "tab", "enter":
+	case "completion.accept":
 		m.acceptCompletion()
 		return true
-	case "up", "ctrl+p":
+	case "completion.up":
 		if n > 0 {
 			m.complSel = (m.complSel - 1 + n) % n
 			m.clampCompletion()
 		}
 		return true
-	case "down", "ctrl+n":
+	case "completion.down":
 		if n > 0 {
 			m.complSel = (m.complSel + 1) % n
 			m.clampCompletion()
 		}
 		return true
-	case "pgup":
+	case "completion.page-up":
 		if n > 0 {
 			m.complSel -= complVisible
 			if m.complSel < 0 {
@@ -171,7 +171,7 @@ func (m *Model) handleCompletionKey(key string) bool {
 			m.clampCompletion()
 		}
 		return true
-	case "pgdown":
+	case "completion.page-down":
 		if n > 0 {
 			m.complSel += complVisible
 			if m.complSel > n-1 {
@@ -180,7 +180,7 @@ func (m *Model) handleCompletionKey(key string) bool {
 			m.clampCompletion()
 		}
 		return true
-	case "left", "right", "home", "end":
+	case "completion.caret":
 		m.closeCompletion()
 		return false
 	}

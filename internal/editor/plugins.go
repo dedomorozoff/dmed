@@ -110,21 +110,21 @@ func (m Model) pluginInstalled(file string) bool {
 // handlePluginStore handles keys while the plugin store is open.
 func (m *Model) handlePluginStore(s string) tea.Cmd {
 	items := m.storeItems
-	switch s {
-	case "esc":
+	switch m.paneCmd("plugin-store", s) {
+	case "plugin-store.close":
 		m.pluginStoreOpen = false
-	case "enter":
+	case "plugin-store.run":
 		if m.pluginStoreSel >= 0 && m.pluginStoreSel < len(items) {
 			it := items[m.pluginStoreSel]
 			m.pluginStoreOpen = false
 			return m.activateStoreItem(it)
 		}
 		m.pluginStoreOpen = false
-	case "up", "k":
+	case "plugin-store.up":
 		if len(items) > 0 {
 			m.pluginStoreSel = (m.pluginStoreSel - 1 + len(items)) % len(items)
 		}
-	case "down", "j":
+	case "plugin-store.down":
 		if len(items) > 0 {
 			m.pluginStoreSel = (m.pluginStoreSel + 1) % len(items)
 		}

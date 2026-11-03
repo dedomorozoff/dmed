@@ -55,13 +55,12 @@ func showsDigitInRange(keys, chord string) bool {
 
 // TestResolveKeysIdentity is the migration proof: resolving the map with nothing
 // in the [keys] section must not change one fact about the tables. Every chord
-// keeps its action, and the inverse index — which the hand-written tables could
-// not express — has to hold exactly the chords that are bound, including the
-// aliases.
+// keeps its action, the panes keep theirs, and the inverse index — which the
+// hand-written tables could not express — has to hold exactly the chords that are
+// bound, including the aliases.
 func TestResolveKeysIdentity(t *testing.T) {
 	k := ResolveKeys(config.Config{})
 
-	total := 0
 	for name, table := range map[string]map[string]bindingDef{
 		"global": globalBindings,
 		"editor": editorBindings,
@@ -70,7 +69,6 @@ func TestResolveKeysIdentity(t *testing.T) {
 		if name == "editor" {
 			resolved = k.editor
 		}
-		total += len(table)
 		if len(resolved) != len(table) {
 			t.Fatalf("%s: resolved %d chords, table has %d", name, len(resolved), len(table))
 		}
@@ -85,13 +83,53 @@ func TestResolveKeysIdentity(t *testing.T) {
 			}
 		}
 	}
-	// The index holds nothing the tables did not bind.
-	n := 0
-	for _, list := range k.acts {
-		n += len(list)
+	// The pane stage, chord by chord: an untouched resolution is the declaration.
+	for p, table := range k.pane {
+		if len(table) != len(paneDefaults[p]) {
+			t.Fatalf("pane %s: resolved %d chords, the declaration binds %d",
+				p, len(table), len(paneDefaults[p]))
+		}
+		for chord, act := range table {
+			if want := paneDefaults[p][chord]; want != act {
+				t.Fatalf("pane %s: chord %q resolves to %q, not to the %q it ships as",
+					p, chord, act, want)
+			}
+		}
 	}
-	if n != total {
-		t.Fatalf("the inverse index holds %d chords, the tables bind %d", n, total)
+	// The index holds nothing the stages did not bind, and holds everything they
+	// bound. Compared as sets rather than as a total, because the pane stage and
+	// the tables can hand the same chord to the same command and the index lists a
+	// command's chords once.
+	want := map[keyAct]map[string]bool{}
+	bind := func(act keyAct, chord string) {
+		if want[act] == nil {
+			want[act] = map[string]bool{}
+		}
+		want[act][chord] = true
+	}
+	for _, table := range []map[string]bindingDef{globalBindings, editorBindings} {
+		for chord, d := range table {
+			bind(d.act, chord)
+		}
+	}
+	for _, table := range paneDefaults {
+		for chord, act := range table {
+			bind(act, chord)
+		}
+	}
+	if len(k.acts) != len(want) {
+		t.Fatalf("the index lists %d commands, the stages bind %d", len(k.acts), len(want))
+	}
+	for act, chords := range want {
+		got := k.acts[act]
+		if len(got) != len(chords) {
+			t.Fatalf("%s: the index holds %q, the stages bind %d chords", act, got, len(chords))
+		}
+		for _, chord := range got {
+			if !chords[chord] {
+				t.Fatalf("%s: the index holds chord %q that no stage binds", act, chord)
+			}
+		}
 	}
 
 	// Aliases, spelled out: these are the pairs the tables have always carried

@@ -204,16 +204,16 @@ func (m *Model) handleAskKey(s string, msg tea.KeyPressMsg) tea.Cmd {
 	if req == nil {
 		return nil
 	}
-	switch s {
-	case "esc":
+	switch m.paneCmd("ask", s) {
+	case "ask.close":
 		return m.finishChatAsk("", true)
-	case "enter":
+	case "ask.run":
 		answer := strings.TrimSpace(string(m.askIn))
 		if answer == "" && len(req.Choices) > 0 && m.askSel >= 0 && m.askSel < len(req.Choices) {
 			answer = req.Choices[m.askSel]
 		}
 		return m.finishChatAsk(answer, false)
-	case "up", "k":
+	case "ask.up":
 		if len(req.Choices) > 0 {
 			m.askSel--
 			if m.askSel < 0 {
@@ -221,7 +221,7 @@ func (m *Model) handleAskKey(s string, msg tea.KeyPressMsg) tea.Cmd {
 			}
 		}
 		return nil
-	case "down", "j":
+	case "ask.down":
 		if len(req.Choices) > 0 {
 			m.askSel++
 			if m.askSel >= len(req.Choices) {
@@ -229,14 +229,14 @@ func (m *Model) handleAskKey(s string, msg tea.KeyPressMsg) tea.Cmd {
 			}
 		}
 		return nil
-	case "tab":
+	case "ask.pick":
 		// Tab picks the highlighted choice into the input, so it can be edited
 		// before submitting.
 		if len(req.Choices) > 0 && m.askSel >= 0 && m.askSel < len(req.Choices) {
 			m.askIn = []rune(req.Choices[m.askSel])
 		}
 		return nil
-	case "backspace":
+	case "ask.erase":
 		if n := len(m.askIn); n > 0 {
 			m.askIn = m.askIn[:n-1]
 		}

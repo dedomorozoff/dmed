@@ -94,25 +94,27 @@ func (m *Model) clampDiffScroll(h int) {
 
 func (m *Model) handleDiffView(s string) tea.Cmd {
 	h := m.viewHeight()
-	switch s {
-	case "esc", "q", "d":
+	switch m.paneCmd("diff", s) {
+	case "diff.close":
 		m.closeDiffView()
-	case "up", "k":
+	case "diff.up":
 		m.diffOffsetY--
-	case "down", "j":
+	case "diff.down":
 		m.diffOffsetY++
-	case "pgup":
+	case "diff.page-up":
 		m.diffOffsetY -= h
-	case "pgdown":
+	case "diff.page-down":
 		m.diffOffsetY += h
-	case "home", "g":
+	case "diff.top":
 		m.diffOffsetY = 0
-	case "end", "G":
+	case "diff.bottom":
 		m.diffOffsetY = len(m.diffRows)
-	case "left", "h":
+	case "diff.scroll-left":
 		m.diffOffsetX -= 8
-	case "right", "l":
+	case "diff.scroll-right":
 		m.diffOffsetX += 8
+	case paneUnbound:
+		return nil
 	default:
 		return nil
 	}

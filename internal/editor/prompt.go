@@ -56,14 +56,14 @@ func (m *Model) startSavePrompt() {
 }
 
 func (m *Model) handlePrompt(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc":
+	switch m.paneCmd("prompt", s) {
+	case "prompt.close":
 		m.promptOpen = false
 		m.promptNewFile = false
 		m.promptNewFolder = false
 		m.promptRename = false
 		m.promptRenameRel = ""
-	case "enter":
+	case "prompt.run":
 		path := strings.TrimSpace(string(m.promptIn))
 		newFolder := m.promptNewFolder
 		renameRel := m.promptRenameRel
@@ -92,10 +92,12 @@ func (m *Model) handlePrompt(s string, msg tea.KeyPressMsg) tea.Cmd {
 			m.rebuildTree()
 			m.refreshGitFiles()
 		}
-	case "backspace":
+	case "prompt.erase":
 		if n := len(m.promptIn); n > 0 {
 			m.promptIn = m.promptIn[:n-1]
 		}
+	case paneUnbound:
+		return nil
 	default:
 		if len(msg.Text) > 0 {
 			m.promptIn = append(m.promptIn, []rune(msg.Text)...)
@@ -105,11 +107,11 @@ func (m *Model) handlePrompt(s string, msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *Model) handleSavePrompt(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc":
+	switch m.paneCmd("save-prompt", s) {
+	case "save-prompt.close":
 		m.promptSave = false
 		m.pendingQuit = false
-	case "enter":
+	case "save-prompt.run":
 		raw := strings.TrimSpace(string(m.promptSaveIn))
 		m.promptSave = false
 		if raw != "" {
@@ -137,10 +139,12 @@ func (m *Model) handleSavePrompt(s string, msg tea.KeyPressMsg) tea.Cmd {
 				return tea.Quit
 			}
 		}
-	case "backspace":
+	case "save-prompt.erase":
 		if n := len(m.promptSaveIn); n > 0 {
 			m.promptSaveIn = m.promptSaveIn[:n-1]
 		}
+	case paneUnbound:
+		return nil
 	default:
 		if len(msg.Text) > 0 {
 			m.promptSaveIn = append(m.promptSaveIn, []rune(msg.Text)...)
@@ -158,23 +162,25 @@ func (m *Model) startGotoPrompt() {
 // handleGoto handles input in the "Go to Line" prompt. Accepts absolute
 // (N, or N:C) and relative (+N/-N, or +N:C/-N:C) line specs.
 func (m *Model) handleGoto(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc":
+	switch m.paneCmd("goto", s) {
+	case "goto.close":
 		m.gotoOpen = false
 		m.msg = ""
-	case "enter":
+	case "goto.run":
 		s := strings.TrimSpace(string(m.gotoIn))
 		m.gotoOpen = false
 		m.msg = ""
 		if s != "" {
 			m.applyGoto(s)
 		}
-	case "backspace":
+	case "goto.erase":
 		if n := len(m.gotoIn); n > 0 {
 			m.gotoIn = m.gotoIn[:n-1]
 		}
-	case "ctrl+l":
+	case "goto.clear":
 		m.gotoIn = nil
+	case paneUnbound:
+		return nil
 	default:
 		if len(msg.Text) > 0 {
 			for _, r := range msg.Text {

@@ -240,6 +240,15 @@ are protected and stay where they are: the escape hatch, the guaranteed exit and
 the movement keys are what the rest of the editor is built around. A remap applies
 to macro playback too, since a replay runs the same dispatch chain as a live key.
 
+The panels are named as well, and the prefix is the panel: `find.next` is Enter in
+the `Ctrl+F` prompt, `tree.open` is Enter in the file tree, `agent-review.accept`
+is `y` in the diff review, `dap.grow` is `+` in the debug panel. They appear in the
+same `--dump-keys actions` list, so there is one place to look for a name. A chord a
+panel no longer answers is swallowed rather than typed — unbinding `finder.erase`
+leaves Backspace doing nothing in the finder, not writing a backspace into the
+query the way an unhandled key would. Each panel's own escape hatch and the `y`/`n`
+a review is answered with are protected like the chords above.
+
 ## Configuration
 
 `.dmed.conf` in your home directory (global) or project root (project wins), hot-reload on save.

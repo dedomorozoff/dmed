@@ -124,18 +124,20 @@ func (m *Model) commitDAPField() {
 // handleDAPCfg routes keys while the DAP settings wizard is open.
 func (m *Model) handleDAPCfg(s string, msg tea.KeyPressMsg) tea.Cmd {
 	if m.dapCfgEdit {
-		switch s {
-		case "esc":
+		switch m.paneCmd("dap-cfg-field", s) {
+		case "dap-cfg-field.close":
 			m.dapCfgEdit = false
 			m.dapCfgIn = nil
-		case "enter":
+		case "dap-cfg-field.run":
 			m.commitDAPField()
 			m.dapCfgEdit = false
 			m.dapCfgIn = nil
-		case "backspace":
+		case "dap-cfg-field.erase":
 			if n := len(m.dapCfgIn); n > 0 {
 				m.dapCfgIn = m.dapCfgIn[:n-1]
 			}
+		case paneUnbound:
+			return nil
 		default:
 			if len(msg.Text) > 0 {
 				m.dapCfgIn = append(m.dapCfgIn, []rune(msg.Text)...)
@@ -144,19 +146,19 @@ func (m *Model) handleDAPCfg(s string, msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
-	switch s {
-	case "esc":
+	switch m.paneCmd("dap-cfg", s) {
+	case "dap-cfg.close":
 		m.dapCfgOpen = false
 		m.dapCfgIn = nil
-	case "j", "down":
+	case "dap-cfg.next":
 		m.dapCfgField = (m.dapCfgField + 1) % len(dapSettingsFields)
-	case "k", "up":
+	case "dap-cfg.prev":
 		m.dapCfgField = (m.dapCfgField - 1 + len(dapSettingsFields)) % len(dapSettingsFields)
-	case "left":
+	case "dap-cfg.choice-prev":
 		m.cycleDAPChoice(m.dapCfgField, -1)
-	case "right":
+	case "dap-cfg.choice-next":
 		m.cycleDAPChoice(m.dapCfgField, 1)
-	case "enter":
+	case "dap-cfg.open":
 		switch dapSettingsFields[m.dapCfgField].kind {
 		case "choice", "bool":
 			m.cycleDAPChoice(m.dapCfgField, 1)
@@ -164,7 +166,7 @@ func (m *Model) handleDAPCfg(s string, msg tea.KeyPressMsg) tea.Cmd {
 			m.dapCfgEdit = true
 			m.dapCfgIn = []rune(m.dapFieldValue(m.dapCfgField))
 		}
-	case "ctrl+s":
+	case "dap-cfg.save":
 		m.saveDAPCfg()
 	}
 	return nil

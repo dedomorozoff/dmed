@@ -337,30 +337,30 @@ func (m *Model) scrollImage(dir int) {
 // tabs, scrolling a tall picture, and the global bindings handled before this
 // point.
 func (m *Model) handleImageKey(s string) tea.Cmd {
-	switch s {
-	case "alt+left":
+	switch m.paneCmd("image", s) {
+	case "image.prev-tab":
 		m.switchTab(-1)
-	case "alt+right":
+	case "image.next-tab":
 		m.switchTab(1)
-	case "ctrl+s":
+	case "image.save":
 		m.msg = m.t("msg.image_readonly")
-	case "alt+[":
+	case "image.prev-hunk":
 		m.jumpHunk(-1)
-	case "alt+]":
+	case "image.next-hunk":
 		m.jumpHunk(1)
-	case "up", "k":
+	case "image.up":
 		m.scrollImage(-1)
-	case "down", "j":
+	case "image.down":
 		m.scrollImage(1)
-	case "pgup":
+	case "image.page-up":
 		m.scrollImage(-max(1, m.paneContentHeight(m.activePane)/2))
-	case "pgdown":
+	case "image.page-down":
 		m.scrollImage(max(1, m.paneContentHeight(m.activePane)/2))
-	case "home", "g":
+	case "image.top":
 		m.scrollImage(-1 << 30)
-	case "end", "G":
+	case "image.bottom":
 		m.scrollImage(1 << 30)
-	case "ctrl+v":
+	case "image.paste":
 		// The paste verb means something on a selection and nothing here;
 		// falling through to the buffer would paste text into a picture tab.
 		m.msg = m.t("msg.image_readonly")

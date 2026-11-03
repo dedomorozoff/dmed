@@ -115,51 +115,51 @@ func (m *Model) folderUse() {
 
 // handleFolderBrowser routes keys while the built-in folder picker is open.
 func (m *Model) handleFolderBrowser(s string) tea.Cmd {
-	switch s {
-	case "esc":
+	switch m.paneCmd("folder", s) {
+	case "folder.close":
 		m.folderOpen = false
-	case "enter", "right":
+	case "folder.open":
 		m.folderEnter()
-	case "left", "backspace":
+	case "folder.parent":
 		m.folderUp()
-	case "o":
+	case "folder.use":
 		m.folderUse()
-	case "up":
+	case "folder.up":
 		if m.folderSel > 0 {
 			m.folderSel--
 			m.clampFolder()
 		}
-	case "down":
+	case "folder.down":
 		if m.folderSel < len(m.folderEntries) {
 			m.folderSel++
 			m.clampFolder()
 		}
-	case "pgup":
+	case "folder.page-up":
 		m.folderSel -= folderVisible
 		if m.folderSel < 0 {
 			m.folderSel = 0
 		}
 		m.clampFolder()
-	case "pgdown":
+	case "folder.page-down":
 		m.folderSel += folderVisible
 		if m.folderSel > len(m.folderEntries) {
 			m.folderSel = len(m.folderEntries)
 		}
 		m.clampFolder()
-	case "home":
+	case "folder.top":
 		m.folderSel = 0
 		m.folderOffset = 0
-	case "end":
+	case "folder.bottom":
 		m.folderSel = len(m.folderEntries)
 		m.clampFolder()
-	case "~":
+	case "folder.home-dir":
 		if home, err := os.UserHomeDir(); err == nil {
 			m.folderPath = filepath.Clean(home)
 			m.folderSel = 0
 			m.folderOffset = 0
 			m.folderRefresh()
 		}
-	case "/":
+	case "folder.root-dir":
 		m.folderPath = filepath.Clean(filepath.VolumeName(m.folderPath) + string(filepath.Separator))
 		m.folderSel = 0
 		m.folderOffset = 0

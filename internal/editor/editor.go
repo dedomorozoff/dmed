@@ -1094,10 +1094,10 @@ func (m *Model) pasteInput(text string) {
 }
 
 func (m *Model) handleFinder(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc":
+	switch m.paneCmd("finder", s) {
+	case "finder.close":
 		m.finderOpen = false
-	case "enter":
+	case "finder.run":
 		if n := len(m.finderHits); n > 0 {
 			path := m.finderHits[m.finderSel]
 			m.finderOpen = false
@@ -1105,19 +1105,21 @@ func (m *Model) handleFinder(s string, msg tea.KeyPressMsg) tea.Cmd {
 		} else {
 			m.finderOpen = false
 		}
-	case "up":
+	case "finder.up":
 		if n := len(m.finderHits); n > 0 {
 			m.finderSel = (m.finderSel - 1 + n) % n
 		}
-	case "down":
+	case "finder.down":
 		if n := len(m.finderHits); n > 0 {
 			m.finderSel = (m.finderSel + 1) % n
 		}
-	case "backspace":
+	case "finder.erase":
 		if n := len(m.finderQ); n > 0 {
 			m.finderQ = m.finderQ[:n-1]
 			m.refind()
 		}
+	case paneUnbound:
+		return nil
 	default:
 		if len(msg.Text) > 0 {
 			m.finderQ = append(m.finderQ, []rune(msg.Text)...)
@@ -1128,16 +1130,16 @@ func (m *Model) handleFinder(s string, msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *Model) handleHelp(s string) tea.Cmd {
-	switch s {
-	case "esc", "f1", "ctrl+e", "q":
+	switch m.paneCmd("help", s) {
+	case "help.close":
 		m.helpOpen = false
-	case "j", "down", "pgdown":
+	case "help.down":
 		m.scrollHelp(1)
-	case "k", "up", "pgup":
+	case "help.up":
 		m.scrollHelp(-1)
-	case "g", "home":
+	case "help.top":
 		m.helpScroll = 0
-	case "G", "end":
+	case "help.bottom":
 		m.helpScroll = m.helpMaxScroll()
 	}
 	return nil
@@ -1861,19 +1863,19 @@ func (m *Model) openLangChooser() {
 // handleLangChooser handles keys while the language chooser is open.
 func (m *Model) handleLangChooser(s string) tea.Cmd {
 	langs := i18n.Supported()
-	switch s {
-	case "esc":
+	switch m.paneCmd("lang", s) {
+	case "lang.close":
 		m.langChooserOpen = false
-	case "enter":
+	case "lang.run":
 		if m.langChooserSel >= 0 && m.langChooserSel < len(langs) {
 			m.setLang(langs[m.langChooserSel].Code)
 		}
 		m.langChooserOpen = false
-	case "up", "k":
+	case "lang.up":
 		if len(langs) > 0 {
 			m.langChooserSel = (m.langChooserSel - 1 + len(langs)) % len(langs)
 		}
-	case "down", "j":
+	case "lang.down":
 		if len(langs) > 0 {
 			m.langChooserSel = (m.langChooserSel + 1) % len(langs)
 		}

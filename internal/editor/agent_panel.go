@@ -196,11 +196,11 @@ func (m *Model) startAgentTaskPrompt() tea.Cmd {
 
 // handleAgentPrompt handles text entry for a new task prompt.
 func (m *Model) handleAgentPrompt(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc":
+	switch m.paneCmd("agent-prompt", s) {
+	case "agent-prompt.close":
 		m.agentPrompt = false
 		m.agentPromptIn = nil
-	case "enter":
+	case "agent-prompt.run":
 		prompt := strings.TrimSpace(string(m.agentPromptIn))
 		if prompt == "" {
 			m.agentPrompt = false
@@ -210,10 +210,12 @@ func (m *Model) handleAgentPrompt(s string, msg tea.KeyPressMsg) tea.Cmd {
 		m.agentPrompt = false
 		m.agentPromptIn = nil
 		m.msg = m.t("msg.agent_queued")
-	case "backspace":
+	case "agent-prompt.erase":
 		if n := len(m.agentPromptIn); n > 0 {
 			m.agentPromptIn = m.agentPromptIn[:n-1]
 		}
+	case paneUnbound:
+		return nil
 	default:
 		if len(msg.Text) > 0 {
 			m.agentPromptIn = append(m.agentPromptIn, []rune(msg.Text)...)
@@ -224,34 +226,34 @@ func (m *Model) handleAgentPrompt(s string, msg tea.KeyPressMsg) tea.Cmd {
 
 // handleAgent handles keys while the agent panel is focused.
 func (m *Model) handleAgent(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc":
+	switch m.paneCmd("agent", s) {
+	case "agent.close":
 		m.agentOpen = false
 		m.agentFocus = false
 		m.msg = ""
-	case "tab":
+	case "agent.blur":
 		// Move focus back to the editor; the panel stays open in the sidebar.
 		m.agentFocus = false
 		m.msg = ""
-	case "j", "down":
+	case "agent.down":
 		m.agentSel++
 		m.clampAgentSel()
-	case "k", "up":
+	case "agent.up":
 		m.agentSel--
 		m.clampAgentSel()
-	case "g", "home":
+	case "agent.top":
 		m.agentSel = 0
-	case "G", "end":
+	case "agent.bottom":
 		m.agentSel = len(m.agentQueue.Snapshot()) - 1
 		m.clampAgentSel()
-	case "x", "ctrl+d":
+	case "agent.cancel":
 		m.cancelAgentSel()
-	case "enter":
+	case "agent.review":
 		m.reviewAgentSel()
-	case "n":
+	case "agent.new-task":
 		m.agentPrompt = true
 		m.agentPromptIn = nil
-	case "u", "U":
+	case "agent.revert":
 		m.undoLastAgentApply()
 	}
 	return nil
@@ -486,55 +488,55 @@ func (m *Model) loadAgentChange(idx int) {
 func (m *Model) handleAgentReview(s string, msg tea.KeyPressMsg) tea.Cmd {
 	task, _ := m.agentQueue.Find(m.agentReviewTaskID)
 	n := len(task.Changes)
-	switch s {
-	case "y", "enter", "a":
+	switch m.paneCmd("agent-review", s) {
+	case "agent-review.accept":
 		m.acceptAgentReview()
-	case "n", "esc", "r":
+	case "agent-review.reject":
 		m.rejectAgentReview()
-	case "tab":
+	case "agent-review.next-change":
 		if n > 0 {
 			m.agentReviewChange = (m.agentReviewChange + 1) % n
 			m.loadAgentChange(m.agentReviewChange)
 			m.msg = ""
 		}
-	case "shift+tab":
+	case "agent-review.prev-change":
 		if n > 0 {
 			m.agentReviewChange = (m.agentReviewChange - 1 + n) % n
 			m.loadAgentChange(m.agentReviewChange)
 			m.msg = ""
 		}
-	case "up", "k":
+	case "agent-review.up":
 		if m.agentReviewOffY > 0 {
 			m.agentReviewOffY--
 		}
-	case "down", "j":
+	case "agent-review.down":
 		if m.agentReviewOffY < len(m.agentReviewRows)-1 {
 			m.agentReviewOffY++
 		}
-	case "pgup":
+	case "agent-review.page-up":
 		m.agentReviewOffY -= m.paneViewHeight(m.activePane) / 2
 		if m.agentReviewOffY < 0 {
 			m.agentReviewOffY = 0
 		}
-	case "pgdown":
+	case "agent-review.page-down":
 		m.agentReviewOffY += m.paneViewHeight(m.activePane) / 2
 		maxOff := len(m.agentReviewRows) - 1
 		if m.agentReviewOffY > maxOff {
 			m.agentReviewOffY = maxOff
 		}
-	case "home", "g":
+	case "agent-review.top":
 		m.agentReviewOffY = 0
-	case "end", "G":
+	case "agent-review.bottom":
 		m.agentReviewOffY = len(m.agentReviewRows) - 1
 		if m.agentReviewOffY < 0 {
 			m.agentReviewOffY = 0
 		}
-	case "left", "h":
+	case "agent-review.scroll-left":
 		m.agentReviewOffX -= 8
 		if m.agentReviewOffX < 0 {
 			m.agentReviewOffX = 0
 		}
-	case "right", "l":
+	case "agent-review.scroll-right":
 		m.agentReviewOffX += 8
 	}
 	return nil

@@ -460,8 +460,8 @@ func (m *Model) handleGitBranch(s string, msg tea.KeyPressMsg) tea.Cmd {
 // --- Dispatch ---
 
 func (m *Model) handleGit(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "ctrl+b", "f9":
+	switch m.paneCmd("git", s) {
+	case "git.close":
 		m.gitOpen = false
 		m.gitFocus = false
 		m.msg = ""

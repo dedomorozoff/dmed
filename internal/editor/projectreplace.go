@@ -312,12 +312,12 @@ func (m *Model) tabDirtyFor(rel string) bool {
 // replacement. Tab stays the regex toggle it is in Find in Project so both
 // panels behave alike; the steps are what separates the fields.
 func (m *Model) handleProjReplInput(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc":
+	switch m.paneCmd("proj-repl-input", s) {
+	case "proj-repl-input.close":
 		m.stopProjectSearch()
-	case "tab":
+	case "proj-repl-input.toggle-regex":
 		m.projSearchRegex = !m.projSearchRegex
-	case "enter":
+	case "proj-repl-input.run":
 		if m.projReplStep == 0 {
 			if len(m.projSearchQ) == 0 {
 				return nil
@@ -326,7 +326,7 @@ func (m *Model) handleProjReplInput(s string, msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		return m.runProjectReplace()
-	case "backspace":
+	case "proj-repl-input.erase":
 		if m.projReplStep == 0 {
 			if n := len(m.projSearchQ); n > 0 {
 				m.projSearchQ = m.projSearchQ[:n-1]
@@ -334,6 +334,8 @@ func (m *Model) handleProjReplInput(s string, msg tea.KeyPressMsg) tea.Cmd {
 		} else if n := len(m.projReplWith); n > 0 {
 			m.projReplWith = m.projReplWith[:n-1]
 		}
+	case paneUnbound:
+		return nil
 	default:
 		if len(msg.Text) > 0 {
 			if m.projReplStep == 0 {
@@ -350,25 +352,27 @@ func (m *Model) handleProjReplInput(s string, msg tea.KeyPressMsg) tea.Cmd {
 // diff review of the selected file, and the y/a answer belongs to that review.
 func (m *Model) handleProjReplList(s string, msg tea.KeyPressMsg) tea.Cmd {
 	n := len(m.projReplFiles)
-	switch s {
-	case "esc", "ctrl+c":
+	switch m.paneCmd("proj-repl-list", s) {
+	case "proj-repl-list.close":
 		m.stopProjectSearch()
-	case "up", "k", "ctrl+p":
+	case "proj-repl-list.up":
 		if n > 0 {
 			m.jumpProjSel((m.projSearchSel - 1 + n) % n)
 		}
-	case "down", "j", "ctrl+n":
+	case "proj-repl-list.down":
 		if n > 0 {
 			m.jumpProjSel((m.projSearchSel + 1) % n)
 		}
-	case "pgup":
+	case "proj-repl-list.page-up":
 		m.jumpProjSel(m.projSearchSel - projSearchVisible)
-	case "pgdown":
+	case "proj-repl-list.page-down":
 		m.jumpProjSel(m.projSearchSel + projSearchVisible)
-	case "enter":
+	case "proj-repl-list.open":
 		if idx := m.projSearchSel; n > 0 && idx < n {
 			m.startProjReplReview(idx)
 		}
+	case paneUnbound:
+		return nil
 	default:
 		// Typing over the preview goes back to the prompt with the query kept.
 		if len(msg.Text) > 0 {
@@ -440,25 +444,27 @@ func (m *Model) loadProjReplChange(idx int) {
 
 func (m *Model) handleProjReplReview(s string) tea.Cmd {
 	n := len(m.projReplOrder)
-	switch s {
-	case "y", "enter":
+	switch m.paneCmd("proj-repl-review", s) {
+	case "proj-repl-review.accept":
 		m.acceptProjRepl(true)
-	case "a":
+	case "proj-repl-review.accept-all":
 		m.acceptProjRepl(false)
-	case "n", "esc", "r":
+	case "proj-repl-review.reject":
 		m.rejectProjRepl()
-	case "tab":
+	case "proj-repl-review.next-file":
 		if n > 0 {
 			m.projReplRevIdx = (m.projReplRevIdx + 1) % n
 			m.loadProjReplChange(m.projReplRevIdx)
 			m.msg = ""
 		}
-	case "shift+tab":
+	case "proj-repl-review.prev-file":
 		if n > 0 {
 			m.projReplRevIdx = (m.projReplRevIdx - 1 + n) % n
 			m.loadProjReplChange(m.projReplRevIdx)
 			m.msg = ""
 		}
+	case paneUnbound:
+		return nil
 	default:
 		m.scrollProjReplReview(s)
 	}
@@ -471,37 +477,37 @@ func (m *Model) handleProjReplReview(s string) tea.Cmd {
 func (m *Model) scrollProjReplReview(s string) {
 	half := m.paneViewHeight(m.activePane) / 2
 	maxOff := len(m.projReplRows) - 1
-	switch s {
-	case "up", "k":
+	switch m.paneCmd("proj-repl-scroll", s) {
+	case "proj-repl-scroll.up":
 		if m.projReplOffY > 0 {
 			m.projReplOffY--
 		}
-	case "down", "j":
+	case "proj-repl-scroll.down":
 		if m.projReplOffY < maxOff {
 			m.projReplOffY++
 		}
-	case "pgup":
+	case "proj-repl-scroll.page-up":
 		m.projReplOffY -= half
 		if m.projReplOffY < 0 {
 			m.projReplOffY = 0
 		}
-	case "pgdown":
+	case "proj-repl-scroll.page-down":
 		m.projReplOffY += half
 		if m.projReplOffY > maxOff {
 			m.projReplOffY = maxOff
 		}
-	case "home", "g":
+	case "proj-repl-scroll.top":
 		m.projReplOffY = 0
-	case "end", "G":
+	case "proj-repl-scroll.bottom":
 		if maxOff > 0 {
 			m.projReplOffY = maxOff
 		}
-	case "left", "h":
+	case "proj-repl-scroll.scroll-left":
 		m.projReplOffX -= 8
 		if m.projReplOffX < 0 {
 			m.projReplOffX = 0
 		}
-	case "right", "l":
+	case "proj-repl-scroll.scroll-right":
 		m.projReplOffX += 8
 	}
 }

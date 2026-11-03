@@ -173,6 +173,13 @@ func dumpActions() string {
 			byAct[d.act] = append(byAct[d.act], chord)
 		}
 	}
+	// The pane commands belong on the same list: a [keys] line names a command and
+	// does not care which stage of the chain runs it.
+	for _, cmds := range paneCommands {
+		for _, c := range cmds {
+			byAct[c.act] = append(byAct[c.act], c.chords...)
+		}
+	}
 	names := make([]string, 0, len(byAct))
 	for act := range byAct {
 		names = append(names, string(act))

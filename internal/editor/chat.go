@@ -193,44 +193,49 @@ func (m *Model) handleChat(s string, msg tea.KeyPressMsg) tea.Cmd {
 	if m.chatPark != nil {
 		return m.handleChatParkKey(s, msg)
 	}
-	switch s {
-	case "esc":
+	switch m.paneCmd("chat", s) {
+	// Ahead of every arm rather than next to the default: the retry arm below
+	// falls through to the default to type the letter it also answers to, and a
+	// fallthrough lands on the clause that physically follows it.
+	case paneUnbound:
+		return nil
+	case "chat.close":
 		// While streaming, Esc stops the generation instead of closing the chat.
 		if m.chatBusy {
 			return m.chatStop()
 		}
 		m.closeChat()
-	case "ctrl+q", "ctrl+c":
+	case "chat.stop":
 		// Ctrl+C stops a running stream; if idle it closes the chat.
 		if m.chatBusy {
 			return m.chatStop()
 		}
 		m.closeChat()
-	case "enter":
+	case "chat.run":
 		return m.chatSubmit()
-	case "backspace":
+	case "chat.erase":
 		if n := len(m.chatIn); n > 0 {
 			m.chatIn = m.chatIn[:n-1]
 		}
-	case "pgup":
+	case "chat.page-up":
 		m.chatScroll += m.paneViewHeight(m.activePane) / 2
 		m.clampChatScroll()
-	case "pgdown":
+	case "chat.page-down":
 		m.chatScroll -= m.paneViewHeight(m.activePane) / 2
 		m.clampChatScroll()
-	case "up": // recall a previously sent prompt
+	case "chat.history-prev": // recall a previously sent prompt
 		m.chatHistoryPrev()
-	case "down": // back toward the newest prompt / draft
+	case "chat.history-next": // back toward the newest prompt / draft
 		m.chatHistoryNext()
-	case "ctrl+n": // newer thread (from the newest one: a new thread)
+	case "chat.thread-prev": // newer thread (from the newest one: a new thread)
 		m.switchChatThread(-1)
-	case "ctrl+u": // start a new conversation thread
+	case "chat.new-thread": // start a new conversation thread
 		m.newChatThread()
-	case "ctrl+l": // clear all chat history (press twice to confirm)
+	case "chat.clear": // clear all chat history (press twice to confirm)
 		m.armChatClear()
-	case "ctrl+y": // copy the last error / AI reply to the system clipboard
+	case "chat.copy": // copy the last error / AI reply to the system clipboard
 		m.copyChatLast()
-	case "r", "R": // retry: re-send the last user prompt (only when input is empty)
+	case "chat.reask": // retry: re-send the last user prompt (only when input is empty)
 		if len(m.chatIn) == 0 && !m.chatBusy && !m.chatReviewMode {
 			return m.chatRetry()
 		}
@@ -913,27 +918,28 @@ func (m *Model) handleChatParkKey(s string, msg tea.KeyPressMsg) tea.Cmd {
 	}
 	switch park.park.Kind {
 	case ParkRunConfirm:
-		switch s {
-		case "y", "enter":
+		switch m.paneCmd("park-run", s) {
+		case "park-run.yes":
 			return m.finishChatRunConfirm(true)
-		case "n", "esc", "r":
+		case "park-run.no":
 			return m.finishChatRunConfirm(false)
 		}
 		return nil // ignore other keys while parked
 	case ParkAskUser:
 		return m.handleAskKey(s, msg)
 	case ParkSwitchMode:
-		switch s {
-		case "y", "enter":
+		switch m.paneCmd("park-mode", s) {
+		case "park-mode.yes":
 			return m.finishChatSwitchMode(true)
-		case "n", "esc", "r":
+		case "park-mode.no":
 			return m.finishChatSwitchMode(false)
 		}
 		return nil
 	case ParkSubAgent:
 		// Nothing to answer: the loop resumes by itself when the task ends.
 		// Esc is the escape hatch, or the wait could last minutes.
-		if s == "esc" {
+		switch m.paneCmd("park-sub", s) {
+		case "park-sub.cancel":
 			m.cancelParkedSubAgent()
 		}
 		return nil
@@ -999,51 +1005,51 @@ func (m *Model) loadChatChange(idx int) {
 // n rejects; Tab cycles between multiple pending files.
 func (m *Model) handleChatReview(s string) tea.Cmd {
 	n := len(m.chatPendingChanges)
-	switch s {
-	case "y", "enter":
+	switch m.paneCmd("chat-review", s) {
+	case "chat-review.accept":
 		return m.acceptChatReview(true) // apply only the current file
-	case "a":
+	case "chat-review.accept-all":
 		return m.acceptChatReview(false) // apply every pending file
-	case "n", "esc", "r":
+	case "chat-review.reject":
 		return m.rejectChatReview()
-	case "tab":
+	case "chat-review.next-file":
 		if n > 0 {
 			m.chatReviewIdx = (m.chatReviewIdx + 1) % n
 			m.loadChatChange(m.chatReviewIdx)
 		}
-	case "shift+tab":
+	case "chat-review.prev-file":
 		if n > 0 {
 			m.chatReviewIdx = (m.chatReviewIdx - 1 + n) % n
 			m.loadChatChange(m.chatReviewIdx)
 		}
-	case "up", "k":
+	case "chat-review.up":
 		if m.chatReviewOffY > 0 {
 			m.chatReviewOffY--
 		}
-	case "down", "j":
+	case "chat-review.down":
 		if m.chatReviewOffY < len(m.chatReviewRows)-1 {
 			m.chatReviewOffY++
 		}
-	case "pgup":
+	case "chat-review.page-up":
 		m.chatReviewOffY -= m.paneViewHeight(m.activePane) / 2
 		if m.chatReviewOffY < 0 {
 			m.chatReviewOffY = 0
 		}
-	case "pgdown":
+	case "chat-review.page-down":
 		m.chatReviewOffY += m.paneViewHeight(m.activePane) / 2
 		if maxOff := len(m.chatReviewRows) - 1; m.chatReviewOffY > maxOff {
 			m.chatReviewOffY = maxOff
 		}
-	case "home", "g":
+	case "chat-review.top":
 		m.chatReviewOffY = 0
-	case "end", "G":
+	case "chat-review.bottom":
 		m.chatReviewOffY = len(m.chatReviewRows) - 1
-	case "left", "h":
+	case "chat-review.scroll-left":
 		m.chatReviewOffX -= 8
 		if m.chatReviewOffX < 0 {
 			m.chatReviewOffX = 0
 		}
-	case "right", "l":
+	case "chat-review.scroll-right":
 		m.chatReviewOffX += 8
 	}
 	return nil

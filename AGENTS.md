@@ -128,6 +128,24 @@ The code is split into focused internal packages:
   that name as `handleX(s string, msg tea.KeyPressMsg)` and matches on `s`,
   never on `msg.String()`; text entry reads `msg.Text`, which `keyOf` hands
   back unrestored, so a typed character is never replaced by its binding name.
+  A panel's own keys go through the same door, or `[keys]` reaches only the two
+  tables: `switch m.paneCmd("<pane>", s)` dispatches on command names declared in
+  `paneCommands` (`panemap.go`), and a chord literal left in such a switch is a key
+  nobody can rebind — `TestPaneHandlersDispatchOnCommands` re-reads the package
+  source and fails on one. Three rules hold that stage together: a pane command's
+  name never equals a table action's (`find.next`, not the text pane's
+  `search.next`), because one name is routed to exactly one stage; the `paneUnbound`
+  arm answers ahead of `default:`, so a chord the user switched off is swallowed
+  rather than typed into the field it was just removed from (the chat retry's
+  `fallthrough` is why it is placed *first* in that switch — a fallthrough lands on
+  the clause that physically follows); and protection there is per *command* (a
+  panel's escape hatch, a review's `y`/`n`) where the tables protect a per-*chord*
+  set. Which panel owns the keyboard (`dispatchPanes`) is runtime state, not a
+  preference: making it rebindable can strand a user in a panel whose Esc moved, so
+  only the chords inside a handler move. Three sites match literals on purpose: the
+  ghost Tab/Esc in `handleTailBindings` (its `default` must keep falling through),
+  the git panel's `switch keyL` family (it folds case, so a declared `G` could never
+  fire), and `terminalKeyBytes` (bytes for a shell, not commands for a panel).
   A new binding is a table entry, not a `case` in a switch; a chord that means
   different things in different states returns `handled == false` to fall
   through to the next stage. The rest is split by concern: `view.go`

@@ -58,20 +58,22 @@ func (m *Model) startInlineRequest() {
 // handleInlineRequest handles keys while the inline prompt is active (before
 // the AI has responded).
 func (m *Model) handleInlineRequest(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc":
+	switch m.paneCmd("inline-ask", s) {
+	case "inline-ask.close":
 		if m.aiInlineCancel != nil {
 			m.aiInlineCancel()
 		}
 		m.aiInlineOpen = false
 		m.aiInlineBusy = false
 		m.msg = ""
-	case "enter":
+	case "inline-ask.run":
 		return m.submitInlineRequest()
-	case "backspace":
+	case "inline-ask.erase":
 		if n := len(m.aiInlineInput); n > 0 {
 			m.aiInlineInput = m.aiInlineInput[:n-1]
 		}
+	case paneUnbound:
+		return nil
 	default:
 		if len(msg.Text) > 0 {
 			m.aiInlineInput = append(m.aiInlineInput, []rune(msg.Text)...)
@@ -217,50 +219,50 @@ func (m *Model) startInlineReview() {
 func (m *Model) handleInlineReview(s string, msg tea.KeyPressMsg) tea.Cmd {
 	// keyOf keeps the y/n prompts layout-independent (н or т in Cyrillic
 	// stand for the physical Y and N keys).
-	switch s {
-	case "y", "enter":
+	switch m.paneCmd("inline-review", s) {
+	case "inline-review.accept":
 		m.applyInlineProposal()
 		m.aiReviewMode = false
 		m.msg = "AI changes applied"
 		return nil
-	case "n", "esc":
+	case "inline-review.reject":
 		m.aiReviewMode = false
 		m.aiInlineProposal = ""
 		m.aiReviewRows = nil
 		m.msg = "AI changes discarded"
 		return nil
-	case "up", "k":
+	case "inline-review.up":
 		if m.aiReviewOffY > 0 {
 			m.aiReviewOffY--
 		}
-	case "down", "j":
+	case "inline-review.down":
 		if m.aiReviewOffY < len(m.aiReviewRows)-1 {
 			m.aiReviewOffY++
 		}
-	case "pgup":
+	case "inline-review.page-up":
 		m.aiReviewOffY -= m.paneViewHeight(m.activePane) / 2
 		if m.aiReviewOffY < 0 {
 			m.aiReviewOffY = 0
 		}
-	case "pgdown":
+	case "inline-review.page-down":
 		m.aiReviewOffY += m.paneViewHeight(m.activePane) / 2
 		maxOff := len(m.aiReviewRows) - 1
 		if m.aiReviewOffY > maxOff {
 			m.aiReviewOffY = maxOff
 		}
-	case "home", "g":
+	case "inline-review.top":
 		m.aiReviewOffY = 0
-	case "end", "G":
+	case "inline-review.bottom":
 		m.aiReviewOffY = len(m.aiReviewRows) - 1
 		if m.aiReviewOffY < 0 {
 			m.aiReviewOffY = 0
 		}
-	case "left", "h":
+	case "inline-review.scroll-left":
 		m.aiReviewOffX -= 8
 		if m.aiReviewOffX < 0 {
 			m.aiReviewOffX = 0
 		}
-	case "right", "l":
+	case "inline-review.scroll-right":
 		m.aiReviewOffX += 8
 	}
 	return nil

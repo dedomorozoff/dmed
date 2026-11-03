@@ -620,16 +620,18 @@ func (m *Model) startLspActions() tea.Cmd {
 }
 
 func (m *Model) handleLspRename(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc", "ctrl+c":
+	switch m.paneCmd("lsp-rename", s) {
+	case "lsp-rename.close":
 		m.lspRenameOpen = false
 		m.msg = ""
-	case "enter":
+	case "lsp-rename.run":
 		return m.startLspRenameCmd()
-	case "backspace":
+	case "lsp-rename.erase":
 		if n := len(m.lspRenameIn); n > 0 {
 			m.lspRenameIn = m.lspRenameIn[:n-1]
 		}
+	case paneUnbound:
+		return nil
 	default:
 		if len(msg.Text) > 0 {
 			m.lspRenameIn = append(m.lspRenameIn, []rune(msg.Text)...)
@@ -641,23 +643,23 @@ func (m *Model) handleLspRename(s string, msg tea.KeyPressMsg) tea.Cmd {
 // handleLspActions drives the quick-fix list overlay: plain cursor keys,
 // Enter applies the edit of the selected action, Esc closes.
 func (m *Model) handleLspActions(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc", "ctrl+c":
+	switch m.paneCmd("lsp-actions", s) {
+	case "lsp-actions.close":
 		m.lspActionsOpen = false
 		m.msg = ""
-	case "up", "k", "ctrl+p":
+	case "lsp-actions.up":
 		if n := len(m.lspActions); n > 0 {
 			m.jumpLspActionsSel((m.lspActionsSel - 1 + n) % n)
 		}
-	case "down", "j", "ctrl+n":
+	case "lsp-actions.down":
 		if n := len(m.lspActions); n > 0 {
 			m.jumpLspActionsSel((m.lspActionsSel + 1) % n)
 		}
-	case "pgup":
+	case "lsp-actions.page-up":
 		m.jumpLspActionsSel(m.lspActionsSel - lspActionsVisible)
-	case "pgdown":
+	case "lsp-actions.page-down":
 		m.jumpLspActionsSel(m.lspActionsSel + lspActionsVisible)
-	case "enter":
+	case "lsp-actions.run":
 		if i := m.lspActionsSel; len(m.lspActions) > 0 && i < len(m.lspActions) {
 			m.lspActionsOpen = false
 			act := m.lspActions[i]
@@ -669,6 +671,8 @@ func (m *Model) handleLspActions(s string, msg tea.KeyPressMsg) tea.Cmd {
 				m.msg = m.t("msg.applied_count", n)
 			}
 		}
+	case paneUnbound:
+		return nil
 	default:
 		// Typing closes to the editor: the list is answer-only.
 	}

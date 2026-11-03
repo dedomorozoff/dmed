@@ -189,26 +189,26 @@ func (m *Model) handleTree(s string, msg tea.KeyPressMsg) tea.Cmd {
 	if m.treeConfirm != "" {
 		return m.handleTreeConfirm(s, msg)
 	}
-	switch s {
-	case "up":
+	switch m.paneCmd("tree", s) {
+	case "tree.up":
 		if m.treeSel > 0 {
 			m.treeSel--
 		}
-	case "down":
+	case "tree.down":
 		if m.treeSel < len(m.treeRows)-1 {
 			m.treeSel++
 		}
-	case "pgup":
+	case "tree.page-up":
 		m.treeSel -= m.viewHeight()
 		if m.treeSel < 0 {
 			m.treeSel = 0
 		}
-	case "pgdown":
+	case "tree.page-down":
 		m.treeSel += m.viewHeight()
 		if m.treeSel > len(m.treeRows)-1 {
 			m.treeSel = len(m.treeRows) - 1
 		}
-	case "enter":
+	case "tree.open":
 		if m.treeSel >= len(m.treeRows) {
 			break
 		}
@@ -226,7 +226,7 @@ func (m *Model) handleTree(s string, msg tea.KeyPressMsg) tea.Cmd {
 			m.focusOrOpen(e.rel)
 			m.treeFocus = false
 		}
-	case "right":
+	case "tree.expand":
 		if m.treeSel >= len(m.treeRows) {
 			break
 		}
@@ -238,7 +238,7 @@ func (m *Model) handleTree(s string, msg tea.KeyPressMsg) tea.Cmd {
 			// Preview: open but keep tree focused
 			m.focusOrOpen(e.rel)
 		}
-	case "left":
+	case "tree.collapse":
 		if m.treeSel >= len(m.treeRows) {
 			break
 		}
@@ -257,38 +257,40 @@ func (m *Model) handleTree(s string, msg tea.KeyPressMsg) tea.Cmd {
 				}
 			}
 		}
-	case "esc", "tab":
+	case "tree.blur":
 		// Return focus to editor without closing the sidebar
 		m.treeFocus = false
-	case "ctrl+g":
+	case "tree.git-panel":
 		// Switch to the Git panel (tree stays visible, loses focus)
 		m.treeFocus = false
 		m.openGitPanel()
 		return nil
-	case "ctrl+b", "f9":
+	case "tree.toggle":
 		m.toggleTree()
-	case "n":
+	case "tree.new-file":
 		m.startTreeNewFilePrompt()
-	case "N":
+	case "tree.new-folder":
 		m.startTreeNewFolderPrompt()
-	case "r":
+	case "tree.rename":
 		if rel, ok := m.treeSelectedRel(); ok {
 			m.startTreeRenamePrompt(rel)
 		}
-	case "d":
+	case "tree.duplicate":
 		if rel, ok := m.treeSelectedRel(); ok {
 			m.duplicateTreeEntry(rel)
 			m.rebuildTree()
 			m.refreshGitFiles()
 		}
-	case "delete":
+	case "tree.delete":
 		if rel, ok := m.treeSelectedRel(); ok {
 			m.beginTreeConfirm("delete", rel)
 		}
-	case "t":
+	case "tree.trash":
 		if rel, ok := m.treeSelectedRel(); ok {
 			m.beginTreeConfirm("trash", rel)
 		}
+	case paneUnbound:
+		return nil
 	default:
 		return nil
 	}
@@ -303,8 +305,8 @@ func (m *Model) handleTreeConfirm(s string, msg tea.KeyPressMsg) tea.Cmd {
 	rel := m.treeConfirmRel
 	full := normalizePath(m.baseDir(), rel)
 	confirm := m.treeConfirm
-	switch s {
-	case "y", "enter":
+	switch m.paneCmd("tree-confirm", s) {
+	case "tree-confirm.yes":
 		var err error
 		if confirm == "trash" {
 			err = moveToTrash(full)
@@ -324,8 +326,10 @@ func (m *Model) handleTreeConfirm(s string, msg tea.KeyPressMsg) tea.Cmd {
 		if err == nil {
 			m.dropTabsUnder(full)
 		}
-	case "n", "esc":
+	case "tree-confirm.no":
 		m.msg = m.t("msg.kept")
+	case paneUnbound:
+		return nil
 	default:
 		return nil
 	}

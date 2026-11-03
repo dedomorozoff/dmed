@@ -880,9 +880,33 @@ cross-build. The cheap part first:
         block whose repeated names Windows resolves to the *first* entry, so the
         harness's `HOME=<tempdir>` was shadowed by the developer's own and no
         scenario had ever read a config file it wrote (`ptyterm.mergeEnv`).
-  - [ ] The overlay and pane handlers, which still match chord literals inside
-        their own `switch s`, move into per-pane tables so nothing is left
-        unremappable.
+  - [x] **The panels dispatch on commands too.** An overlay that owns the keyboard
+        asks `m.paneCmd("<pane>", s)` which of its commands the chord runs and
+        matches on the answer, so a `[keys]` line reaches the find prompt, the tree,
+        every review and the debugger: 54 panels, 333 commands, each declared once in
+        `paneCommands` (`panemap.go`) beside the chords it ships with. The handlers
+        dispatch on a *name* rather than the closure tables the plan sketched, because
+        the arm bodies then never move and the move is checkable: the generator that
+        rewrote them (`panegen`, `-mode verify`) compares the chord→arm graph of the
+        HEAD copy with the result and says so per panel, which a hand-written
+        40-handler refactor cannot. Three properties the migration had to earn:
+        a command the user switched off is answered by `paneUnbound` ahead of the
+        default arm, or Backspace without a Backspace becomes a character typed into
+        the field it was just removed from; a panel command never shares a name with a
+        table action, since `find.next` and the text pane's `search.next` naming one
+        chord would hand Enter to the buffer the first time someone rebound it
+        (`TestPaneCommandsAreWellFormed` keeps them apart); and a panel's protection is
+        per *command* — its escape hatch, the `y`/`n` a review answers with — where the
+        tables protect a per-*chord* set. The chat retry, which answers `r` and then
+        falls through to type it, forced the sentinel to the top of the switch: a
+        `fallthrough` lands on the clause that physically follows, not on the one that
+        means the same.
+        What stays literal on purpose: the ghost-text Tab/Esc inside
+        `handleTailBindings` (it must fall through to normal editing, which is what its
+        `default` arm is for), the git panel's `switch keyL` family (it folds case, so a
+        declared `G` could never fire and the `[keys]` line naming it would be a lie),
+        and `terminalKeyBytes`, which encodes bytes for a shell rather than commands for
+        a panel.
 - Themes: user palettes for syntax_theme in `.dmed.conf` or a separate
   file, live preview in the wizard.
 - `.editorconfig`: indent_style/size, trim trailing whitespace, final newline.

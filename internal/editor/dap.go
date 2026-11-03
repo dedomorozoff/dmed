@@ -859,27 +859,29 @@ func (m *Model) dapRelease() tea.Cmd {
 // out of it so the panel never hijacks ordinary editing keys).
 func (m *Model) handleDap(s string, msg tea.KeyPressMsg) tea.Cmd {
 	if m.dapFocus == 3 {
-		switch s {
-		case "esc":
+		switch m.paneCmd("dap-console", s) {
+		case "dap-console.close":
 			m.dapIn = nil
 			m.dapFocus = 0
 			m.dapOpen = false
-		case "backspace":
+		case "dap-console.erase":
 			if len(m.dapIn) > 0 {
 				m.dapIn = m.dapIn[:len(m.dapIn)-1]
 			}
-		case "enter":
+		case "dap-console.run":
 			if len(m.dapIn) > 0 {
 				expr := string(m.dapIn)
 				m.dapIn = nil
 				return m.dapEvalCmd(expr)
 			}
-		case "tab":
+		case "dap-console.focus-next":
 			m.dapFocus = (m.dapFocus + 1) % 4
-		case "shift+tab":
+		case "dap-console.focus-prev":
 			m.dapFocus = (m.dapFocus + 3) % 4
-		case "ctrl+l":
+		case "dap-console.clear":
 			m.dapClearConsole()
+		case paneUnbound:
+			return nil
 		default:
 			if len(msg.Text) > 0 {
 				m.dapIn = append(m.dapIn, []rune(msg.Text)...)
@@ -888,13 +890,13 @@ func (m *Model) handleDap(s string, msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
-	switch s {
-	case "esc":
+	switch m.paneCmd("dap", s) {
+	case "dap.close":
 		m.dapIn = nil
 		m.dapFocus = 0
 		m.dapOpen = false
 		return nil
-	case "backspace", "left":
+	case "dap.erase":
 		if len(m.dapIn) > 0 {
 			m.dapIn = m.dapIn[:len(m.dapIn)-1]
 			return nil
@@ -906,66 +908,68 @@ func (m *Model) handleDap(s string, msg tea.KeyPressMsg) tea.Cmd {
 			m.dapVarSel = 0
 		}
 		return nil
-	case "l":
+	case "dap.peek":
 		m.dapConsolePeek = !m.dapConsolePeek
 		return nil
-	case "enter":
+	case "dap.expand":
 		if m.dapFocus == 2 {
 			if v := m.dapSelectedVar(); v != nil && v.ref > 0 {
 				return m.dapExpandVarsCmd(v.ref)
 			}
 		}
 		return nil
-	case "tab":
+	case "dap.focus-next":
 		m.dapFocus = (m.dapFocus + 1) % 4 // 0..3, incl. the input row
 		return nil
-	case "shift+tab":
+	case "dap.focus-prev":
 		m.dapFocus = (m.dapFocus + 3) % 4
 		return nil
-	case "up", "k":
+	case "dap.up":
 		if m.dapConsolePeek {
 			m.dapScrollConsole(1) // the peek has no selection: walk the backlog
 			return nil
 		}
 		return m.dapMoveSelCmd(-1)
-	case "down", "j":
+	case "dap.down":
 		if m.dapConsolePeek {
 			m.dapScrollConsole(-1)
 			return nil
 		}
 		return m.dapMoveSelCmd(1)
-	case "pgup":
+	case "dap.page-up":
 		if m.dapConsolePeek {
 			m.dapScrollConsole(m.dapListRows())
 			return nil
 		}
 		return m.dapMoveSelPageCmd(-1)
-	case "pgdown":
+	case "dap.page-down":
 		if m.dapConsolePeek {
 			m.dapScrollConsole(-m.dapListRows())
 			return nil
 		}
 		return m.dapMoveSelPageCmd(1)
-	case "home":
+	case "dap.top":
 		if m.dapConsolePeek {
 			m.dapConsoleToEdge(true)
 			return nil
 		}
 		return m.dapMoveSelEdgeCmd(true)
-	case "end":
+	case "dap.bottom":
 		if m.dapConsolePeek {
 			m.dapConsoleToEdge(false)
 			return nil
 		}
 		return m.dapMoveSelEdgeCmd(false)
-	case "+", "=":
+	case "dap.grow":
 		m.growDapPanel(1)
 		return nil
-	case "-", "_":
+	case "dap.shrink":
 		m.growDapPanel(-1)
 		return nil
-	case "ctrl+l":
+	case "dap.clear":
 		m.dapClearConsole()
+		return nil
+	case paneUnbound:
 		return nil
 	default:
 		// Typed characters are deliberately ignored here: the evaluator row is

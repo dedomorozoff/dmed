@@ -256,13 +256,13 @@ func (m *Model) filterPalette() []commandItem {
 
 func (m *Model) handlePalette(s string, msg tea.KeyPressMsg) tea.Cmd {
 	hits := m.filterPalette()
-	switch s {
-	case "esc":
+	switch m.paneCmd("palette", s) {
+	case "palette.close":
 		m.paletteOpen = false
 		m.paletteSel = 0
 		m.paletteOffset = 0
 		m.msg = ""
-	case "enter":
+	case "palette.run":
 		if len(hits) > 0 {
 			if m.paletteSel >= len(hits) {
 				m.paletteSel = 0
@@ -275,22 +275,24 @@ func (m *Model) handlePalette(s string, msg tea.KeyPressMsg) tea.Cmd {
 			return sel.action(m)
 		}
 		m.paletteOpen = false
-	case "up":
+	case "palette.up":
 		if len(hits) > 0 {
 			m.paletteSel = (m.paletteSel - 1 + len(hits)) % len(hits)
 			m.clampPalette(hits)
 		}
-	case "down":
+	case "palette.down":
 		if len(hits) > 0 {
 			m.paletteSel = (m.paletteSel + 1) % len(hits)
 			m.clampPalette(hits)
 		}
-	case "backspace":
+	case "palette.erase":
 		if len(m.paletteQ) > 0 {
 			m.paletteQ = m.paletteQ[:len(m.paletteQ)-1]
 			m.paletteSel = 0
 			m.paletteOffset = 0
 		}
+	case paneUnbound:
+		return nil
 	default:
 		if len(msg.Text) > 0 {
 			m.paletteQ = append(m.paletteQ, []rune(msg.Text)...)

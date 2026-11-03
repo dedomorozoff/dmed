@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -34,6 +35,13 @@ type KeyMap struct {
 	// that happen to agree, and it is what the generated help reads.
 	acts map[keyAct][]string
 
+	// pane holds the keys of the panels and overlays, one table per keyboard owner,
+	// chord to command name. A pane's stage is the only one whose value is a name
+	// rather than a closure: the code stays in the handler's switch and only the
+	// chord→command mapping is a preference, which is what lets an overlay be
+	// re-keyed without moving a single line of its logic.
+	pane map[paneID]map[string]keyAct
+
 	// refusals explains, in the order the lines were read, what a [keys] section
 	// asked for that the map would not do. A binding that silently does not move
 	// is worse than one that says why.
@@ -48,6 +56,7 @@ func ResolveKeys(cfg config.Config) *KeyMap {
 		global: cloneTable(globalBindings),
 		editor: cloneTable(editorBindings),
 		defs:   defaultDefs(),
+		pane:   clonePanes(),
 	}
 	actions := make([]string, 0, len(cfg.Keys.Overrides))
 	for action := range cfg.Keys.Overrides {
@@ -66,6 +75,20 @@ func cloneTable(t map[string]bindingDef) map[string]bindingDef {
 	out := make(map[string]bindingDef, len(t))
 	for chord, d := range t {
 		out[chord] = d
+	}
+	return out
+}
+
+// clonePanes copies the shipped pane keys: resolving rewrites them, and the
+// declarations are read by every model.
+func clonePanes() map[paneID]map[string]keyAct {
+	out := make(map[paneID]map[string]keyAct, len(paneDefaults))
+	for p, table := range paneDefaults {
+		c := make(map[string]keyAct, len(table))
+		for chord, act := range table {
+			c[chord] = act
+		}
+		out[p] = c
 	}
 	return out
 }
@@ -142,7 +165,7 @@ func (k *KeyMap) resolve(actions []string, overrides map[string][]string) {
 	known := make([]keyAct, 0, len(actions))
 	for _, action := range actions {
 		act := keyAct(action)
-		if len(k.entries(act, false)) == 0 {
+		if !k.isKnown(act) {
 			k.refuse(action, "no such action (dmed --dump-keys actions lists them)")
 			continue
 		}
@@ -150,14 +173,27 @@ func (k *KeyMap) resolve(actions []string, overrides map[string][]string) {
 		known = append(known, act)
 	}
 	for _, act := range known {
-		k.assign(act, overrides[string(act)])
+		k.apply(act, overrides[string(act)])
 	}
 }
 
-// clear drops the chords the action answers to now. A protected one is not
-// dropped — and not complained about either when the line asks for it again,
-// since restating it is the user agreeing with the default.
+// isKnown reports whether the name is a command dmed ships: one of the editor's
+// own, or one declared by a pane.
+func (k *KeyMap) isKnown(act keyAct) bool {
+	if _, _, ok := paneActCommand(act); ok {
+		return true
+	}
+	return len(k.entries(act, false)) > 0
+}
+
+// clear drops the chords the command answers to now, in whichever stage holds it.
+// A pane command and a table action can never share a name — see
+// TestPaneCommandsAreWellFormed — so one line addresses exactly one of them.
 func (k *KeyMap) clear(act keyAct, wanted []string) {
+	if _, p, ok := paneActCommand(act); ok {
+		k.clearPane(p, act, wanted)
+		return
+	}
 	for _, e := range k.entries(act, true) {
 		if e.def.flags&protected == 0 {
 			delete(k.stage(e.global), e.chord)
@@ -183,9 +219,18 @@ func chordListed(chord string, wanted []string) bool {
 	return false
 }
 
-// assign writes the chords one action asked for. A chord is refused when it
-// cannot arrive as written, when it is protected and belongs to something else,
-// or when an action the file did not name already answers to it.
+// apply writes the chords one action asked for, in the stage that owns the name.
+func (k *KeyMap) apply(act keyAct, value []string) {
+	if _, p, ok := paneActCommand(act); ok {
+		k.assignPane(p, act, value)
+		return
+	}
+	k.assign(act, value)
+}
+
+// assign moves one chord of a table stage. It is refused when it cannot arrive as
+// written, when it is protected and belongs to something else, or when an action
+// the file did not name already answers to it.
 func (k *KeyMap) assign(act keyAct, value []string) {
 	if len(value) == 0 {
 		return
@@ -232,6 +277,82 @@ func defaultCoOwner(chord string, act keyAct) bool {
 	g, gok := globalBindings[chord]
 	e, eok := editorBindings[chord]
 	return gok && eok && g.act != e.act && (g.act == act || e.act == act)
+}
+
+// clearPane drops the chords a pane command answers to now. A protected one
+// survives, and is only complained about when the line does not ask for it again:
+// restating Esc on the panel that closes on Esc is the user agreeing with the
+// default, not trying to move it.
+func (k *KeyMap) clearPane(p paneID, act keyAct, wanted []string) {
+	cmd, _, ok := paneActCommand(act)
+	if !ok {
+		return
+	}
+	for _, chord := range k.paneChords(p, act) {
+		if cmd.flags&protected == 0 {
+			delete(k.pane[p], chord)
+			continue
+		}
+		if chordListed(chord, wanted) {
+			continue
+		}
+		k.refuse(string(act)+" =", chord+" is protected; it stays bound to "+string(act))
+	}
+}
+
+// paneChords lists the resolved table's chords for one pane command, sorted, so
+// a refusal report reads the same every run.
+func (k *KeyMap) paneChords(p paneID, act keyAct) []string {
+	var out []string
+	for chord, held := range k.pane[p] {
+		if held == act {
+			out = append(out, chord)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// assignPane writes the chords a pane command was given. The rules are the
+// editor's, with one addition only a pane needs: a chord the global stage already
+// answers is refused, because dispatchKey asks that table first and the panel
+// would never see the key. The exception is a chord the command shipped with,
+// where refusing would break the one property the whole section is built on —
+// that restating the defaults changes nothing.
+func (k *KeyMap) assignPane(p paneID, act keyAct, value []string) {
+	cmd, _, ok := paneActCommand(act)
+	if !ok || len(value) == 0 {
+		return
+	}
+	for _, raw := range value {
+		for _, chord := range expandChord(raw) {
+			line := string(act) + " = " + raw
+			if why := checkChord(chord); why != "" {
+				k.refuse(line, why)
+				continue
+			}
+			shipped := false
+			for _, c := range cmd.chords {
+				shipped = shipped || c == chord
+			}
+			if cmd.flags&protected != 0 {
+				if held, taken := k.pane[p][chord]; taken && held == act {
+					continue // exactly where the line says it should be
+				}
+				k.refuse(line, chord+" is protected; it stays bound to "+string(act))
+				continue
+			}
+			if d, taken := k.global[chord]; taken && !shipped {
+				k.refuse(line, chord+" answers globally as "+string(d.act)+" before any panel sees it")
+				continue
+			}
+			if held, taken := k.pane[p][chord]; taken && held != act {
+				k.refuse(line, chord+" already runs "+string(held))
+				continue
+			}
+			k.pane[p][chord] = act
+		}
+	}
 }
 
 func (k *KeyMap) refuse(line, why string) {
@@ -345,7 +466,15 @@ func isAlnum(s string) bool {
 // tables key on, plus the "alt+1..9" sugar for a run of digits, which is how a
 // family of nine commands gets written as one line.
 func expandChord(raw string) []string {
-	s := strings.ToLower(strings.TrimSpace(raw))
+	s := strings.TrimSpace(raw)
+	if len([]rune(s)) == 1 && !strings.ContainsRune(s, '+') {
+		// A lone letter keeps the case it was written in: keyOf reports a shifted
+		// press as the character it produces, so "N" and "n" are two different keys
+		// and a list pane carries both. Anything with a modifier is spelled in
+		// lowercase, which is what lets a config write Ctrl+S for ctrl+s.
+		return []string{s}
+	}
+	s = strings.ToLower(s)
 	dot := strings.Index(s, "..")
 	if dot < 2 || len(s) != dot+3 {
 		// Not the shape <prefix><digit>..<digit>: leave it as written and let
@@ -372,8 +501,19 @@ func (k *KeyMap) index() {
 			k.acts[d.act] = append(k.acts[d.act], chord)
 		}
 	}
-	for _, list := range k.acts {
+	// A pane command is indexed too, so the help and the dump read one map for
+	// both kinds of stage even though only one of them holds closures.
+	for _, table := range k.pane {
+		for chord, act := range table {
+			k.acts[act] = append(k.acts[act], chord)
+		}
+	}
+	for act, list := range k.acts {
 		sort.Strings(list)
+		// The same chord can reach one command through two stages, and the list is
+		// what the cheat sheet prints: "f3 f3" would read as a fact about the keys
+		// rather than about the chain.
+		k.acts[act] = slices.Compact(list)
 	}
 }
 

@@ -197,8 +197,8 @@ func hoverLines(md string) []string {
 }
 
 func (m *Model) handleHover(s string, _ tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc", "ctrl+c", "ctrl+k", "enter":
+	switch m.paneCmd("hover", s) {
+	case "hover.close":
 		m.hoverOpen = false
 		m.msg = ""
 	}
@@ -264,21 +264,21 @@ func (m *Model) handleRefsMsg(msg lspRefsMsg) {
 // Enter jumping to the hit (pushJump first — a server-found usage is not a
 // place the user can retrace).
 func (m *Model) handleRefs(s string, _ tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc", "ctrl+c":
+	switch m.paneCmd("refs", s) {
+	case "refs.close":
 		m.refsOpen = false
 		m.msg = ""
-	case "up", "k", "ctrl+p":
+	case "refs.up":
 		if n := len(m.refs); n > 0 {
 			m.refsSel = (m.refsSel - 1 + n) % n
 			m.clampRefsWindow()
 		}
-	case "down", "j", "ctrl+n":
+	case "refs.down":
 		if n := len(m.refs); n > 0 {
 			m.refsSel = (m.refsSel + 1) % n
 			m.clampRefsWindow()
 		}
-	case "enter":
+	case "refs.open":
 		if i := m.refsSel; len(m.refs) > 0 && i < len(m.refs) {
 			loc := m.refs[i]
 			m.refsOpen = false
@@ -367,21 +367,21 @@ func (m *Model) handleOutlineMsg(msg lspOutlineMsg) {
 
 // handleOutline drives the symbol list; Enter jumps to the symbol's line.
 func (m *Model) handleOutline(s string, _ tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "esc", "ctrl+c":
+	switch m.paneCmd("outline", s) {
+	case "outline.close":
 		m.outlineOpen = false
 		m.msg = ""
-	case "up", "k", "ctrl+p":
+	case "outline.up":
 		if n := len(m.outline); n > 0 {
 			m.outlineSel = (m.outlineSel - 1 + n) % n
 			m.clampOutlineWindow()
 		}
-	case "down", "j", "ctrl+n":
+	case "outline.down":
 		if n := len(m.outline); n > 0 {
 			m.outlineSel = (m.outlineSel + 1) % n
 			m.clampOutlineWindow()
 		}
-	case "enter":
+	case "outline.open":
 		if i := m.outlineSel; len(m.outline) > 0 && i < len(m.outline) {
 			sym := m.outline[i]
 			m.outlineOpen = false

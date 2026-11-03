@@ -301,31 +301,31 @@ func (m *Model) handleAISelectKey(s string) (handled, changed bool) {
 		return false, false
 	}
 	n := len(m.aiCfgSelItems)
-	switch s {
-	case "esc":
+	switch m.paneCmd("ai-select", s) {
+	case "ai-select.close":
 		m.closeAISelect()
 		return true, false
-	case "up":
+	case "ai-select.up":
 		if m.aiCfgSelIdx > 0 {
 			m.aiCfgSelIdx--
 		}
 		m.scrollAISelect()
 		return true, false
-	case "down":
+	case "ai-select.down":
 		if m.aiCfgSelIdx < n-1 {
 			m.aiCfgSelIdx++
 		}
 		m.scrollAISelect()
 		return true, false
-	case "home", "g":
+	case "ai-select.top":
 		m.aiCfgSelIdx = 0
 		m.scrollAISelect()
 		return true, false
-	case "end", "G":
+	case "ai-select.bottom":
 		m.aiCfgSelIdx = n - 1
 		m.scrollAISelect()
 		return true, false
-	case "enter":
+	case "ai-select.run":
 		item := m.aiCfgSelItems[m.aiCfgSelIdx]
 		field := m.aiCfgSelField
 		m.closeAISelect()
@@ -377,18 +377,20 @@ func (m *Model) handleAISettings(s string, msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	if m.aiCfgEdit {
-		switch s {
-		case "esc":
+		switch m.paneCmd("ai-cfg-field", s) {
+		case "ai-cfg-field.close":
 			m.aiCfgEdit = false
 			m.aiCfgIn = nil
-		case "enter":
+		case "ai-cfg-field.run":
 			m.commitAIField()
 			m.aiCfgEdit = false
 			m.aiCfgIn = nil
-		case "backspace":
+		case "ai-cfg-field.erase":
 			if n := len(m.aiCfgIn); n > 0 {
 				m.aiCfgIn = m.aiCfgIn[:n-1]
 			}
+		case paneUnbound:
+			return nil
 		default:
 			if len(msg.Text) > 0 {
 				m.aiCfgIn = append(m.aiCfgIn, []rune(msg.Text)...)
@@ -397,23 +399,23 @@ func (m *Model) handleAISettings(s string, msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
-	switch s {
-	case "esc":
+	switch m.paneCmd("ai-cfg", s) {
+	case "ai-cfg.close":
 		m.aiCfgOpen = false
 		m.aiCfgIn = nil
-	case "j", "down":
+	case "ai-cfg.next":
 		m.aiCfgField = (m.aiCfgField + 1) % len(aiSettingsFields)
-	case "k", "up":
+	case "ai-cfg.prev":
 		m.aiCfgField = (m.aiCfgField - 1 + len(aiSettingsFields)) % len(aiSettingsFields)
-	case "left", "right":
+	case "ai-cfg.select":
 		// Arrows are not a value cycler here: a list of presets or fifty models
 		// cannot be walked one step at a time. They open the same select Enter
 		// does, for anyone whose fingers are already on them.
 		m.openAISelect(m.aiCfgField)
 		return nil
-	case "t", "T":
+	case "ai-cfg.test":
 		return m.testAIConnection()
-	case "enter":
+	case "ai-cfg.open":
 		switch m.aiCfgField {
 		case len(aiSettingsFields) - 1:
 			return m.testAIConnection()
@@ -426,7 +428,7 @@ func (m *Model) handleAISettings(s string, msg tea.KeyPressMsg) tea.Cmd {
 			m.aiCfgEdit = true
 			m.aiCfgIn = []rune(m.rawAIFieldValue(m.aiCfgField))
 		}
-	case "ctrl+s":
+	case "ai-cfg.save":
 		m.saveAISettings()
 	}
 	return nil

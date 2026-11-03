@@ -636,17 +636,19 @@ func (m *Model) handleSqlite(s string, msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.sqlSchema {
 		// The DDL view scrolls on its own; 's'/esc returns to the grid.
-		switch s {
-		case "esc", "s", "q":
+		switch m.paneCmd("sqlite-schema", s) {
+		case "sqlite-schema.close":
 			m.sqlSchema = false
-		case "up", "k":
+		case "sqlite-schema.up":
 			m.sqlSchemaOffY--
-		case "down", "j":
+		case "sqlite-schema.down":
 			m.sqlSchemaOffY++
-		case "pgup":
+		case "sqlite-schema.page-up":
 			m.sqlSchemaOffY -= m.viewHeight()
-		case "pgdown":
+		case "sqlite-schema.page-down":
 			m.sqlSchemaOffY += m.viewHeight()
+		case paneUnbound:
+			return nil
 		default:
 			return nil
 		}
@@ -654,45 +656,47 @@ func (m *Model) handleSqlite(s string, msg tea.KeyPressMsg) tea.Cmd {
 		m.sqlSchemaOffY = min(max(0, m.sqlSchemaOffY), max(0, maxStart))
 		return nil
 	}
-	switch s {
-	case "esc", "q":
+	switch m.paneCmd("sqlite", s) {
+	case "sqlite.close":
 		m.closeSQLite()
-	case "up", "k":
+	case "sqlite.up":
 		m.sqliteMove(-1, 0)
-	case "down", "j":
+	case "sqlite.down":
 		m.sqliteMove(1, 0)
-	case "left", "h":
+	case "sqlite.left":
 		m.sqliteMove(0, -1)
-	case "right", "l":
+	case "sqlite.right":
 		m.sqliteMove(0, 1)
-	case "pgup":
+	case "sqlite.page-up":
 		m.sqliteGoto(m.sqlOff - m.sqlLim)
-	case "pgdown":
+	case "sqlite.page-down":
 		m.sqliteGoto(m.sqlOff + m.sqlLim)
-	case "home", "g":
+	case "sqlite.top":
 		m.sqliteGoto(0)
-	case "end", "G":
+	case "sqlite.bottom":
 		m.sqliteGoto(m.sqlTotal - 1)
-	case "enter":
+	case "sqlite.edit-cell":
 		m.beginSqliteCellEdit()
-	case "ctrl+n":
+	case "sqlite.insert-row":
 		m.sqliteInsertRow()
-	case "ctrl+d":
+	case "sqlite.delete-row":
 		m.sqliteDeleteRow()
-	case "o":
+	case "sqlite.toggle-order":
 		m.sqliteToggleOrder()
-	case "/":
+	case "sqlite.filter":
 		m.sqlFilterIn = true
 		m.sqlFilterBuf = []rune(m.sqlFilter)
-	case "tab":
+	case "sqlite.table-next":
 		m.sqliteCycleTable(1)
-	case "shift+tab":
+	case "sqlite.table-prev":
 		m.sqliteCycleTable(-1)
-	case "s":
+	case "sqlite.schema":
 		if m.sqlSchemaText != "" {
 			m.sqlSchema = true
 			m.sqlSchemaOffY = 0
 		}
+	case paneUnbound:
+		return nil
 	default:
 		return nil
 	}
@@ -701,15 +705,17 @@ func (m *Model) handleSqlite(s string, msg tea.KeyPressMsg) tea.Cmd {
 
 // handleSqliteEdit drives the in-place cell editor.
 func (m *Model) handleSqliteEdit(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "enter":
+	switch m.paneCmd("sqlite-edit", s) {
+	case "sqlite-edit.run":
 		m.commitSqliteCellEdit()
-	case "esc", "ctrl+c":
+	case "sqlite-edit.close":
 		m.sqlEdit = nil
-	case "backspace":
+	case "sqlite-edit.erase":
 		if r := m.sqlEdit.buf; len(r) > 0 {
 			m.sqlEdit.buf = r[:len(r)-1]
 		}
+	case paneUnbound:
+		return nil
 	default:
 		if msg.Text != "" {
 			m.sqlEdit.buf = append(m.sqlEdit.buf, []rune(msg.Text)...)
@@ -720,17 +726,19 @@ func (m *Model) handleSqliteEdit(s string, msg tea.KeyPressMsg) tea.Cmd {
 
 // handleSqliteFilterInput drives the filter prompt.
 func (m *Model) handleSqliteFilterInput(s string, msg tea.KeyPressMsg) tea.Cmd {
-	switch s {
-	case "enter":
+	switch m.paneCmd("sqlite-filter", s) {
+	case "sqlite-filter.run":
 		m.sqlFilter = string(m.sqlFilterBuf)
 		m.sqlFilterIn = false
 		m.sqliteGoto(0)
-	case "esc":
+	case "sqlite-filter.close":
 		m.sqlFilterIn = false
-	case "backspace":
+	case "sqlite-filter.erase":
 		if r := m.sqlFilterBuf; len(r) > 0 {
 			m.sqlFilterBuf = r[:len(r)-1]
 		}
+	case paneUnbound:
+		return nil
 	default:
 		if msg.Text != "" {
 			m.sqlFilterBuf = append(m.sqlFilterBuf, []rune(msg.Text)...)
