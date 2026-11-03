@@ -45,17 +45,21 @@ directly; they emit `Change`s that land through `internal/agent.Applier`
 
 ```sh
 make build          # ./dmed binary
-make test           # go test ./...
+make test           # unit suite (the TUI harness excluded, see below)
+make tui            # tests/tui: real pty, real frames (DMED_BIN names the binary)
 make vet            # go vet ./...
-make cover          # go test ./... with a coverage profile + total
+make cover          # the unit suite with a coverage profile + total
 make cover-check    # the suite, then fail below COVERAGE_BASELINE - 1
 make run FILE=path  # build + run editor on a file
 ```
 
 Run `make build && make vet && make test` before considering any change done.
+`make tui` is slower — it spawns the editor in a pseudo-terminal — so it runs as
+its own CI step rather than inside the loop above; `go test ./...` still reaches
+it when you want everything.
 
-CI (`make vet` + `make cover-check` + native build + 8-platform cross-build)
-runs on every push to `main`/`master` and every PR; keep it green.
+CI (`make vet` + `make cover-check` + `make tui` + native build + 8-platform
+cross-build) runs on every push to `main`/`master` and every PR; keep it green.
 `COVERAGE_BASELINE` in the Makefile is the recorded total — raise it when
 coverage goes up, and only lower it deliberately.
 
@@ -275,6 +279,9 @@ The code is split into focused internal packages:
   per session (`web_search_budget`), and when the budget is spent the tool is
   withdrawn from the model's list, not just rejected.
 - `main.go` — CLI entry only (`dmed [dir | files...]`, `-h`, `-v`).
+- `tests/tui/` — the regression harness: the built binary in a real pty, its
+  frames read back through vt10x (`package tui_test`, test-only, so it adds no
+  coverage and no dependency to the binary).
 
 Conventions:
 
@@ -362,28 +369,45 @@ Conventions:
   (`dapGen`). Stale events/disconnects from superseded sessions are dropped so
   they never clobber a newer live session; keep that guard if you touch the
   DAP message flow.
-- New packages get focused unit tests; TUI behavior is verified manually.
+- New packages get focused unit tests; TUI behavior is verified by the
+  `tests/tui` harness and, for chords a pty cannot carry, manually.
 
-## Manual verification
+## Verifying the TUI
 
 Unit tests cover the buffer core, rope, agent applier/queue/commit, AI
 providers, DAP client and editor debug flow, config, LSP, plugins, git, and
-editor panels. There is no automated TUI test yet.
+editor panels. On top of them sits `tests/tui` (`make tui`, and a CI step in the
+ubuntu and windows jobs): it spawns the *built* binary in a real pseudo-terminal
+— the editor's own `internal/ptyterm`, so ConPTY on Windows and creack/pty
+elsewhere — writes keystrokes into it and reads the painted frames back through
+`vt10x`, the same emulator the terminal panel uses. Typing, saving to disk, the
+finder, the palette, a docked shell round-trip and "Ctrl+C does not kill the
+editor" are all asserted on frames and files rather than on model internals.
 
-Known-broken on this machine: the old cygwin recipe
-`printf ... | script -qec './dmed f' /dev/null` does not work with the native
-Windows binary. Use a ConPTY harness instead (pywinpty is installed):
+Four things this harness learned about driving a pty, all of which cost a
+half-day of misreading a screen:
 
-```python
-from winpty import PtyProcess
-p = PtyProcess.spawn(r"<repo>\dmed.exe", cwd=workdir, dimensions=(24, 80))
-p.write("text\x13\x11")  # type, Ctrl+S save, Ctrl+Q quit
-```
+- The editor is not ready when the process is. Startup (plugins, session, the
+  chroma registry) takes seconds, and a keystroke written before the console
+  input exists is dropped, so `Start` waits for the status bar and for the frame
+  to stop changing before any scenario types. Never sleep in a scenario: poll
+  the screen (`WaitFor`, `WaitAbsent`, `WaitForAtLeast`, `WaitFile`).
+- Control bytes (`Ctrl+S`) and static escape sequences (Enter, arrows, PgDn)
+  arrive exactly as written. **Alt chords do not**: ConPTY's VT input parser
+  consumes `ESC`+letter as one unrecognized sequence and loses it, so an alt
+  binding cannot be driven from this harness — the palette reaches the same
+  action, and the unit tests (`internal/editor/key*_test.go`) cover the alt
+  bindings themselves.
+- `DMED_DEBUG_KEYS=1` cannot be used from the harness. Its trace goes to stderr,
+  which is the same pty the editor paints to, so it scribbles over the frame
+  under test. To see what a chord resolved to, run the editor in a real terminal.
+- F-keys and three-modifier chords are not encodable portably, so they stay
+  manual. Headless ptys may also report a zero window size: the model guards
+  against a non-positive `WindowSizeMsg` (keep that guard) and the harness always
+  passes 120x30.
 
-Caveats of the winpty agent: most ctrl-chords arrive as plain letters
-(`\x02`→`b`, `\x06`→`f`) and F-key byte sequences fall apart, so only
-verify keybindings in a real terminal (Windows Terminal / mintty).
-`DMED_DEBUG_KEYS=1` echoes recognized keys into the status bar.
-Timing is flaky: capture several seconds after each keystroke before
-asserting on output; headless ptys may report a zero window size (the model
-guards against non-positive `WindowSizeMsg` values, keep that guard intact).
+The old cygwin recipe `printf ... | script -qec './dmed f' /dev/null` still does
+not work with the native Windows binary, and the pywinpty recipe it was replaced
+by mangles ctrl-chords (`\x02`→`b`) — the Go harness supersedes both. What
+remains manual is exactly what a pty cannot carry: F-keys, alt and
+ctrl+alt chords, and the look of a theme.

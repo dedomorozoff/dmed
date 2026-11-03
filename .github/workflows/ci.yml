@@ -34,6 +34,14 @@ jobs:
       - name: Build (native)
         run: make build
 
+      # The TUI harness drives the built binary through a real pty, so it runs
+      # after the build and reuses it (DMED_BIN) instead of compiling its own.
+      # A runner without a working pty skips rather than fails.
+      - name: TUI harness
+        env:
+          DMED_BIN: ./dmed
+        run: make tui
+
   race:
     name: race detector
     runs-on: ubuntu-latest
@@ -76,6 +84,14 @@ jobs:
 
       - name: Build
         run: go build -ldflags "-s -w -X main.version=ci" .
+
+      # ConPTY is the transport the editor's own terminal panel uses, so this
+      # is the job that exercises it for real: native binary, native pty,
+      # painted frames read back.
+      - name: TUI harness
+        env:
+          DMED_BIN: ./dmed.exe
+        run: make tui
 
   cross-build:
     name: cross-compile (${{ matrix.platform }})

@@ -28,9 +28,16 @@ BUILD_TARGETS := build-linux-amd64 build-linux-arm64 build-freebsd-amd64 \
 
 # help is the first rule, so it is the default target under both make flavors.
 .PHONY: help build test vet run clean dist install install-man
-.PHONY: fmt fmt-check race cover cover-check
+.PHONY: fmt fmt-check race cover cover-check tui
 .PHONY: deb rpm pkg termux win-zip freebsd-port
 .PHONY: $(BUILD_TARGETS)
+
+# The TUI harness (tests/tui) spawns the real binary in a real pseudo-terminal
+# and reads back the frames it paints, so it is deliberately not part of the
+# unit suite: `make test` stays a second-or-two loop, and `cover-check` keeps
+# measuring the same packages as before it existed. `make tui` is the target CI
+# runs, with the binary it built passed in as DMED_BIN.
+UNIT_PKGS := $(shell $(GO) list ./... | grep -v '/tests/tui')
 
 help: ## Show this help
 	@echo "dmed $(VERSION)"
@@ -59,17 +66,20 @@ fmt-check: ## Fail if any Go source is not gofmt-clean
 	fi
 
 test: ## Run unit tests
-	$(GO) test ./...
+	$(GO) test $(UNIT_PKGS)
+
+tui: ## Run the TUI regression harness (real pty, real frames)
+	$(GO) test -count=1 -timeout 8m ./tests/tui
 
 race: ## Run the race detector over the concurrent packages
 	$(GO) test -race -count=1 ./internal/agent/... ./internal/editor/...
 
 cover: ## Run tests with a coverage profile (needs a working local toolchain)
-	$(GO) test -coverprofile=cover.out ./...
+	$(GO) test -coverprofile=cover.out $(UNIT_PKGS)
 	$(GO) tool cover -func=cover.out | tail -1
 
 cover-check: ## Run tests and fail if total coverage drops below the baseline
-	$(GO) test -coverprofile=cover.out ./...
+	$(GO) test -coverprofile=cover.out $(UNIT_PKGS)
 	@total=$$($(GO) tool cover -func=cover.out | \
 		awk '/^total:/ {gsub("%", "", $$3); print $$3}'); \
 	floor=$$(awk -v b=$(COVERAGE_BASELINE) -v s=$(COVERAGE_SLACK) \

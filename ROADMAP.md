@@ -842,9 +842,17 @@ cross-build. The cheap part first:
 - Themes: user palettes for syntax_theme in `.dmed.conf` or a separate
   file, live preview in the wizard.
 - `.editorconfig`: indent_style/size, trim trailing whitespace, final newline.
-- TUI regression harness in CI: ConPTY scripts (winpty is already on the
-  machine) drive smoke scenarios (typing, saving, panels, chords) on the
-  native Windows build; the same harness with a linux pty as the transport.
+- [x] TUI regression harness in CI: `tests/tui` (Go, no Python) spawns the built
+      binary in a real pseudo-terminal through the editor's own `internal/ptyterm`
+      — ConPTY on Windows, creack/pty on Linux — types into it, and asserts on the
+      frames read back from vt10x plus the files left on disk. Typing and saving,
+      the fuzzy finder, the command palette, a docked shell round-trip and
+      "Ctrl+C never kills the editor". `make tui`, one CI step in each of the two
+      test jobs, `DMED_BIN` reusing the binary CI already built; a runner without a
+      working pty skips instead of failing.
+      What a pty cannot carry stays manual: alt chords (ConPTY eats `ESC`+letter),
+      F-keys and three-modifier chords — see the "Verifying the TUI" section of
+      AGENTS.md.
 - Plugins: the `buffer:modified`/`file:changed`/`agent:updated` events from
   `internal/events` exposed to Lua, an async API (callbacks instead of
   blocking), subprocess spawn with a timeout — the very
