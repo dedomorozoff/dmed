@@ -48,7 +48,7 @@ func TestTreeNavigateOpenAndFold(t *testing.T) {
 
 	m := New(root)
 	m.width, m.height = 100, 24
-	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl}) // focus tree
+	m.treeFocus = true
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})           // select b.txt
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})          // open file, defocus tree
 	if m.activeTab().path != filepath.Join(root, "b.txt") {
@@ -65,9 +65,9 @@ func TestTreeNavigateOpenAndFold(t *testing.T) {
 	}
 
 	// Re-focus tree to navigate to dir
-	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl}) // re-focus tree
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyUp})             // select sub dir
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})          // expand sub (stays in tree)
+	m.treeFocus = true
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyUp})     // select sub dir
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // expand sub (stays in tree)
 	found := false
 	for _, r := range m.treeRows {
 		if r.rel == "sub/a.txt" && r.depth == 2 {
@@ -125,9 +125,17 @@ func TestSidebarFocusLifecycle(t *testing.T) {
 	if m.treeFocus {
 		t.Fatal("tree starts unfocused")
 	}
+	// Ctrl+B when the sidebar is already showing hides it — the chord is a
+	// binary toggle, so every press changes the screen.
 	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
-	if !m.treeFocus {
-		t.Fatal("ctrl+b must focus visible tree")
+	if m.treeVisible {
+		t.Fatal("ctrl+b on a visible sidebar must hide it")
+	}
+	// Coming back it shows and focuses in one press, so the keyboard lands
+	// on the tree without a second invisible press.
+	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	if !m.treeVisible || !m.treeFocus {
+		t.Fatalf("ctrl+b on a hidden sidebar must show and focus it: visible=%v focus=%v", m.treeVisible, m.treeFocus)
 	}
 	typeStr(m, "zzz")
 	if m.tabs[0].buf.Text() != "\n" {
@@ -141,10 +149,11 @@ func TestSidebarFocusLifecycle(t *testing.T) {
 	if m.tabs[0].buf.Text() != "hi\n" {
 		t.Fatal("typing after esc must edit buffer")
 	}
-	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	// With focus out and the panel still visible, the next press hides it
+	// rather than silently re-focusing it.
 	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
 	if m.treeVisible {
-		t.Fatal("ctrl+b twice more must hide panel")
+		t.Fatal("ctrl+b must hide a visible sidebar even when it is unfocused")
 	}
 	v := m.View()
 	if strings.Contains(v.Content, "▸ sub") {
@@ -297,7 +306,7 @@ func TestTreeScrollKeepsSelectionVisible(t *testing.T) {
 
 	m := New(root)
 	m.width, m.height = 100, 12
-	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	m.treeFocus = true
 	er := m.treeEntryRows(m.viewHeight())
 
 	// Walk to the very bottom of the list.
@@ -330,7 +339,7 @@ func TestTreeNewFilePromptPrefillsTargetDir(t *testing.T) {
 	m.width, m.height = 100, 24
 
 	// Focus the tree and select sub dir.
-	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	m.treeFocus = true
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyUp}) // sub
 	m = press(m, tea.KeyPressMsg{Code: 'n'})
 	if !m.promptOpen || !m.promptNewFile {
@@ -353,7 +362,7 @@ func TestTreeNewFolderPromptCreatesInDir(t *testing.T) {
 	m := New(root)
 	m.width, m.height = 100, 24
 
-	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	m.treeFocus = true
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyUp}) // sub
 	m = press(m, tea.KeyPressMsg{Code: 'N'})
 	if !m.promptOpen || !m.promptNewFolder {
@@ -409,7 +418,7 @@ func TestTreeDuplicateCopiesFile(t *testing.T) {
 	m := New(root)
 	m.width, m.height = 100, 24
 
-	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	m.treeFocus = true
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown}) // select b.txt (0-index: after expand sorting)
 	m = press(m, tea.KeyPressMsg{Code: 'd'})
 	if _, err := os.Stat(filepath.Join(root, "b_copy.txt")); err != nil {
@@ -427,7 +436,7 @@ func TestTreeDeleteConfirmRemovesFileAndTab(t *testing.T) {
 	m.openPath(filepath.Join(root, "b.txt"))
 	m.width, m.height = 100, 24
 
-	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	m.treeFocus = true
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown}) // select b.txt
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyDelete})
 	if m.treeConfirm != "delete" {
@@ -454,7 +463,7 @@ func TestTreeTrashConfirmCancelKeepsFile(t *testing.T) {
 	m := New(root)
 	m.width, m.height = 100, 24
 
-	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	m.treeFocus = true
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown}) // select b.txt
 	m = press(m, tea.KeyPressMsg{Code: 't'})
 	if m.treeConfirm != "trash" {

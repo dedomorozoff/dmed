@@ -294,7 +294,7 @@ func TestQuitKeysWorkInAllModes(t *testing.T) {
 	// Project tree focused: Ctrl+Q must quit
 	m := New(dir)
 	m.width, m.height = 80, 24
-	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl}) // focus tree
+	m.treeFocus = true // focus tree
 	if !m.treeFocus {
 		t.Fatal("setup: tree must be focused")
 	}
@@ -362,7 +362,7 @@ func TestCloseTabKeysWorkInAllModes(t *testing.T) {
 	if len(mt.tabs) != 1 {
 		t.Fatalf("setup: want single untitled tab, got %d", len(mt.tabs))
 	}
-	mt = press(mt, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	mt.treeFocus = true
 	if !mt.treeFocus {
 		t.Fatal("setup: tree must be focused")
 	}
@@ -484,7 +484,7 @@ func TestSwitchGitTreePanels(t *testing.T) {
 	}
 
 	// Focus the tree ("project mode"), then Ctrl+G must open the Git panel
-	m = press(m, tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	m.treeFocus = true
 	if !m.treeFocus {
 		t.Fatal("setup: tree must be focused")
 	}

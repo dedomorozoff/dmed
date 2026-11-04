@@ -43,30 +43,36 @@ func (m Model) sidebarOn() bool {
 	return m.treeVisible && m.width >= treeMinWidth
 }
 
+// toggleTree is the sidebar's binary show/hide. It used to have a middle
+// state — visible but unfocused — so the first press only moved the keyboard
+// focus and the panel disappeared on the second; that made Ctrl+B feel broken
+// on any startup that already had the tree up. Now every press changes the
+// screen: hidden shows (and focuses), visible hides.
+//
+// While the Git panel is open the same chord is the switch back to the tree,
+// not a hide: it closes Git and reveals the sidebar in one motion, so a user
+// can leave the Git panel with the same key that opened it.
 func (m *Model) toggleTree() {
 	if m.gitOpen {
 		m.gitOpen = false
 		m.gitFocus = false
 		m.msg = ""
-	}
-	if !m.treeVisible {
 		m.treeVisible = true
 		m.treeFocus = true
-		m.gitFocus = false
 		m.chatFocus = false
 		m.rebuildTree()
 		return
 	}
-	if m.treeFocus {
-		m.treeVisible = false
-		m.treeFocus = false
-		m.gitFocus = false
-		m.chatFocus = false
-		return
-	}
-	m.treeFocus = true
 	m.gitFocus = false
 	m.chatFocus = false
+	if m.treeVisible {
+		m.treeVisible = false
+		m.treeFocus = false
+		return
+	}
+	m.treeVisible = true
+	m.treeFocus = true
+	m.rebuildTree()
 }
 
 func (m *Model) rebuildTree() {

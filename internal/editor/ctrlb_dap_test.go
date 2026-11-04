@@ -11,16 +11,17 @@ func TestCtrlBGivesTreeCursorWhileDebugPanelOpen(t *testing.T) {
 	m.width, m.height = 80, 24
 	m.dapOpen = true
 	m.dapFocus = 0
-	if !m.treeVisible {
-		m.treeVisible = true
-	}
+	// Start from hidden so Ctrl+B runs the show branch (the toggle is binary:
+	// a visible sidebar would hide on the next press).
+	m.treeVisible = false
+	m.treeFocus = false
 
-	// Ctrl+B moves the caret into the project tree instead of being eaten by
+	// Ctrl+B reveals and focuses the project tree instead of being eaten by
 	// the debug panel.
 	n, _ := m.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
 	m = n.(Model)
-	if !m.treeFocus {
-		t.Fatal("ctrl+b must focus the project tree even with the debug panel open")
+	if !m.treeVisible || !m.treeFocus {
+		t.Fatalf("ctrl+b must show and focus the project tree even with the debug panel open: visible=%v focus=%v", m.treeVisible, m.treeFocus)
 	}
 	if !m.dapOpen {
 		t.Fatal("ctrl+b must not close the debug panel")
