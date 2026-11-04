@@ -72,6 +72,9 @@ type tab struct {
 	img           *imageView   // a picture tab: decoded frames, nil = plain text
 	delimMatch    buffer.DelimiterMatch
 	hasDelimMatch bool
+	// modSeen is the buffer change counter the buffer:modified publication
+	// last saw; the per-frame compare notices a move without a text compare.
+	modSeen uint64
 }
 
 // wrapSeg describes one screen row of a wrapped (or plain) buffer line: the
@@ -309,9 +312,13 @@ type Model struct {
 	// syn is the syntax highlighter owned by the model. It was a package-level
 	// variable in internal/syntax, written from Update on config hot-reload
 	// and read while rendering; keeping it here removes that global mutable.
-	syn        *syntax.Highlighter
-	tr         i18n.Translator
-	plugins    *plugin.Manager
+	syn     *syntax.Highlighter
+	tr      i18n.Translator
+	plugins *plugin.Manager
+	// pluginCh is the wake channel of the plugin pump: an event or a spawn
+	// completion queues in the manager (from any goroutine) and one
+	// pluginPumpMsg here asks the UI thread to run the waiting Lua.
+	pluginCh   chan tea.Msg
 	lspClient  *lsp.Client
 	diagCh     chan lspDiagMsg
 	diags      map[string][]lsp.Diagnostic
@@ -849,12 +856,14 @@ var ruToEn = map[rune]rune{
 
 func New(paths ...string) Model {
 	fe := make(chan string, 16)
+	pe := make(chan tea.Msg, 8)
 	m := Model{
 		g:                     unicodeGlyphs,
 		width:                 80,
 		height:                24,
 		expanded:              map[string]bool{},
 		fileEvents:            fe,
+		pluginCh:              pe,
 		bus:                   events.New(),
 		diagCh:                make(chan lspDiagMsg, 64),
 		diags:                 map[string][]lsp.Diagnostic{},
@@ -939,6 +948,16 @@ func New(paths ...string) Model {
 	}
 	m.loadPlugins()
 	m.plugins.Emit(&m, "ready")
+	// The plugin pump: background-arriving Lua work (bus events, dmed.spawn
+	// completions) queues in the manager and one message on pluginCh asks the
+	// Update loop to run the waiting handlers on this thread.
+	m.plugins.SetWake(func() {
+		select {
+		case pe <- pluginPumpMsg{}:
+		default:
+		}
+	})
+	m.wirePluginEvents()
 	// Watch root directory for tree updates
 	if m.root != "" && m.watcher != nil {
 		m.watcher.Watch(m.root)
@@ -1209,8 +1228,19 @@ func waitForFileEvent(ch <-chan string) tea.Cmd {
 	}
 }
 
+// pluginPumpMsg wakes the Update loop to run the Lua work the plugin
+// manager has queued (bus events, dmed.spawn completions).
+type pluginPumpMsg struct{}
+
+func waitForPlugin(ch <-chan tea.Msg) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg { return <-ch }
+}
+
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh), waitForDAPEvent(m.dapCh), waitForSyntax(m.syntaxCh), waitForDiff(m.diffCh))
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh), waitForDAPEvent(m.dapCh), waitForSyntax(m.syntaxCh), waitForDiff(m.diffCh), waitForPlugin(m.pluginCh))
 }
 
 // Update handles a message and keeps the background highlighting in step
@@ -1224,6 +1254,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	mm.requestSyntax()
 	mm.requestDiff()
+	// Publish buffer:modified for the tabs whose change counter moved this
+	// frame; the bus subscription routes it into the plugin pump.
+	mm.emitBufferModified()
 	return mm, cmd
 }
 
@@ -1249,8 +1282,18 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and arm the waiter for the next one.
 		m.applySyntax(msg)
 		return m, waitForSyntax(m.syntaxCh)
+	case pluginPumpMsg:
+		// The pump: every Lua work a background goroutine queued (bus events,
+		// spawn completions) runs here, on the UI thread, and the waiter
+		// re-arms for the next wake. A burst coalesces into one drain.
+		m.drainPlugins()
+		return m, waitForPlugin(m.pluginCh)
 	case FileChangedMsg:
 		path := msg.Path
+		// Every file change funnels through the bus here: agent commits
+		// publish from their own goroutine, and the watcher's events join on
+		// the UI thread in this branch. The plugin pump delivers both.
+		m.publishBus(events.Event{Type: events.EventFileChanged, Path: path})
 		// Hot-reload config when .dmed.conf changes
 		if strings.HasSuffix(path, ".dmed.conf") {
 			m.cfg = config.Load(m.root)

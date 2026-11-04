@@ -38,6 +38,10 @@ type Buffer struct {
 	lastEditCol  int
 	lastEditSet  bool
 
+	// Number of text modifications this buffer has seen (bumped by pushUndo,
+	// the choke point every mutating method passes through). See Changes.
+	changes uint64
+
 	// Multi-cursor support: secondary cursors plus the word target used by
 	// AddNextOccurrence (Alt+D). See multicursor.go.
 	cursors []Cursor
@@ -80,12 +84,19 @@ func (b *Buffer) pushUndo() {
 	if len(b.undoStack) > maxUndo {
 		b.undoStack = b.undoStack[1:]
 	}
+	b.changes++
 	// Every operation that changes text pushes an undo step, so this is the one
 	// place that can answer "where was text last changed". The position is the
 	// caret the snapshot takes, i.e. where the change started: for a typing run
 	// that is the run's start, which is also what one Ctrl+Z restores.
 	b.lastEditLine, b.lastEditCol, b.lastEditSet = b.line, b.col, true
 }
+
+// Changes reports how many text modifications this buffer has recorded (one
+// per undo step funneled through pushUndo). Callers use it to notice "the
+// buffer changed since last frame" without a full-text compare, which is what
+// lets an editor keep the check per keystroke on a file of any size.
+func (b *Buffer) Changes() uint64 { return b.changes }
 
 // LastEdit reports where the most recent change was made, and false when this
 // buffer has never been edited. Undo does not clear it: after a Ctrl+Z the place
@@ -1102,6 +1113,10 @@ func (b *Buffer) Undo() bool {
 	b.redoStack = append(b.redoStack, snapshot{b.d.root, b.line, b.col})
 	b.d.root, b.line, b.col = s.root, s.line, s.col
 	b.goalCol = b.col
+	// Undo rewrites the text but not through pushUndo: it moves a root
+	// pointer instead of editing lines. The change counter still moves,
+	// or a listener of one Ctrl+Z would miss that the buffer just changed.
+	b.changes++
 	return true
 }
 

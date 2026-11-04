@@ -316,6 +316,14 @@ The code is split into focused internal packages:
   frames at MaxFrames. Consumed by the editor's picture tabs.
 - `internal/plugin/` — gopher-lua plugin framework (`dmed.*` API); plugins
   load from `~/.dmed/plugins` and `<project>/.dmed/plugins` with hot-reload.
+  Async Lua work runs through one pump (`plugin/async.go`): bus events and
+  `dmed.spawn` completions queue in the manager from any goroutine and are
+  drained on the editor's UI thread over a wake channel — Lua never runs on
+  the calling goroutine, and a job for a since-closed LState (hot-reload,
+  uninstall) is skipped. The bus events a plugin may follow are subscribed
+  once in `New` (`wirePluginEvents`); `buffer:modified`'s publisher is the
+  per-frame compare of `buffer.Changes`, a counter `pushUndo`/`Undo` bump,
+  not a text compare.
 - `internal/vcs/` — git via go-git (pure Go, no system git needed): status in
   the gutter, hunks, side-by-side diffs, stage/unstage, commit, history,
   branches, and `RevertCommit`/`LastCommitWithSubject` — the refusal-safe

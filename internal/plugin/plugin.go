@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
@@ -67,6 +68,11 @@ type Plugin struct {
 	keyHandlers   map[string][]lua.LValue
 	commandRefs   map[string]*Command
 	eventHandlers map[string][]lua.LValue
+	// closed is set (on the UI thread) when the plugin's LState is dropped by
+	// Reload/Remove; a job queued for delivery afterwards is skipped instead
+	// of crashing into a closed VM. Load and delivery both run on the UI
+	// thread, so a plain flag is enough.
+	closed bool
 }
 
 // Manager owns all loaded plugins.
@@ -75,6 +81,11 @@ type Manager struct {
 	commands []*Command
 	// timeout bounds every Lua call and every plugin load; see budget().
 	timeout time.Duration
+	// async delivery: pending collects events and spawn completions from any
+	// goroutine; wake asks the host to drain on the UI thread. See async.go.
+	asyncMu sync.Mutex
+	pending []queuedJob
+	wake    func()
 }
 
 // New returns an empty manager.
@@ -248,6 +259,7 @@ func (m *Manager) removePlugin(i int) {
 		}
 	}
 	m.commands = kept
+	p.closed = true
 	p.L.Close()
 }
 
@@ -268,12 +280,22 @@ func (m *Manager) Remove(path string) {
 // the call's error (Protect: true), so a spinning handler stalls for the
 // budget and then reports, instead of hanging the editor for good.
 func (m *Manager) invoke(p *Plugin, host Host, fn lua.LValue) {
+	m.invokeWith(p, host, fn, nil)
+}
+
+// invokeWith is invoke with arguments, the shape the async deliveries need:
+// a handler receives the event's payload, a spawn callback its result table.
+// It refuses a plugin whose LState was closed after the job was queued.
+func (m *Manager) invokeWith(p *Plugin, host Host, fn lua.LValue, args []lua.LValue) {
+	if p.closed {
+		return
+	}
 	installHostAPI(p, host)
 	ctx, cancel := context.WithTimeout(context.Background(), m.budget())
 	defer cancel()
 	p.L.SetContext(ctx)
 	defer p.L.RemoveContext()
-	if err := p.L.CallByParam(lua.P{Fn: fn, NRet: 0, Protect: true}); err != nil {
+	if err := p.L.CallByParam(lua.P{Fn: fn, NRet: 0, Protect: true}, args...); err != nil {
 		// Plugin errors used to vanish silently; the status bar is the one
 		// user-visible surface this package-side code has.
 		host.Status(fmt.Sprintf("plugin %s: %v", p.name, err))
@@ -307,6 +329,16 @@ func installRegAPI(p *Plugin) {
 		event := L.CheckString(1)
 		fn := L.CheckAny(2)
 		p.eventHandlers[event] = append(p.eventHandlers[event], fn)
+		return 0
+	}))
+
+	// spawn runs a subprocess asynchronously: the call returns at once and
+	// the callback gets {code=, out=, err=, timeout=} when the process ends
+	// or is killed at its deadline. Delivered on the UI thread like events.
+	p.L.SetField(dmed, "spawn", p.L.NewFunction(func(L *lua.LState) int {
+		spec := L.CheckAny(1)
+		fn := L.CheckAny(2)
+		p.mgr.startSpawn(p, L, spec, fn)
 		return 0
 	}))
 }

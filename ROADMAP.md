@@ -164,7 +164,8 @@ in the Makefile as insurance).
       ("Plugins: Install..."): built-in (Emmet, snippets) + remote from
       `plugins/` on GitHub (`[plugins] repo/dir/branch`), install/uninstall,
       without network — the built-in set. Uppercase is built into the editor (Ctrl+U).
-      Docs in `docs/PLUGINS.md`. Remaining: more events/API.
+      Docs in `docs/PLUGINS.md`. More events/API: done in M13 (bus events,
+      async delivery, `dmed.spawn`).
 - [x] Configuration (`.dmed.conf` INI): tab_width, syntax_theme, line_numbers,
       skipped_dirs, model, ollama_url, system_prompt, context_max,
       tree_width, chat_width_pct. `Settings: Open Config` in the palette,
@@ -555,7 +556,7 @@ plan with per-item estimates, design decisions and open questions lives in
       traceable in history rather than a silent tree rewrite. No external
       terminal needed.
 
-## M9–M13 — planned (M9, M10 and M11 done)
+## M9–M13 (M9, M10, M11 and M13 done; M12 planned)
 
 The list below is drawn from the aftermath of Post-M8: the "chroma →
 tree-sitter (later)" note in the stack, the plugins' "Remaining: more
@@ -1016,10 +1017,25 @@ cross-build. The cheap part first:
       What a pty cannot carry stays manual: alt chords (ConPTY eats `ESC`+letter),
       F-keys and three-modifier chords — see the "Verifying the TUI" section of
       AGENTS.md.
-- Plugins: the `buffer:modified`/`file:changed`/`agent:updated` events from
-  `internal/events` exposed to Lua, an async API (callbacks instead of
-  blocking), subprocess spawn with a timeout — the very
-  "Remaining: more events/API".
+- [x] **Plugins: bus events, async API, subprocess spawn** — the
+      `buffer:modified`/`file:changed`/`agent:updated` events from
+      `internal/events` exposed to Lua, an async delivery (callbacks instead
+      of blocking), and `dmed.spawn` with a timeout. The three events queue
+      in the plugin manager (`Mgr.PostEvent`, safe from any goroutine) and
+      reach Lua through one wake channel on the UI thread (`Drain`), so a
+      handler never runs on the goroutine that published and typing never
+      waits for Lua; handlers are resolved at delivery time, so a hot-reload
+      between queue and delivery cannot run a handler into a closed VM. The
+      `buffer:modified` publisher is a per-frame compare of the buffer's
+      change counter (`buffer.Changes`, bumped by `pushUndo` and by `Undo`,
+      which swaps root pointers off the pushUndo path), replacing an O(n)
+      full-text compare per keystroke. `dmed.spawn` runs a subprocess under a
+      wall-clock deadline (default 10 s, clamped 100 ms–10 min), streams
+      stdout/stderr through a 1 MB cap and delivers
+      `{code=, out=, err=, timeout=}` to the callback through the same pump.
+      The remaining editor events (`ready`, `file_open`, `save`) are
+      synchronous as before, being the places plugins hook directly into the
+      UI flow.
 
 ## Tech debt left by the October audit
 

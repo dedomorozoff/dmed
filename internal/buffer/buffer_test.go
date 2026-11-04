@@ -36,6 +36,46 @@ func TestInsertBackspace(t *testing.T) {
 	}
 }
 
+func TestChangesCountsEditsNotMoves(t *testing.T) {
+	b := New()
+	if b.Changes() != 0 {
+		t.Fatalf("fresh buffer changes=%d", b.Changes())
+	}
+	// Movement and selection change nothing.
+	b.MoveRight()
+	b.SetCursor(0, 0)
+	if b.Changes() != 0 {
+		t.Fatal("a caret move counted as a change")
+	}
+	// One counter answers for every edit shape, each funneled through
+	// pushUndo (or, for undo, its own root-pointer swap).
+	b.Insert('x')
+	if b.Changes() != 1 {
+		t.Fatalf("changes=%d after one insert", b.Changes())
+	}
+	b.InsertNewline()
+	if b.Changes() != 2 {
+		t.Fatalf("changes=%d after the newline", b.Changes())
+	}
+	b.Undo()
+	b.Undo()
+	if b.Changes() != 4 {
+		t.Fatalf("changes=%d after two undos", b.Changes())
+	}
+	if b.Text() != "\n" {
+		t.Fatalf("text after undos: %q", b.Text())
+	}
+	b.Redo()
+	if b.Changes() != 5 {
+		t.Fatalf("changes=%d after redo", b.Changes())
+	}
+	// A freshly loaded buffer starts clean, so a reloaded tab is told apart
+	// from its previous self with no special-casing.
+	if l := Load("hello"); l.Changes() != 0 {
+		t.Fatalf("loaded buffer changes=%d", l.Changes())
+	}
+}
+
 func TestEnterSplitAndJoin(t *testing.T) {
 	b := Load("abcd")
 	b.MoveRight()

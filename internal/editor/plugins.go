@@ -9,11 +9,66 @@ import (
 
 	"dmed/internal/buffer"
 	"dmed/internal/bundled"
+	"dmed/internal/events"
 	"dmed/internal/plugin"
 )
 
 // Model implements plugin.Host so Lua plugins can read/edit the active buffer.
 var _ plugin.Host = (*Model)(nil)
+
+// pluginPumpMsg is declared here (not in editor.go) because the pump's
+// channel and both helpers live in this file.
+
+func (m *Model) drainPlugins() {
+	if m.plugins != nil && m.plugins.Pending() > 0 {
+		m.plugins.Drain(m)
+	}
+}
+
+// emitBufferModified publishes buffer:modified for every tab whose change
+// counter moved since the last frame. The counter (buffer.Changes, bumped by
+// pushUndo) makes noticing a change O(1) instead of a full-text compare per
+// keystroke, and publishing on the UI thread means every publisher — the
+// plugin pump, an external reload that rebuilds a buffer — reaches Lua the
+// same way. A handler that edits the buffer will see the event again for its
+// own edit, as any document-change listener would.
+func (m *Model) emitBufferModified() {
+	if m.bus == nil {
+		return
+	}
+	for i := range m.tabs {
+		t := &m.tabs[i]
+		if n := t.buf.Changes(); n != t.modSeen {
+			t.modSeen = n
+			m.bus.Publish(events.Event{Type: events.EventBufferModified, Path: t.path})
+		}
+	}
+}
+
+// publishBus is the nil-safe publish a test-built Model needs.
+func (m *Model) publishBus(e events.Event) {
+	if m.bus != nil {
+		m.bus.Publish(e)
+	}
+}
+
+// wirePluginEvents subscribes the plugin pump to the three bus events a Lua
+// plugin may follow. Called once from New, after the manager is loaded: every
+// publisher (agent commit on its own goroutine, the watcher branch, the
+// change counter per frame) reaches plugins through the one queue.
+func (m *Model) wirePluginEvents() {
+	if m.bus == nil || m.plugins == nil {
+		return
+	}
+	for ev, name := range map[events.EventType]string{
+		events.EventFileChanged:    "file:changed",
+		events.EventAgentUpdated:   "agent:updated",
+		events.EventBufferModified: "buffer:modified",
+	} {
+		name := name
+		m.bus.Subscribe(ev, func(e events.Event) { m.plugins.PostEvent(name, e.Path) })
+	}
+}
 
 func (m *Model) Text() string       { return m.cur().buf.Text() }
 func (m *Model) SetText(s string)   { m.cur().buf = buffer.Load(s) }

@@ -83,6 +83,57 @@ dmed.on("file_open", function() end)  -- a file tab was opened
 dmed.on("save", function() end)       -- the active buffer was saved
 ```
 
+#### Change-tracking events
+
+The three editor events above fire synchronously where they happen. On top of
+them, the event bus (`internal/events`) is exposed to plugins:
+
+```lua
+dmed.on("buffer:modified", function(path) end) -- the buffer's text changed
+dmed.on("file:changed",    function(path) end) -- a file changed on disk
+dmed.on("agent:updated",   function(id)   end) -- the background agent queue moved
+```
+
+- `path` is the project path of the tab (empty for the untitled buffer) or of
+  the file that changed; `id` is the agent task id.
+- `file:changed` covers both outside sources that edit files: an agent commit
+  and an external editor/watcher change.
+- These three fire **asynchronously**: they are queued the moment they happen
+  and delivered a step later on the editor's UI thread — typing never waits
+  for a handler. A burst between two UI steps coalesces into one drain. The
+  synchronous events (`ready`, `file_open`, `save`) stay where they were.
+- A handler that edits the buffer will see `buffer:modified` again for its
+  own edit, as any document-change listener would; guard against re-entry.
+
+### Subprocesses
+
+```lua
+dmed.spawn("gofmt -w main.go", function(res)
+  if res.code ~= 0 then
+    dmed.status("gofmt: " .. res.err)
+  end
+end)
+
+dmed.spawn({
+  cmd = "go", args = {"build", "./..."},
+  timeout = 30,                 -- seconds, default 10
+  cwd = project_root,           -- optional
+}, function(res)
+  dmed.status(("exit=%d out=%s"):format(res.code, res.out))
+end)
+```
+
+The call returns at once and the callback gets a table when the process ends:
+
+- `res.code` — exit code (`-1` if the process could not start, with the
+  reason in `res.err`);
+- `res.out` / `res.err` — captured stdout/stderr, first 1 MB each;
+- `res.timeout` — `true` when the deadline killed the process (the callback
+  still receives whatever output was already there).
+
+There is no shell: the string form splits on whitespace, so a path with
+spaces needs the table form above.
+
 ### Buffer / editor functions
 
 | Function | Description |
