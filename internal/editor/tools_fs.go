@@ -65,9 +65,11 @@ func (p projectSkip) skipDir(name string) bool {
 // simply huge).
 func (p projectSkip) skipFile(path string, size int64) bool {
 	base := strings.ToLower(filepath.Base(path))
-	if base == ".dmed_session.json" {
-		// The editor's own restart state: it lives in the project root and
-		// means nothing to an agent or a search.
+	switch base {
+	case ".dmed_session.json", ".dmed_chat.json", ".dmed_agent.json":
+		// The editor's own state files (restart session, chat threads, agent
+		// task store): they live in the project root and mean nothing to an
+		// agent or a search.
 		return true
 	}
 	if p.files[strings.ToLower(filepath.Ext(path))] {

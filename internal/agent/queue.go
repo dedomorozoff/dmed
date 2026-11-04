@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -9,13 +10,18 @@ import (
 
 // Queue is a thread-safe FIFO of agent Tasks. Every mutation publishes an
 // EventAgentUpdated on the provided bus so the TUI can repaint, and Enqueue
-// wakes the worker channel so it does not poll.
+// wakes the workers so they do not poll.
 type Queue struct {
 	mu    sync.Mutex
 	tasks []Task // sorted oldest -> newest, includes finished tasks
 	bus   publisher
-	wake  chan struct{} // buffered(1); signaled when a task is enqueued
 	order uint64
+
+	// One wake channel per registered worker. They are guarded by wakeMu, not
+	// mu: notify runs while mu is held, and a worker registration must not
+	// deadlock against an enqueue mid-flight.
+	wakeMu sync.Mutex
+	wakes  []chan struct{}
 }
 
 // events.Publisher is the subset of the event bus the queue needs, so the
@@ -26,18 +32,31 @@ type publisher interface {
 
 // NewQueue creates an empty queue. bus may be nil (publishing becomes a no-op).
 func NewQueue(bus publisher) *Queue {
-	return &Queue{bus: bus, wake: make(chan struct{}, 1)}
+	return &Queue{bus: bus}
 }
 
-// Wake returns the channel that is signaled whenever a task is enqueued.
-// A blocked worker drains it and re-checks the queue; a buffered(1) channel is
-// enough for a single worker because the wake is only a hint to call Next.
-func (q *Queue) Wake() <-chan struct{} { return q.wake }
+// Wake registers one worker and returns the channel it blocks on while the
+// queue is empty: every Enqueue signals all registered workers, so a pool of
+// workers drains a burst instead of one channel handing off one token. Each
+// call registers a new channel — a caller asks once per worker goroutine.
+// The wake is only a hint to call Next again, so buffered(1) per worker is
+// enough and a coalesced burst loses no work.
+func (q *Queue) Wake() <-chan struct{} {
+	ch := make(chan struct{}, 1)
+	q.wakeMu.Lock()
+	q.wakes = append(q.wakes, ch)
+	q.wakeMu.Unlock()
+	return ch
+}
 
 func (q *Queue) notify() {
-	select {
-	case q.wake <- struct{}{}:
-	default:
+	q.wakeMu.Lock()
+	defer q.wakeMu.Unlock()
+	for _, ch := range q.wakes {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -214,9 +233,56 @@ func (q *Queue) findLocked(id string) int {
 	return -1
 }
 
-// newID builds a short, unique, sortable task ID.
+// Restore seeds the queue with tasks from a previous session (agent-panel
+// persistence). An ID already present is skipped, and the order counter is
+// advanced past every restored ID so a fresh Enqueue cannot collide with one.
+// It reports how many tasks landed. The caller normalises interrupted states
+// before restoring: the queue stores, it does not judge.
+func (q *Queue) Restore(tasks []Task) int {
+	q.mu.Lock()
+	added := 0
+	for _, t := range tasks {
+		if q.findLocked(t.ID) >= 0 {
+			continue
+		}
+		tt := t.clone()
+		q.tasks = append(q.tasks, tt)
+		if o := orderOfID(t.ID); o > q.order {
+			q.order = o
+		}
+		q.publish(tt.ID)
+		added++
+	}
+	q.mu.Unlock()
+	if added > 0 {
+		q.notify()
+	}
+	return added
+}
+
+// orderOfID extracts the counter embedded by newID ("t<date>-<order>"); an
+// ID from an older format yields 0 and simply does not move the counter.
+func orderOfID(id string) uint64 {
+	i := strings.LastIndexByte(id, '-')
+	if i < 0 || i == len(id)-1 {
+		return 0
+	}
+	var n uint64
+	for _, c := range id[i+1:] {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + uint64(c-'0')
+	}
+	return n
+}
+
+// newID builds a short, unique, sortable task ID. The date is part of it
+// because IDs survive the session: a restored task and a fresh one from the
+// same clock minute must not share an address, and the panel, the revert
+// trail and the event bus all name a task by it.
 func newID(order uint64, now time.Time) string {
-	return "t" + now.Format("150405") + "-" + itoa(order)
+	return "t" + now.Format("0102-150405") + "-" + itoa(order)
 }
 
 func itoa(n uint64) string {

@@ -217,8 +217,8 @@ func (c *Client) Initialize(ctx context.Context, name, version string) (ServerIn
 			Name    string `json:"name"`
 			Version string `json:"version"`
 		} `json:"serverInfo"`
-		ProtocolVersion string            `json:"protocolVersion"`
-		Capabilities    map[string]any    `json:"capabilities"`
+		ProtocolVersion string         `json:"protocolVersion"`
+		Capabilities    map[string]any `json:"capabilities"`
 	}
 	if err := json.Unmarshal(res, &out); err != nil {
 		return ServerInfo{}, fmt.Errorf("mcp: bad initialize result: %w", err)

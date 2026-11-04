@@ -799,6 +799,10 @@ type Model struct {
 	agentPromptIn   []rune
 	agentSel        int
 	agentOffset     int
+	// agentStoreSig is the durable shape last written to .dmed_agent.json
+	// (ids+statuses+errors, no progress): a refresh that only moved progress
+	// must not rewrite the file.
+	agentStoreSig string
 
 	// Agent diff review (T6): a task's proposed changes shown side-by-side.
 	agentReviewMode   bool
@@ -1537,6 +1541,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A delegation may have finished while the chat was parked on it; the
 		// queue update is what wakes the conversation back up.
 		m.pollSubAgentPark()
+		// The queue's durable shape (ids, statuses, errors) is what the store
+		// compares; a progress-only refresh writes nothing.
+		m.saveAgentStore()
 		return m, waitForAgentRefresh(m.agentCh)
 	case gitTransferMsg:
 		if msg.err != "" {

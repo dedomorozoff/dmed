@@ -185,7 +185,14 @@ The code is split into focused internal packages:
   renumbers both), `tree.go`, `mouse.go`,
   `completion.go`, `palette.go`, `terminal.go`, `chat.go`
   (AI chat), `ai_inline.go` (inline rewrite → diff review), `ghost.go`
-  (Copilot-style ghost text), `agent_panel.go` (agent task queue UI),
+  (Copilot-style ghost text), `agent_panel.go` (agent task queue UI;
+  `[agent] workers` goroutines drain the queue in parallel, each waiting on its
+  own wake channel; `r` retries a finished task as a new one, sub tasks are
+  refused — the chat waiting on them is gone), `agent_store.go`
+  (`.dmed_agent.json`: the queue's durable shape — ids, statuses, errors, full
+  Changes — rewritten only when that shape moves, so a progress tick writes
+  nothing; a running/queued task is stored cancelled with the exit as its
+  cause, and the quit path writes unconditionally),
   `git_panel.go`, `diffview.go`, `sqlite_view.go` (SQLite browser: table
   strip + paged row grid, immediate cell edits through `internal/sqlitedb`),
   `imageview.go` (picture tabs: ASCII/half-block render via
@@ -241,8 +248,12 @@ The code is split into focused internal packages:
   breakpoints, continue/step, panel state), `dap_panel.go`
   (threads/stack/variables/console panel rendering).
 - `internal/agent/` — background AI agents (the project-rule core).
-  `queue.go` — thread-safe task queue with progress/cancel; `runner.go` runs
-  tasks; `apply.go` is the **atomic Applier**: it validates that every
+  `queue.go` — thread-safe task queue with progress/cancel; each worker
+  registers its own `Wake()` channel (one Enqueue signals all of them, so a
+  pool of workers drains a burst) and `Restore` seeds a fresh queue from the
+  persisted store, moving the order counter past every restored ID. Task IDs
+  carry the date because they outlive the session. `runner.go` runs tasks;
+  `apply.go` is the **atomic Applier**: it validates that every
   `Change.Orig` still matches on-disk content (stale patches reject the whole
   series) and writes all-or-nothing with rollback; `commit.go` turns an
   approved, applied series into a single git commit. See `model.go` for the

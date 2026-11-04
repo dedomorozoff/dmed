@@ -137,6 +137,7 @@ var paneCommands = map[paneID][]paneCommand{
 		{act: "agent.cancel", chords: []string{"x", "ctrl+d"}},
 		{act: "agent.review", chords: []string{"enter"}},
 		{act: "agent.new-task", chords: []string{"n"}},
+		{act: "agent.retry", chords: []string{"r"}},
 		{act: "agent.revert", chords: []string{"u", "U"}},
 	},
 	// agent-prompt

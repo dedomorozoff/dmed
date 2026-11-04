@@ -122,6 +122,14 @@ type AgentConfig struct {
 	// SubagentRounds caps the tool loop of one delegated task; 0 means the
 	// built-in cap (6).
 	SubagentRounds int
+	// Workers is how many agent tasks run in parallel in the queue. Two
+	// default: a task is usually waiting for the model, not for the CPU, and
+	// a second agent costs nothing the user did not already opt into by
+	// starting two tasks. Values outside 1..4 are refused by the loader.
+	Workers int
+	// Persist, when true (the default), saves the task list to
+	// .dmed_agent.json so reviews survive a restart.
+	Persist bool
 }
 
 // EditorConfig holds editor-related settings.
@@ -294,6 +302,8 @@ func Settings(cfg Config) []Setting {
 		{"ai", "models_path", cfg.AI.ModelsPath},
 		{"agent", "context_max", strconv.Itoa(cfg.Agent.ContextMax)},
 		{"agent", "subagent_rounds", strconv.Itoa(cfg.Agent.SubagentRounds)},
+		{"agent", "workers", strconv.Itoa(cfg.Agent.Workers)},
+		{"agent", "persist", strconv.FormatBool(cfg.Agent.Persist)},
 		{"plugins", "repo", cfg.Plugins.Repo},
 		{"plugins", "dir", cfg.Plugins.Dir},
 		{"plugins", "branch", cfg.Plugins.Branch},
@@ -391,7 +401,7 @@ func Defaults() Config {
 			FreeFallback: true,
 			// An MCP server runs code the editor cannot inspect: ask first.
 			MCPAsk: true,
-			Mode_:        string(ModeAct),
+			Mode_:  string(ModeAct),
 			SystemPrompt: "You are a helpful coding assistant inside the dmed editor. " +
 				"Answer concisely. You have tools: EDIT creates or rewrites a whole file, " +
 				"READ reads a file, SEARCH finds text, LIST_DIR and GLOB navigate the project, " +
@@ -403,6 +413,8 @@ func Defaults() Config {
 		Agent: AgentConfig{
 			SystemPrompt: "",
 			ContextMax:   256 * 1024,
+			Workers:      2,
+			Persist:      true,
 		},
 		UI: UIConfig{
 			TreeWidth:    25,
@@ -678,6 +690,16 @@ func loadFile(path string, cfg *Config) {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				cfg.Agent.SubagentRounds = n
 			}
+		}
+		if v, ok := s["workers"]; ok {
+			// Out of range is a mistake, not a preference: keep the default
+			// rather than silently running one or a dozen workers.
+			if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 4 {
+				cfg.Agent.Workers = n
+			}
+		}
+		if v, ok := s["persist"]; ok {
+			cfg.Agent.Persist = parseBool(v)
 		}
 	}
 

@@ -1027,3 +1027,44 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(data)
 }
+
+// TestLoadAgentWorkersAndPersist pins the parallel-agent knobs: workers
+// outside 1..4 is a typo, not a preference, so the default survives it, and
+// persist=false must silence the store entirely.
+func TestLoadAgentWorkersAndPersist(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[agent]
+workers = 3
+persist = false
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if cfg.Agent.Workers != 3 {
+		t.Errorf("workers = %d, want 3", cfg.Agent.Workers)
+	}
+	if cfg.Agent.Persist {
+		t.Error("persist = false must switch the store off")
+	}
+	if Defaults().Agent.Workers != 2 || !Defaults().Agent.Persist {
+		t.Errorf("defaults = workers %d, persist %v, want 2 and true",
+			Defaults().Agent.Workers, Defaults().Agent.Persist)
+	}
+
+	// Out of range keeps the default rather than silently running one (or
+	// a dozen) workers.
+	if err := os.WriteFile(path, []byte("[agent]\nworkers = 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg := Load(dir); cfg.Agent.Workers != 2 {
+		t.Errorf("workers = 0 must keep the default, got %d", cfg.Agent.Workers)
+	}
+	if err := os.WriteFile(path, []byte("[agent]\nworkers = 99\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg := Load(dir); cfg.Agent.Workers != 2 {
+		t.Errorf("workers = 99 must keep the default, got %d", cfg.Agent.Workers)
+	}
+}

@@ -85,13 +85,34 @@ func (m *Model) ensureAgent() tea.Cmd {
 		}
 	})
 
-	go debug.CapturePanicReport(m.agentWorker)
+	// Yesterday's tasks come back before today's worker starts: a review left
+	// unfinished (or an exit that interrupted a run) is the reason the store
+	// exists, and the panel must show it on the first open.
+	m.loadAgentStore(m.agentQueue)
+
+	// The worker pool: [agent] workers goroutines, each waiting on its own
+	// wake channel, drain the queue. A task is mostly waiting on the model,
+	// so a second worker turns two queued tasks from serial into parallel
+	// for the price of one more request.
+	n := m.cfg.Agent.Workers
+	if n < 1 {
+		n = 1
+	}
+	if n > 4 {
+		n = 4
+	}
+	for range n {
+		go debug.CapturePanicReport(m.agentWorker)
+	}
 
 	return waitForAgentRefresh(m.agentCh)
 }
 
 // agentWorker drains the queue in a loop, running each task to completion.
+// It waits on the wake channel it registered for itself — with more than one
+// worker there is no single channel to share.
 func (m *Model) agentWorker() {
+	wake := m.agentQueue.Wake()
 	for {
 		if m.agentCtx != nil && m.agentCtx.Err() != nil {
 			return
@@ -101,7 +122,7 @@ func (m *Model) agentWorker() {
 			select {
 			case <-m.agentCtx.Done():
 				return
-			case <-m.agentQueue.Wake():
+			case <-wake:
 			}
 			continue
 		}
@@ -253,6 +274,8 @@ func (m *Model) handleAgent(s string, msg tea.KeyPressMsg) tea.Cmd {
 	case "agent.new-task":
 		m.agentPrompt = true
 		m.agentPromptIn = nil
+	case "agent.retry":
+		m.retryAgentSel()
 	case "agent.revert":
 		m.undoLastAgentApply()
 	}
@@ -290,6 +313,32 @@ func (m *Model) cancelAgentSel() {
 	id := tasks[m.agentSel].ID
 	m.agentRunner.Cancel(id)
 	m.msg = m.t("msg.agent_cancelled", id)
+}
+
+// retryAgentSel queues the same prompt again as a fresh task. A retry is a
+// new task, not a resurrection: the interrupted one keeps its row, its error
+// and its place in history, while the new one starts with a clean ID — the
+// panel shows what happened, not one task edited into telling a different
+// story. A delegated (sub) task is refused because its chat that waits on
+// the result is long gone; running it as a plain agent would deliver changes
+// nobody asked to see.
+func (m *Model) retryAgentSel() {
+	tasks := m.agentQueue.Snapshot()
+	if len(tasks) == 0 || m.agentSel < 0 || m.agentSel >= len(tasks) {
+		return
+	}
+	t := tasks[m.agentSel]
+	if t.Kind == agent.KindSubagent {
+		m.msg = m.t("msg.agent_retry_sub")
+		return
+	}
+	if !t.Terminal() {
+		m.msg = m.t("msg.agent_retry_busy")
+		return
+	}
+	m.agentQueue.Enqueue(t.Prompt)
+	m.agentSel = len(m.agentQueue.Snapshot()) - 1
+	m.msg = m.t("msg.agent_retried", t.ID)
 }
 
 // agentListHeight is how many tasks fit on screen at once.

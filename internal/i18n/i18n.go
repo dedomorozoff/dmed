@@ -482,6 +482,10 @@ var enCatalog = map[string]string{
 	// Agent panel
 	"msg.agent_queued":        "agent task queued",
 	"msg.agent_cancelled":     "cancelled %s",
+	"msg.agent_restored":      "restored %d agent task(s) from the previous session",
+	"msg.agent_retried":       "re-queued the prompt of %s as a new task",
+	"msg.agent_retry_sub":     "a delegated task is retried from the chat that asked for it",
+	"msg.agent_retry_busy":    "only a finished task can be retried",
 	"agent.task_label":        " Agent task: ",
 	"agent.sub_badge":         " [sub]",
 	"msg.agent_nothing":       "nothing to review for this task",
@@ -1008,6 +1012,10 @@ var ruCatalog = map[string]string{
 	// Agent panel
 	"msg.agent_queued":        "задача агента поставлена в очередь",
 	"msg.agent_cancelled":     "отменено %s",
+	"msg.agent_restored":      "восстановлено задач агента из прошлого сеанса: %d",
+	"msg.agent_retried":       "промпт %s поставлен в очередь заново новой задачей",
+	"msg.agent_retry_sub":     "делегированную задачу повторяет чат, который её запросил",
+	"msg.agent_retry_busy":    "повторять можно только завершённую задачу",
 	"agent.task_label":        " Задача агента: ",
 	"agent.sub_badge":         " [под]",
 	"msg.agent_nothing":       "нечего просматривать для этой задачи",

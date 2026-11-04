@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"sync"
 	"testing"
 
@@ -227,26 +228,62 @@ func TestQueueConcurrentReadWrite(t *testing.T) {
 
 func TestWakeSignalsOnEnqueue(t *testing.T) {
 	q := NewQueue(nil)
-	// Drain any stale token so the check below starts clean.
+	// Wake registers one worker's channel; the worker keeps it and waits on
+	// that same channel for its whole life.
+	wake := q.Wake()
 	select {
-	case <-q.Wake():
-	default:
-	}
-	select {
-	case <-q.Wake():
+	case <-wake:
 		t.Fatalf("wake should not be signaled before any enqueue")
 	default:
 	}
 	q.Enqueue("a")
 	select {
-	case <-q.Wake():
+	case <-wake:
 	default:
 		t.Fatalf("expected a wake signal after first enqueue")
 	}
 	q.Enqueue("b")
 	select {
-	case <-q.Wake():
+	case <-wake:
 	default:
 		t.Fatalf("expected a wake signal after second enqueue")
+	}
+}
+
+// TestWakeWakesEveryWorker pins the pool property: with several workers
+// registered, one enqueue signals all of them, so two queued tasks can start
+// in parallel instead of one worker collecting tokens one at a time.
+func TestWakeWakesEveryWorker(t *testing.T) {
+	q := NewQueue(nil)
+	w1 := q.Wake()
+	w2 := q.Wake()
+	q.Enqueue("a")
+	for i, ch := range []<-chan struct{}{w1, w2} {
+		select {
+		case <-ch:
+		default:
+			t.Fatalf("worker %d was not woken", i)
+		}
+	}
+}
+
+func TestRestoreSeedsQueueAndKeepsOrder(t *testing.T) {
+	q := NewQueue(nil)
+	// A restored high-order ID must move the counter: a fresh Enqueue gets a
+	// different ID than a task from the previous session.
+	q.Restore([]Task{
+		{ID: "t1104-120000-9", Prompt: "old", Status: StatusReview},
+		{ID: "t1104-120000-9", Prompt: "duplicate"}, // same ID: skipped
+	})
+	if n := len(q.Snapshot()); n != 1 {
+		t.Fatalf("snapshot = %d tasks, want 1", n)
+	}
+	fresh := q.Enqueue("new")
+	if fresh.ID == "t1104-120000-9" {
+		t.Fatalf("restored and fresh IDs collide: %s", fresh.ID)
+	}
+	// Order moved: the fresh task is #10, not #1.
+	if o := strings.HasSuffix(fresh.ID, "-10"); !o {
+		t.Fatalf("fresh ID = %s, want the counter to continue past the restored one", fresh.ID)
 	}
 }

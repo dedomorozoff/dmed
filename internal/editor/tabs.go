@@ -276,6 +276,10 @@ func (m *Model) shutdown() {
 		m.agentCancel()
 		m.agentCancel = nil
 	}
+	// In-flight tasks are written as cancelled-interrupted, then the panel
+	// finds them there next session. Unconditional: the signature may lag a
+	// progress-heavy last minute, and a lost review is the point of this file.
+	m.forceSaveAgentStore()
 	if m.watcher != nil {
 		_ = m.watcher.Close()
 	}

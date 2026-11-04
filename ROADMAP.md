@@ -848,8 +848,29 @@ cross-build. The cheap part first:
         park queue, the same `y`/`n` protection as RUN's confirmation, the
         placeholder replaced by the real outcome. The unit tests drive the
         real protocol over `net.Pipe`, so no test spawns a server process.
-- Agent tasks survive a restart: persist the task transcript, resume from
+- [x] Agent tasks survive a restart: persist the task transcript, resume from
   the panel, parallel agents in the queue.
+  - [x] **`.dmed_agent.json` beside the session and chat files.** Every status
+        change writes the durable shape (ids, statuses, errors — a progress
+        tick rewrites nothing); a running or queued task cannot outlive the
+        editor that streamed it, so it is stored cancelled with "interrupted —
+        the editor exited" naming the cause, and a review left unfinished comes
+        back whole, changes included, ready to `y` after a crash. `persist =
+        false` switches the file off; a corrupt one opens an empty queue rather
+        than failing the editor.
+  - [x] **Restore is a seed, not a resurrection.** `Queue.Restore` appends the
+        saved tasks, skips an ID it already has, and moves the order counter
+        past every restored one — and the ID itself gained the date, because
+        "same minute of a different day" used to be a collision. `r` on a
+        finished row retries its prompt as a *new* task: the interrupted one
+        keeps its row, its error and its place in history. A delegated (sub)
+        task is refused — the chat waiting on its result is long gone.
+  - [x] **The queue got a pool.** `[agent] workers = 2` (1..4, an out-of-range
+        value keeps the default: a typo must not quietly halve or stampede the
+        parallelism): each worker registers its own wake channel, one enqueue
+        signals all of them, and a burst coalesces per channel without losing
+        a task — the runner was always keyed by task id, so two tasks stream,
+        review and cancel independently.
 - Slash commands / prompt templates: `/refactor`, `/test`, user ones in
   `.dmed/templates` (plain files or Lua).
 - Ghost completion → a fill-in-middle prompt for code models
