@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"dmed/internal/ai"
 	"dmed/internal/buffer"
@@ -108,5 +109,116 @@ func TestApplyGhostInsertsContinuation(t *testing.T) {
 	}
 	if got := tb.Text(); got != "func foo() {\nfmt.Println()\n}\n" {
 		t.Fatalf("buffer after apply = %q", got)
+	}
+}
+
+func TestIsCodeModel(t *testing.T) {
+	for _, m := range []string{"qwen2.5-coder:7b", "deepseek-coder-v2", "codestral-latest", "Qwen3-Coder"} {
+		if !isCodeModel(m) {
+			t.Errorf("%s must read as a code model", m)
+		}
+	}
+	for _, m := range []string{"llama3.2", "gpt-4o", "deepseek-chat"} {
+		if isCodeModel(m) {
+			t.Errorf("%s must not read as a code model", m)
+		}
+	}
+}
+
+func TestGhostMessagesFIMShape(t *testing.T) {
+	msgs := ghostMessages("func foo() {\n  ", "\n}", "qwen2.5-coder")
+	if len(msgs) != 2 {
+		t.Fatalf("msgs = %+v", msgs)
+	}
+	if !strings.Contains(msgs[1].Content, "PREFIX:\nfunc foo() {") {
+		t.Fatalf("prefix lost: %q", msgs[1].Content)
+	}
+	if !strings.Contains(msgs[1].Content, "SUFFIX:\n\n}") {
+		t.Fatalf("suffix lost: %q", msgs[1].Content)
+	}
+	// A chat model keeps the old prose frame: no SUFFIX section for a model
+	// that was not trained to read one.
+	msgs = ghostMessages("abc", "xyz", "llama3.2")
+	if strings.Contains(msgs[1].Content, "SUFFIX") {
+		t.Fatalf("chat model got the FIM frame: %q", msgs[1].Content)
+	}
+	if !strings.HasPrefix(msgs[1].Content, "Continue this code:") {
+		t.Fatalf("chat model frame changed: %q", msgs[1].Content)
+	}
+}
+
+func TestGhostContextSplit(t *testing.T) {
+	m := New()
+	m.tabs = []tab{{buf: buffer.Load("a\nb\nfunc f() {\n\tcursor here\nrest\n\nafter blank\n")}}
+	m.initPanes()
+	t2 := &m.tabs[0]
+	// Place the caret mid "cursor here": line 3 is "	cursor here", so the
+	// caret after the tab plus "cur" sits at rune column 4.
+	t2.buf.SetCursor(3, 4)
+	prefix, suffix := m.ghostContext()
+	if !strings.HasSuffix(prefix, "cur") {
+		t.Fatalf("prefix must end at the caret, got %q", prefix)
+	}
+	if !strings.HasPrefix(suffix, "sor here") {
+		t.Fatalf("suffix must start at the caret, got %q", suffix)
+	}
+	if strings.Contains(suffix, "after blank") {
+		t.Fatalf("the suffix must stop at the blank line, got %q", suffix)
+	}
+}
+
+func TestGhostWindowFollowsRhythm(t *testing.T) {
+	m := Model{}
+	// No rhythm yet: the middle tier.
+	if w := m.ghostWindow(); w != ghostMedWindow {
+		t.Fatalf("cold window = %v", w)
+	}
+	fast := []time.Time{time.Now(), time.Now().Add(50 * time.Millisecond), time.Now().Add(90 * time.Millisecond)}
+	m.ghostStamps = fast
+	if w := m.ghostWindow(); w != ghostFastWindow {
+		t.Fatalf("fast window = %v, want the long pause", w)
+	}
+	slow := []time.Time{time.Now(), time.Now().Add(700 * time.Millisecond), time.Now().Add(1500 * time.Millisecond)}
+	m.ghostStamps = slow
+	if w := m.ghostWindow(); w != ghostSlowWindow {
+		t.Fatalf("slow window = %v, want the short pause", w)
+	}
+}
+
+func TestScheduleGhostStampsAndGuards(t *testing.T) {
+	m := New()
+	m.tabs = []tab{{buf: buffer.Load("x\n")}}
+	m.initPanes()
+	m.ai = &fakeProvider{pieces: []string{"y"}}
+	// GhostAuto default true comes from cfg; New loaded Defaults.
+	cmd := m.scheduleGhost()
+	if cmd == nil {
+		t.Fatal("scheduleGhost with a provider must return the window timer")
+	}
+	gen := m.ghostGen
+	// A stale tick does nothing; the current one asks for a suggestion.
+	if c := m.handleGhostWait(ghostWaitMsg{gen: gen - 1}); c != nil {
+		t.Fatal("a stale generation must not fire")
+	}
+	c := m.handleGhostWait(ghostWaitMsg{gen: gen})
+	if c == nil {
+		t.Fatal("the current generation must fire the request")
+	}
+	// A stale stream message must not append to the ghost.
+	m.ghostText = "keep"
+	m.handleGhostOutput(GhostOutputMsg{Delta: "stale", Gen: gen - 1})
+	if m.ghostText != "keep" {
+		t.Fatalf("stale delta painted: %q", m.ghostText)
+	}
+
+	// ghost_auto = false puts the typing trigger away.
+	m.cfg.AI.GhostAuto = false
+	if cmd := m.scheduleGhost(); cmd != nil {
+		t.Fatal("ghost_auto = false must not schedule")
+	}
+	// The manual chord still works.
+	m.ai = &fakeProvider{pieces: []string{"y"}}
+	if cmd := m.ghostTrigger(); cmd == nil {
+		t.Fatal("the explicit request must answer regardless")
 	}
 }

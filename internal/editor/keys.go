@@ -424,6 +424,9 @@ var globalBindings = map[string]bindingDef{
 	}, 0},
 	"alt+g": {actAiGhostDismiss, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.dismissGhost()
+		// The manual ask answers immediately and abandons any window still
+		// counting down, so one chord means one request, not two.
+		bumpGen(&m.ghostGen)
 		return m.ghostTrigger(), true
 	}, 0},
 	"ctrl+o": {actFinderOpen, func(m *Model, _ tea.KeyPressMsg) (tea.Cmd, bool) {
@@ -990,7 +993,7 @@ var editorBindings = map[string]bindingDef{
 		}
 		m.msg = ""
 		if m.ai != nil {
-			return m.ghostTrigger(), true
+			return m.scheduleGhost(), true
 		}
 		return nil, true
 	}, protected},
@@ -1061,7 +1064,9 @@ func (m *Model) typingFallback(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	}
 	m.msg = ""
-	return m.triggerCompletion(false)
+	// Completion pops on every keystroke; the ghost waits for the typing to
+	// settle — both clocks restart together, one Batch.
+	return tea.Batch(m.triggerCompletion(false), m.scheduleGhost())
 }
 
 // runBinding looks a key up in a resolved table and runs it when the key is

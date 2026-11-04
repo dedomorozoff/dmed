@@ -192,7 +192,13 @@ The code is split into focused internal packages:
   templates run on a fresh VM under a 3 s budget with a global `args`, and
   their output is the final prompt), `ai_inline.go` (inline rewrite → diff
   review), `ghost.go`
-  (Copilot-style ghost text), `agent_panel.go` (agent task queue UI;
+  (Copilot-style ghost text: a fill-in-middle PREFIX/SUFFIX frame for model
+  names holding a completion family — *coder*, codestral, starcoder, and
+  deliberately not deepseek-chat — the old prose frame for the rest; the
+  request fires when the typing pauses, with the debounce window (750/450/250
+  ms) chosen by the median gap of the last keystrokes, all of it stamped with
+  `ghostGen` so a tick or a delta arriving after the next edit is dropped.
+  `[ai] ghost_auto` switches the typing trigger off), `agent_panel.go` (agent task queue UI;
   `[agent] workers` goroutines drain the queue in parallel, each waiting on its
   own wake channel; `r` retries a finished task as a new one, sub tasks are
   refused — the chat waiting on them is gone), `agent_store.go`

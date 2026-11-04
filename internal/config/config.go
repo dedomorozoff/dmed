@@ -207,6 +207,11 @@ type AIConfig struct {
 	// outside the editor's walls, and the first call is not the place to
 	// discover what it does.
 	MCPAsk bool
+	// GhostAuto triggers the inline completion after typing pauses as well
+	// as on Enter. The debounce follows typing speed, so a burst of keys
+	// costs the model nothing; off puts the request back behind Enter and
+	// the manual chord.
+	GhostAuto bool
 	// Mode_ is the agent mode ("plan" | "act"). The trailing underscore avoids
 	// colliding with the Mode() accessor.
 	Mode_ string
@@ -298,6 +303,7 @@ func Settings(cfg Config) []Setting {
 		{"ai", "tool_rounds", strconv.Itoa(cfg.AI.ToolRounds)},
 		{"ai", "allow_run", cfg.AI.AllowRun},
 		{"ai", "mcp_ask", strconv.FormatBool(cfg.AI.MCPAsk)},
+		{"ai", "ghost_auto", strconv.FormatBool(cfg.AI.GhostAuto)},
 		{"ai", "api_path", cfg.AI.APIPath},
 		{"ai", "models_path", cfg.AI.ModelsPath},
 		{"agent", "context_max", strconv.Itoa(cfg.Agent.ContextMax)},
@@ -401,6 +407,8 @@ func Defaults() Config {
 			FreeFallback: true,
 			// An MCP server runs code the editor cannot inspect: ask first.
 			MCPAsk: true,
+			// Ghost completes on a pause, not only after Enter.
+			GhostAuto: true,
 			Mode_:  string(ModeAct),
 			SystemPrompt: "You are a helpful coding assistant inside the dmed editor. " +
 				"Answer concisely. You have tools: EDIT creates or rewrites a whole file, " +
@@ -655,6 +663,9 @@ func loadFile(path string, cfg *Config) {
 		}
 		if v, ok := s["mcp_ask"]; ok {
 			cfg.AI.MCPAsk = parseBool(v)
+		}
+		if v, ok := s["ghost_auto"]; ok {
+			cfg.AI.GhostAuto = parseBool(v)
 		}
 		// mcp.<name> = command [args...] attaches an external MCP tool
 		// server over stdio; an empty value removes one the other config

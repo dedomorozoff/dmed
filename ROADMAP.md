@@ -893,8 +893,28 @@ cross-build. The cheap part first:
         hanging template fails with a message, not with a frozen editor. Its
         output is the final prompt: post-processing would be rewriting what
         the script deliberately wrote.
-- Ghost completion → a fill-in-middle prompt for code models
+- [x] Ghost completion → a fill-in-middle prompt for code models
   (qwen-coder and kin can do it); the debounce follows typing speed.
+  - [x] **The suffix is what the caret already sits inside.** `ghostContext`
+        splits the buffer at the caret — 8 lines before, the remainder of the
+        line and the next ones after, cut at the first blank line of the
+        block. A model tuned for completion gets a `PREFIX:` / `SUFFIX:`
+        frame; a chat model keeps the old prose frame, because a FIM-shaped
+        request handed to a model that was not trained on one is worse than
+        the sentence that works everywhere. The name decides: any tag holding
+        *coder*/*codestral*/... gets the split — and *deepseek-chat* does not,
+        which is exactly the trap a looser `deepseek-` prefix would have
+        walked into.
+  - [x] **The window reads the keystroke rhythm.** Every typed character and
+        every Enter restarts one clock (a generation-stamped `tea.Tick` like
+        every other async subsystem's, so a stale tick cannot fire); the
+        median gap of the last 8 edits picks 750 / 450 / 250 ms — a fast
+        typist gets one suggestion when they pause, a slow one per stop, a
+        burst costs the model nothing. Streaming deltas carry the generation:
+        typing past a half-arrived suggestion drops it.
+  - [x] **`[ai] ghost_auto`** (default on) is the switch; off puts requests
+        back behind Enter and the manual Alt+G, which now also abandons the
+        counting window — one chord, one request.
 - Usage: token/cost cards in the chat and the agent panel, quick model
   switching from the palette.
 - Park UI: the approval queue already works, but the different kinds

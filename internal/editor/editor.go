@@ -777,6 +777,10 @@ type Model struct {
 	ghostCh      <-chan chatEvent
 	ghostText    string // accumulated text during streaming
 	ghostCancel  context.CancelFunc
+	// ghostGen stamps the debounce window and the streamed request: a new
+	// edit bumps it, and every message carrying an older value is dropped.
+	ghostGen    uint64
+	ghostStamps []time.Time // recent edit times: the rhythm the window reads
 
 	quitConfirm bool
 	quitTab     bool // true if confirming close of a single tab (not quit)
@@ -1537,6 +1541,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case GhostOutputMsg:
 		cmd := m.handleGhostOutput(msg)
 		return m, cmd
+	case ghostWaitMsg:
+		// The debounce window expired; fire the request it was counting for.
+		return m, m.handleGhostWait(msg)
 	case AgentRefreshMsg:
 		// A delegation may have finished while the chat was parked on it; the
 		// queue update is what wakes the conversation back up.
