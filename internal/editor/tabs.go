@@ -285,6 +285,7 @@ func (m *Model) shutdown() {
 	if m.dapClient != nil {
 		m.dapClient.Close()
 	}
+	m.mcpMgr.Close()
 	m.saveSession()
 }
 

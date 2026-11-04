@@ -818,9 +818,36 @@ cross-build. The cheap part first:
   M9 fold-ranges item landed.
 
 ### M12 — AI v3: agents without stops
-- MCP client: attaching external tool servers (`[ai] mcp_servers`), their
+- [x] MCP client: attaching external tool servers (`[ai] mcp_servers`), their
   tools join the same tool loop; their changes still go through the
   Applier only. Transport: stdio first, HTTP/SSE later.
+  - [x] **The keys are the `[lsp] lang.<id>` shape.** `[ai] mcp.<name> = command
+        [args…]` attaches a server; an empty value removes one the other config
+        file added. The client is `internal/mcp`: JSON-RPC 2.0 over stdio, one
+        frame per line (the stdio transport is *not* Content-Length framing),
+        initialize → tools/list (with cursor pagination) → tools/call, and a
+        server request to the client answered method-not-found rather than left
+        to hang. A genuinely configured server also silences the keyless
+        fallback: `Unconfigured()` counts an attached `mcp.<name>`.
+  - [x] **The round is async, the call is not.** Spawning N processes and
+        shaking hands with each runs as one stamped generation like `dapGen`
+        and `termGen`, its results land as a message, and a late reply from a
+        superseded server set is dropped; a hot reload respawns only when the
+        `mcp.*` fingerprint actually moved, and the old processes die on the
+        UI thread first. One tool call then runs synchronously with a 60 s
+        deadline, exactly like RUN: the loop already waits on RUN that way.
+  - [x] **Exposure and gating.** Tools arrive as `mcp_<server>_<tool>` (a name
+        too long for the providers is reported, never sent), curated by the same
+        `tools_enabled`/`tools_disabled` as the built-ins, and dropped wholesale
+        in plan mode — an MCP tool's claimed capability is a claim, not a
+        guarantee the absence of tools can make. A direct MCP write is an
+        external change like a RUN one: every MCP call counts for the
+        touched-file walk, so what a server rewrote opens in a tab; a server's
+        proposal would go through the review like any other Change.
+  - [x] **`mcp_ask` (default on) parks every call for a human y/n** — the same
+        park queue, the same `y`/`n` protection as RUN's confirmation, the
+        placeholder replaced by the real outcome. The unit tests drive the
+        real protocol over `net.Pipe`, so no test spawns a server process.
 - Agent tasks survive a restart: persist the task transcript, resume from
   the panel, parallel agents in the queue.
 - Slash commands / prompt templates: `/refactor`, `/test`, user ones in

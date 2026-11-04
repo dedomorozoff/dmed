@@ -232,6 +232,11 @@ The code is split into focused internal packages:
   `tools_web.go` (WEB_SEARCH plus the plan/act modes),
   `tools_subagent.go` (SUB_AGENT: the tool, the tool surface a sub-agent gets,
   and the park that waits for it),
+  `tools_mcp.go` (MCP servers: the stamped background spawn round, the flat-name
+  tool defs joined to `activeChatToolDefs`, the per-call park beside RUN's, and
+  the fingerprint branch that respawns on a moved `[ai] mcp.*` set — every MCP
+  call counts for `toolBatchTouchesDisk`, and plan mode drops `mcp_` names by
+  prefix because a server's declared capability is a claim, not a guarantee),
   `dap.go` (DAP session lifecycle: async adapter start, launch/attach,
   breakpoints, continue/step, panel state), `dap_panel.go`
   (threads/stack/variables/console panel rendering).
@@ -262,7 +267,7 @@ The code is split into focused internal packages:
   token name and the value a chroma style entry, which only `internal/syntax` can
   read, so config keeps both as written and `ResolveTheme` reports what it refused.
   An unknown key in a section with an open-ended grammar (`lang.<id>`,
-  an action) is kept, not dropped.
+  `mcp.<name>`, an action) is kept, not dropped.
   `editorconfig.go` is the per-file half of the same job: `LoadEditorConfig(root,
   path, def)` walks from the file's directory to the root (nearest file wins, last
   matching section wins, `root = true` ends the walk, outside the root the walk is
@@ -363,6 +368,18 @@ The code is split into focused internal packages:
   chat panel show.
 - `internal/ask/` — questions the model asks the user: `Queue.Next` pushes,
   `Answer`/`Cancel` resolve by id, so a round that asks twice keeps both.
+- `internal/mcp/` — the MCP client (external tool servers): JSON-RPC 2.0 over an
+  attached process's stdin/stdout, **newline framing** (the stdio transport is
+  not Content-Length; do not "fix" it toward the DAP/LSP shape), the
+  initialize → tools/list → tools/call round trip, a server request to the
+  client answered `-32601` rather than left hanging, and a pending-call map that
+  a dead stream wakes with an error instead of its deadline. `Manager` exposes
+  server tools under flat `mcp_<server>_<tool>` names (over-long ones are
+  reported, never sent — providers cap function names at 64). Editor-owned
+  `[ai] mcp.<name> = command`; a genuinely empty map keeps `Unconfigured` true,
+  so an attached server silences the keyless fallback. Tests drive the protocol
+  over `net.Pipe` — a pipe endpoint pair, both halves on the *far* end from the
+  peer, or the client reads back its own requests and deadlocks.
 - `internal/websearch/` — the only component allowed to reach outside the
   workspace: DuckDuckGo HTML endpoint, own timeouts, `Parse` is pure so the
   fragile markup can be tested against a fixture. Opt-in (`web_search`), capped

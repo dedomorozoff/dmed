@@ -140,13 +140,21 @@ const (
 	// ParkSubAgent holds a delegation until the background sub-agent finishes.
 	// The sub-agent's changes are reviewed in the agent panel.
 	ParkSubAgent
+	// ParkMCPConfirm holds an external MCP tool call while mcp_ask = true:
+	// the server runs code the editor cannot inspect, so the human decides.
+	ParkMCPConfirm
 )
 
 // Park is one pending human decision attached to a tool call.
 type Park struct {
 	Kind ParkKind
-	Text string       // held command (ParkRunConfirm)
+	Text string       // held command (ParkRunConfirm) or server/tool label (ParkMCPConfirm)
 	Ask  *ask.Request // question awaiting an answer (ParkAskUser)
+	// Server, Tool and Args identify the held call for ParkMCPConfirm, so
+	// the answer can run exactly what the placeholder described.
+	Server string
+	Tool   string
+	Args   string
 }
 
 // ToolResult is what one tool call produced: the text fed back to the model,
@@ -287,12 +295,18 @@ var legacyToolName = map[string]string{
 
 // toolBatchTouchesDisk reports whether any tool call in the batch can change
 // files on disk: EDIT and REPLACE write directly, RUN executes an arbitrary
-// shell command in the project root. Everything else is read-only (or only
-// parks a proposal for review), so a batch without these three never walks
-// the project for touched-file detection.
+// shell command in the project root, and an MCP server is an external process
+// whose tool may write anything — no annotation says it cannot, so every
+// mcp_-prefixed call counts. Everything else is read-only (or only parks a
+// proposal for review), so a batch without these never walks the project for
+// touched-file detection.
 func toolBatchTouchesDisk(tools []ai.ToolCall) bool {
 	for _, tc := range tools {
-		switch normalizeToolName(tc.Name) {
+		name := normalizeToolName(tc.Name)
+		if strings.HasPrefix(name, "mcp_") {
+			return true
+		}
+		switch name {
 		case "RUN", "EDIT", "REPLACE":
 			return true
 		}
@@ -374,6 +388,9 @@ func (m *Model) activeChatToolDefs() []ai.ToolDef {
 	if m.canDelegate() {
 		defs = append(defs, subAgentDef())
 	}
+	// MCP servers answer asynchronously; whatever came up joins the list,
+	// curated by the same tools_enabled / tools_disabled as the rest.
+	defs = append(defs, m.mcpToolDefs()...)
 	if m.cfg.AI.AgentMode() == config.ModePlan {
 		defs = readOnlyToolDefs(defs)
 	}
@@ -396,7 +413,9 @@ func readOnlyToolDefs(defs []ai.ToolDef) []ai.ToolDef {
 	}
 	out := make([]ai.ToolDef, 0, len(defs))
 	for _, d := range defs {
-		if mutating[toolKey(d.Name)] {
+		// An MCP tool's capability is whatever the server says with it, and
+		// a claim is not a guarantee: plan mode drops all of them.
+		if mutating[toolKey(d.Name)] || strings.HasPrefix(d.Name, "mcp_") {
 			continue
 		}
 		out = append(out, d)
@@ -412,6 +431,9 @@ func readOnlyToolDefs(defs []ai.ToolDef) []ai.ToolDef {
 // learns what was proposed.
 func (m *Model) execChatTool(tc ai.ToolCall) ToolResult {
 	name := normalizeToolName(tc.Name)
+	if ex, ok := m.mcpLookup(name); ok {
+		return m.execMCPTool(ex, tc.Args)
+	}
 	switch name {
 	case "TODO_READ", "TODO_WRITE", "TODO_SET":
 		return m.execTodoTool(name, tc.Args)

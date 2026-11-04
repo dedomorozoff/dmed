@@ -188,6 +188,17 @@ type AIConfig struct {
 	// providers that speak the protocol somewhere other than /v1.
 	APIPath    string
 	ModelsPath string
+	// MCPServers maps a server name to its launch command line, written as
+	// `[ai] mcp.<name> = command [args...]` — the open-ended-key shape of
+	// [lsp] lang.<id>. An empty value removes a server the other config file
+	// added. The name is lowercased by the INI reader and sanitized when the
+	// tools are exposed to the model.
+	MCPServers map[string]string
+	// MCPAsk parks every MCP tool call for a human y/n, the way RUN parks
+	// under allow_run = ask. On by default: an MCP server runs arbitrary code
+	// outside the editor's walls, and the first call is not the place to
+	// discover what it does.
+	MCPAsk bool
 	// Mode_ is the agent mode ("plan" | "act"). The trailing underscore avoids
 	// colliding with the Mode() accessor.
 	Mode_ string
@@ -209,6 +220,11 @@ func (a AIConfig) AgentMode() Mode {
 // pointed dmed at their own server would be worse than not helping.
 func (a AIConfig) Unconfigured() bool {
 	d := Defaults().AI
+	for _, cmd := range a.MCPServers {
+		if strings.TrimSpace(cmd) != "" {
+			return false // an attached tool server is a deliberate setup
+		}
+	}
 	return strings.TrimSpace(a.Model) == "" &&
 		strings.TrimSpace(a.APIKey) == "" &&
 		a.Provider == d.Provider &&
@@ -273,6 +289,7 @@ func Settings(cfg Config) []Setting {
 		{"ai", "num_predict", strconv.Itoa(cfg.AI.NumPredict)},
 		{"ai", "tool_rounds", strconv.Itoa(cfg.AI.ToolRounds)},
 		{"ai", "allow_run", cfg.AI.AllowRun},
+		{"ai", "mcp_ask", strconv.FormatBool(cfg.AI.MCPAsk)},
 		{"ai", "api_path", cfg.AI.APIPath},
 		{"ai", "models_path", cfg.AI.ModelsPath},
 		{"agent", "context_max", strconv.Itoa(cfg.Agent.ContextMax)},
@@ -286,6 +303,20 @@ func Settings(cfg Config) []Setting {
 		{"debug", "adapter_mode", cfg.Debug.AdapterMode},
 		{"debug", "auto_detect", strconv.FormatBool(cfg.Debug.AutoDetect)},
 		{"lsp", "enabled", strconv.FormatBool(cfg.LSP.Enabled)},
+	}
+	// The attached MCP servers are open-ended keys too: one row per server,
+	// searchable by name, an empty value shown as removed rather than hidden.
+	names := make([]string, 0, len(cfg.AI.MCPServers))
+	for name := range cfg.AI.MCPServers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		value := cfg.AI.MCPServers[name]
+		if value == "" {
+			value = "(off)"
+		}
+		out = append(out, Setting{"ai", "mcp." + name, value})
 	}
 	// The [keys] overrides are open-ended, so they are listed as written: one row
 	// per command the user renamed, which is what makes the section findable by
@@ -358,6 +389,8 @@ func Defaults() Config {
 			// Nothing configured yet: allow the keyless fallback so a fresh
 			// install still has a working AI, and say so in the chat.
 			FreeFallback: true,
+			// An MCP server runs code the editor cannot inspect: ask first.
+			MCPAsk: true,
 			Mode_:        string(ModeAct),
 			SystemPrompt: "You are a helpful coding assistant inside the dmed editor. " +
 				"Answer concisely. You have tools: EDIT creates or rewrites a whole file, " +
@@ -607,6 +640,24 @@ func loadFile(path string, cfg *Config) {
 			if m := Mode(strings.ToLower(strings.TrimSpace(v))); m == ModePlan || m == ModeAct {
 				cfg.AI.Mode_ = string(m)
 			}
+		}
+		if v, ok := s["mcp_ask"]; ok {
+			cfg.AI.MCPAsk = parseBool(v)
+		}
+		// mcp.<name> = command [args...] attaches an external MCP tool
+		// server over stdio; an empty value removes one the other config
+		// file added. An open-ended key grammar, kept as written: whether
+		// the command starts anything is the editor's business, not the
+		// loader's — the [lsp] lang.<id> shape again.
+		for k, v := range s {
+			name := strings.TrimPrefix(k, "mcp.")
+			if name == k || name == "" {
+				continue
+			}
+			if cfg.AI.MCPServers == nil {
+				cfg.AI.MCPServers = map[string]string{}
+			}
+			cfg.AI.MCPServers[name] = v
 		}
 	}
 

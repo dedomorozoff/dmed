@@ -400,6 +400,49 @@ func TestToolListsDefaultToEverything(t *testing.T) {
 		t.Fatalf("default tool lists = %v / %v, want empty (no filtering)",
 			cfg.AI.ToolsEnabled, cfg.AI.ToolsDisabled)
 	}
+	if !cfg.AI.MCPAsk {
+		t.Error("mcp_ask defaults to true: an MCP tool call asks the human first")
+	}
+}
+
+// TestLoadAIMCPServers pins the open-ended [ai] mcp.<name> = command line,
+// the removal-by-empty-value shape copied from [lsp] lang.<id>, and mcp_ask.
+func TestLoadAIMCPServers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	content := `[ai]
+mcp.files = npx -y @mcp/server-fs .
+mcp.db =  postgres-mcp --dsn x
+mcp.gone =
+mcp_ask = false
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir)
+	if len(cfg.AI.MCPServers) != 3 {
+		t.Fatalf("servers = %v, want three entries kept as written", cfg.AI.MCPServers)
+	}
+	if cfg.AI.MCPServers["files"] != "npx -y @mcp/server-fs ." {
+		t.Errorf("files = %q", cfg.AI.MCPServers["files"])
+	}
+	if cfg.AI.MCPServers["gone"] != "" {
+		t.Errorf("an empty value must stay a removal, got %q", cfg.AI.MCPServers["gone"])
+	}
+	if cfg.AI.MCPAsk {
+		t.Error("mcp_ask = false must switch the confirmations off")
+	}
+	// A configured server is a deliberate setup: the keyless fallback must
+	// not fire on top of it.
+	if cfg.AI.Unconfigured() {
+		t.Error("MCPServers configured must mean Unconfigured() is false")
+	}
+	// Only a removal left behind does not count as configuration.
+	off := Defaults()
+	off.AI.MCPServers = map[string]string{"gone": ""}
+	if !off.AI.Unconfigured() {
+		t.Error("an all-empty MCPServers map must still read as unconfigured")
+	}
 }
 
 // TestLoadAIWebSearchAndMode covers the opt-in web tool and the agent mode.

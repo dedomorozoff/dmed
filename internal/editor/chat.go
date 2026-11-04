@@ -817,6 +817,9 @@ func (m *Model) startNextPark() bool {
 		// shows the wait and Esc cancels it.
 		m.msg = m.t("chat.subagent_status")
 		return true
+	case ParkMCPConfirm:
+		m.msg = "MCP " + p.park.Text + "  (y run / n deny)"
+		return true
 	default:
 		m.chatPark = nil
 		return false
@@ -943,6 +946,14 @@ func (m *Model) handleChatParkKey(s string, msg tea.KeyPressMsg) tea.Cmd {
 			m.cancelParkedSubAgent()
 		}
 		return nil
+	case ParkMCPConfirm:
+		switch m.paneCmd("park-mcp", s) {
+		case "park-mcp.yes":
+			return m.finishChatMCPConfirm(true)
+		case "park-mcp.no":
+			return m.finishChatMCPConfirm(false)
+		}
+		return nil // ignore other keys while parked
 	default:
 		return nil
 	}

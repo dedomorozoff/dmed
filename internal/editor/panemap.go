@@ -332,6 +332,11 @@ var paneCommands = map[paneID][]paneCommand{
 		{act: "park-run.yes", chords: []string{"y", "enter"}, flags: protected},
 		{act: "park-run.no", chords: []string{"n", "esc", "r"}, flags: protected},
 	},
+	// park-mcp
+	"park-mcp": {
+		{act: "park-mcp.yes", chords: []string{"y", "enter"}, flags: protected},
+		{act: "park-mcp.no", chords: []string{"n", "esc", "r"}, flags: protected},
+	},
 	// park-sub
 	"park-sub": {
 		{act: "park-sub.cancel", chords: []string{"esc"}, flags: protected},

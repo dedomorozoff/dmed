@@ -23,6 +23,7 @@ import (
 	"dmed/internal/events"
 	"dmed/internal/i18n"
 	"dmed/internal/lsp"
+	"dmed/internal/mcp"
 	"dmed/internal/plugin"
 	"dmed/internal/ptyterm"
 	"dmed/internal/session"
@@ -721,6 +722,16 @@ type Model struct {
 	webSearchUsed     int
 	webSearchOverride *websearch.Client
 
+	// MCP tool servers ([ai] mcp.*): the manager built from the last spawn
+	// round, the generation that round was stamped with, and the fingerprint
+	// of the server set it was started for — a config reload respawns only
+	// when the set actually moved. mcpSpawn is the test seam: a unit test
+	// injects a client over an in-memory pipe instead of starting a process.
+	mcpMgr   *mcp.Manager
+	mcpGen   int
+	mcpFP    string
+	mcpSpawn func(cmdline, dir string) (*mcp.Client, error)
+
 	// The question currently on screen and the answer being typed into it.
 	// askSel indexes into askReq.Choices (-1 while there are none).
 	askReq *ask.Request
@@ -926,6 +937,7 @@ func New(paths ...string) Model {
 	}
 	m.cfg = config.Load(m.root)
 	m.keys = ResolveKeys(m.cfg)
+	m.mcpFP = m.mcpFingerprint()
 	// Create the AI provider up front so chat, inline, and ghost all work even
 	// before the chat panel is first opened (previously ghost silently no-opped
 	// until toggleChat ran).
@@ -1240,7 +1252,7 @@ func waitForPlugin(ch <-chan tea.Msg) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh), waitForDAPEvent(m.dapCh), waitForSyntax(m.syntaxCh), waitForDiff(m.diffCh), waitForPlugin(m.pluginCh))
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh), waitForDAPEvent(m.dapCh), waitForSyntax(m.syntaxCh), waitForDiff(m.diffCh), waitForPlugin(m.pluginCh), m.mcpCmd(m.mcpGen))
 }
 
 // Update handles a message and keeps the background highlighting in step
@@ -1288,6 +1300,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// re-arms for the next wake. A burst coalesces into one drain.
 		m.drainPlugins()
 		return m, waitForPlugin(m.pluginCh)
+	case mcpReadyMsg:
+		// A spawn round landed. A reply from a superseded server set is
+		// dropped, as every other async subsystem drops its stale stamp.
+		m.applyMCPReady(msg)
+		return m, nil
 	case FileChangedMsg:
 		path := msg.Path
 		// Every file change funnels through the bus here: agent commits
@@ -1315,6 +1332,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.msg = m.t("msg.config_reloaded")
 			if msg := m.configRefusals(); msg != "" {
 				m.msg = msg
+			}
+			// A moved [ai] mcp.* set respawns the servers; the same reload
+			// with the set untouched leaves running processes alone.
+			if m.mcpFingerprint() != m.mcpFP {
+				return m, tea.Batch(waitForFileEvent(m.fileEvents), m.restartMCP())
 			}
 			return m, waitForFileEvent(m.fileEvents)
 		}
