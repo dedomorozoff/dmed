@@ -409,7 +409,7 @@ func Defaults() Config {
 			MCPAsk: true,
 			// Ghost completes on a pause, not only after Enter.
 			GhostAuto: true,
-			Mode_:  string(ModeAct),
+			Mode_:     string(ModeAct),
 			SystemPrompt: "You are a helpful coding assistant inside the dmed editor. " +
 				"Answer concisely. You have tools: EDIT creates or rewrites a whole file, " +
 				"READ reads a file, SEARCH finds text, LIST_DIR and GLOB navigate the project, " +
