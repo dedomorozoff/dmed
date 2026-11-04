@@ -108,8 +108,11 @@ func (p *ollamaProvider) ChatStream(ctx context.Context, req Request, h Handler)
 					} `json:"function"`
 				} `json:"tool_calls"`
 			} `json:"message"`
-			Error string `json:"error"`
-			Done  bool   `json:"done"`
+			Error             string `json:"error"`
+			Done              bool   `json:"done"`
+			PromptEvalCount   int    `json:"prompt_eval_count"`
+			EvalCount         int    `json:"eval_count"`
+			TotalDurationNano int64  `json:"total_duration"`
 		}
 		if err := json.Unmarshal(sc.Bytes(), &chunk); err != nil {
 			continue // skip malformed keep-alive lines
@@ -136,6 +139,15 @@ func (p *ollamaProvider) ChatStream(ctx context.Context, req Request, h Handler)
 			h.ToolCalls(calls)
 		}
 		if chunk.Done {
+			// Ollama answers token counts only in the final chunk; a server
+			// that computes none leaves the report empty, not zeroed.
+			if h.Usage != nil && (chunk.PromptEvalCount > 0 || chunk.EvalCount > 0) {
+				h.Usage(Usage{
+					PromptTokens:     chunk.PromptEvalCount,
+					CompletionTokens: chunk.EvalCount,
+					TotalTokens:      chunk.PromptEvalCount + chunk.EvalCount,
+				})
+			}
 			return nil
 		}
 	}

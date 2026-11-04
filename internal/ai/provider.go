@@ -21,6 +21,11 @@ type Message struct {
 	ToolCalls  []ToolCall // assistant: functions invoked by the model
 	ToolCallID string     // tool: id of the assistant call being answered
 	ToolName   string     // tool: function name (Ollama needs it explicitly)
+	// Usage records what one assistant turn cost, for the transcript's
+	// token card. Providers serialize the selected fields of a message into
+	// their wire form and never this struct, so the field is display and
+	// thread-history state — it is not sent back over the API.
+	Usage *Usage
 }
 
 // ToolDef describes one callable tool the model may invoke.
@@ -46,8 +51,31 @@ type Options struct {
 	NumPredict  int // max output tokens; 0 = provider default
 }
 
+// Usage is the token accounting one stream reported. Not every server answers
+// it: Ollama sends the counts in its final chunk, OpenAI-compatible servers
+// send them in a usage-only chunk after the finish_reason — with
+// include_usage asked for — and a server that knows neither shape simply
+// reports nothing. Zero means unknown, never zero tokens.
+type Usage struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}
+
+// Add folds another report in, for a session total built turn by turn.
+func (u Usage) Add(o Usage) Usage {
+	return Usage{
+		PromptTokens:     u.PromptTokens + o.PromptTokens,
+		CompletionTokens: u.CompletionTokens + o.CompletionTokens,
+		TotalTokens:      u.TotalTokens + o.TotalTokens,
+	}
+}
+
+// Empty reports whether nothing was measured at all.
+func (u Usage) Empty() bool { return u.PromptTokens == 0 && u.CompletionTokens == 0 }
+
 // Request bundles the conversation, the tools available for one turn, and the
-// optional generation options.
+// optional generation parameters.
 type Request struct {
 	Messages []Message
 	Tools    []ToolDef
@@ -59,6 +87,9 @@ type Request struct {
 type Handler struct {
 	Delta     func(string)     // called for each content chunk
 	ToolCalls func([]ToolCall) // called at most once per turn, if any
+	// Usage is called at most once per turn, when the server reported
+	// token counts. A stream cancelled mid-flight may never report.
+	Usage func(Usage)
 }
 
 // Provider is the unified interface for all LLM backends.

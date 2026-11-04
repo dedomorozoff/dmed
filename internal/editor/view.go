@@ -391,6 +391,9 @@ func (m Model) View() tea.View {
 	if m.outlineOpen {
 		rows = append(rows, m.withDivider(m.outlinePanel())...)
 	}
+	if m.modelPickOpen {
+		rows = append(rows, m.withDivider(m.modelPickPanel())...)
+	}
 	if m.agentPrompt {
 		rows = append(rows, m.agentPromptInputRender()...)
 	}
@@ -2089,6 +2092,13 @@ func (m Model) m10PanelExtraRows() int {
 	}
 	if m.outlineOpen {
 		n := len(m.outline)
+		if n > 12 {
+			n = 12
+		}
+		return n + 2
+	}
+	if m.modelPickOpen {
+		n := len(m.modelPick)
 		if n > 12 {
 			n = 12
 		}

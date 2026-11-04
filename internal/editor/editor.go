@@ -470,6 +470,14 @@ type Model struct {
 	outlineOff  int
 	outline     []lsp.DocumentSymbol
 
+	// "AI: Switch Model…" — the provider's list as a bottom panel, stamped
+	// so a reply to an abandoned pick cannot open anything.
+	modelPickOpen bool
+	modelPickSel  int
+	modelPickOff  int
+	modelPick     []string
+	modelPickGen  uint64
+
 	// Go to line
 	gotoOpen bool
 	gotoIn   []rune
@@ -682,6 +690,12 @@ type Model struct {
 	chatPendingResults   []ai.Message
 	chatPendingChanges   []agent.Change
 	chatEditTracks       []chatEditTrack
+
+	// Token accounting for the session: chatTurnUsage adds up the reports of
+	// the turn in progress (tool rounds included), chatSessionUsage is the
+	// running total the header and the cards read.
+	chatTurnUsage    ai.Usage
+	chatSessionUsage ai.Usage
 
 	// Chat EDIT diff review: proposals are applied only after the user picks
 	// y (apply) or n (discard), routed through the agent Applier.
@@ -1516,8 +1530,18 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.rebuildChatRows()
 				return m, cmd
 			}
+			var usage *ai.Usage
+			if !m.chatTurnUsage.Empty() {
+				// A turn with tool rounds reports usage per round, and every
+				// round re-sends (and re-bills) the whole context: the sum is
+				// the cost of the turn, which is the honest thing to show.
+				m.chatSessionUsage = m.chatSessionUsage.Add(m.chatTurnUsage)
+				u := m.chatTurnUsage
+				usage = &u
+				m.chatTurnUsage = ai.Usage{}
+			}
 			if m.chatReply != "" {
-				m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "assistant", Content: m.chatReply})
+				m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "assistant", Content: m.chatReply, Usage: usage})
 				m.chatReply = ""
 			}
 			m.saveChatThread()
@@ -1525,6 +1549,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		default:
 			m.chatReply += msg.Delta
+			if msg.HasUsage {
+				m.chatTurnUsage = m.chatTurnUsage.Add(msg.Usage)
+			}
 		}
 		m.rebuildChatRows()
 		if !msg.Done && msg.Err == nil {
@@ -1688,6 +1715,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleLspRenameMsg(msg)
 	case lspActionsMsg:
 		m.handleLspActionsMsg(msg)
+	case aiModelsMsg:
+		m.handleModelsMsg(msg)
+		return m, nil
 	case agentUndoMsg:
 		m.handleAgentUndoMsg(msg)
 	case lspFormatMsg:

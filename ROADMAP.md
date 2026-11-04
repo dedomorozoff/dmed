@@ -915,8 +915,32 @@ cross-build. The cheap part first:
   - [x] **`[ai] ghost_auto`** (default on) is the switch; off puts requests
         back behind Enter and the manual Alt+G, which now also abandons the
         counting window — one chord, one request.
-- Usage: token/cost cards in the chat and the agent panel, quick model
+- [x] Usage: token/cost cards in the chat and the agent panel, quick model
   switching from the palette.
+  - [x] **The providers finally answered.** `ai.Handler.Usage` fires once per
+        stream: Ollama counts ride its final chunk, OpenAI-compatible servers
+        send them in a usage-only chunk after `finish_reason` — which meant
+        the client could not return at the finish marker anymore, and the
+        request must ask with `stream_options.include_usage`. A server that
+        reports nothing leaves the field empty: unknown is not zero, and no
+        card is drawn for an estimate nobody measured. No cost column: dmed
+        has no price source it could state honestly, so the cards show tokens.
+  - [x] **Cards key on the message they measured.** The report rides the
+        assistant message (`ai.Message.Usage` — a display and history field,
+        never serialized to the providers, which build their wire form from
+        selected fields), so a rebuilt transcript and a thread loaded from
+        `.dmed_chat.json` show the same card. A tool-round turn adds the
+        rounds: every round re-sends — and re-bills — the whole context, and
+        the card is the cost of the turn. The agent panel shows the same on
+        its rows and persists them with the task store; a sub-agent's total
+        is the sum of its rounds for the same reason.
+  - [x] **Palette → "AI: Switch Model…"**: the provider's list opens as a
+        bottom panel in the outline's shape (j/k/Enter/Esc), and the pick
+        lands on the chat, on `[ai] model` and on the cached provider through
+        the wizard's own save — one switch cannot leave the config and the
+        session at odds. The fetch is generation-stamped, an error answers on
+        the status bar instead of an empty box, and picking the already-active
+        model rewrites no file.
 - Park UI: the approval queue already works, but the different kinds
   (file approval, ASK_USER question, waiting for a sub-agent) deserve to
   be one predictable flow with a shared navigation stack.

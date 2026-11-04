@@ -211,7 +211,10 @@ The code is split into focused internal packages:
   `imageview.go` (picture tabs: ASCII/half-block render via
   `internal/imgprev`, empty buffer + decoded frames, read-only key
   handling, scroll, GIF tick chain), `plugins.go`, `plugin_store.go`, `lsp.go`,
-  `ai_settings.go`, `theme_picker.go` (the `[theme]` panel and `syntaxFor`: it rows
+  `ai_settings.go`, `model_pick.go` ("AI: Switch Model…": a generation-stamped
+  provider list in the outline's panel shape; the pick lands on the chat model,
+  `[ai] model` and the cached provider through the wizard's save, and a switch
+  to the already-active model writes no file), `theme_picker.go` (the `[theme]` panel and `syntaxFor`: it rows
   are staged in the model's own map and painted over a fixed sample, synchronously —
   there is no server to probe, so no reply to stamp and no `tea.Cmd` a pick path
   cannot return — and only `Ctrl+S` writes, so `Esc` leaves the file untouched),
@@ -280,7 +283,13 @@ The code is split into focused internal packages:
   `/v1`: Pollinations serves the same protocol under `/openai` and lists models
   at `/models`. Anything adding a provider preset must carry those paths into
   both `NewProvider` and `WriteAI`, or the probe will 404 and be reported as a
-  connection failure.
+  connection failure. `Handler.Usage` reports each stream's token counts —
+  Ollama's ride the final chunk, an OpenAI server sends a usage-only chunk
+  *after* `finish_reason`, which is why the OpenAI reader drains to `[DONE]`
+  instead of returning at the finish and why the request asks
+  `stream_options.include_usage`. `Message.Usage` is display/history state:
+  providers build their wire form from selected fields, so the card rides the
+  transcript and never the API.
 - `internal/config/` — INI `.dmed.conf` loader (`[editor]`, `[ai]`, `[agent]`,
   `[ui]`, `[plugins]`, `[debug]`, `[lsp]`, `[keys]`, `[theme]`); priority defaults <
   global < project < env vars; hot-reload on save; `WriteAI`/`WriteLang` merge

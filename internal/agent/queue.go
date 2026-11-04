@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"dmed/internal/ai"
 	"dmed/internal/events"
 )
 
@@ -187,6 +188,23 @@ func (q *Queue) SetProgress(id string, p float32) {
 	}
 	q.tasks[i].Progress = p
 	q.tasks[i].Updated = time.Now()
+	q.publish(id)
+}
+
+// SetUsage folds one token report into the task's total. It answers to no
+// status check on purpose: the final usage chunk can arrive while the task
+// is being moved into review. Reports add because every provider round
+// re-sends (and re-bills) the context — a sub-agent with ten rounds pays ten
+// prompts, and the card should say what the task cost, not what its last
+// round did.
+func (q *Queue) SetUsage(id string, u ai.Usage) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	i := q.findLocked(id)
+	if i < 0 || u.Empty() {
+		return
+	}
+	q.tasks[i].Usage = q.tasks[i].Usage.Add(u)
 	q.publish(id)
 }
 

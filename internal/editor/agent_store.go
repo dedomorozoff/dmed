@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dmed/internal/agent"
+	"dmed/internal/ai"
 )
 
 // Agent tasks persist to a JSON file next to the project (like the chat
@@ -37,6 +38,7 @@ type persistedAgentTask struct {
 	Parent  string         `json:"parent,omitempty"`
 	Status  agent.Status   `json:"status"`
 	Changes []agent.Change `json:"changes,omitempty"`
+	Usage   ai.Usage       `json:"usage,omitempty"`
 	Error   string         `json:"error,omitempty"`
 	Created time.Time      `json:"created"`
 	Updated time.Time      `json:"updated"`
@@ -45,7 +47,7 @@ type persistedAgentTask struct {
 func (p persistedAgentTask) toTask() agent.Task {
 	return agent.Task{
 		ID: p.ID, Prompt: p.Prompt, Kind: p.Kind, Parent: p.Parent,
-		Status: p.Status, Changes: p.Changes, Error: p.Error,
+		Status: p.Status, Changes: p.Changes, Usage: p.Usage, Error: p.Error,
 		Created: p.Created, Updated: p.Updated,
 	}
 }
@@ -70,7 +72,7 @@ func storeView(tasks []agent.Task) []persistedAgentTask {
 	for _, t := range tasks {
 		p := persistedAgentTask{
 			ID: t.ID, Prompt: t.Prompt, Kind: t.Kind, Parent: t.Parent,
-			Status: t.Status, Changes: t.Changes, Error: t.Error,
+			Status: t.Status, Changes: t.Changes, Usage: t.Usage, Error: t.Error,
 			Created: t.Created, Updated: t.Updated,
 		}
 		if p.Status == agent.StatusRunning || p.Status == agent.StatusQueued {

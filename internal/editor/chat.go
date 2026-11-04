@@ -61,15 +61,21 @@ type chatEvent struct {
 	done  bool
 	gen   uint64
 	tools []ai.ToolCall
+	usage ai.Usage
+	// HasUsage marks a report the server actually made; the zero Usage
+	// means "not measured", not "zero tokens".
+	HasUsage bool
 }
 
 // ChatOutputMsg delivers one event from the streaming chat goroutine.
 type ChatOutputMsg struct {
-	Delta string
-	Err   error
-	Done  bool
-	Gen   uint64 // conversation generation, stale for cleared threads
-	Tools []ai.ToolCall
+	Delta    string
+	Err      error
+	Done     bool
+	Gen      uint64 // conversation generation, stale for cleared threads
+	Tools    []ai.ToolCall
+	Usage    ai.Usage
+	HasUsage bool
 }
 
 func waitForChatOutput(ch <-chan chatEvent, gen uint64) tea.Cmd {
@@ -81,8 +87,23 @@ func waitForChatOutput(ch <-chan chatEvent, gen uint64) tea.Cmd {
 		if !ok {
 			return ChatOutputMsg{Done: true, Gen: gen}
 		}
-		return ChatOutputMsg{Delta: ev.delta, Err: ev.err, Done: ev.done, Gen: gen, Tools: ev.tools}
+		return ChatOutputMsg{Delta: ev.delta, Err: ev.err, Done: ev.done, Gen: gen,
+			Tools: ev.tools, Usage: ev.usage, HasUsage: ev.HasUsage}
 	}
+}
+
+// formatUsage renders one token report for a card: "1.2k in · 450 out".
+// A server that measured nothing reports an empty Usage and no card is
+// drawn — zero tokens and unknown tokens must not read the same.
+func formatUsage(u ai.Usage) string {
+	return compactTokens(u.PromptTokens) + " in · " + compactTokens(u.CompletionTokens) + " out"
+}
+
+func compactTokens(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	return fmt.Sprintf("%.1fk", float64(n)/1024)
 }
 
 func (m Model) chatPanelWidth() int {
@@ -605,6 +626,12 @@ func (m *Model) startChatTurn() tea.Cmd {
 			Delta: func(d string) {
 				select {
 				case ch <- chatEvent{delta: d, gen: gen}:
+				case <-ctx.Done():
+				}
+			},
+			Usage: func(u ai.Usage) {
+				select {
+				case ch <- chatEvent{usage: u, HasUsage: true, gen: gen}:
 				case <-ctx.Done():
 				}
 			},
@@ -1269,6 +1296,12 @@ func (m *Model) rebuildChatRows() {
 				add("hint", "")
 			} else {
 				m.addAIRows(&rows, msg.Content)
+				// The turn's token card, keyed on the message it measured:
+				// a rebuilt transcript shows the same cards, and a thread
+				// loaded from history shows the ones the server reported.
+				if msg.Usage != nil && !msg.Usage.Empty() {
+					add("notice", " "+m.g.iconTool+" "+formatUsage(*msg.Usage))
+				}
 			}
 		}
 	}

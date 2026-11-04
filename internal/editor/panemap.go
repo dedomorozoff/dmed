@@ -328,6 +328,13 @@ var paneCommands = map[paneID][]paneCommand{
 		{act: "park-mode.yes", chords: []string{"y", "enter"}, flags: protected},
 		{act: "park-mode.no", chords: []string{"n", "esc", "r"}, flags: protected},
 	},
+	// model-pick
+	"model-pick": {
+		{act: "model-pick.close", chords: []string{"esc", "ctrl+c"}, flags: protected},
+		{act: "model-pick.up", chords: []string{"k", "up"}},
+		{act: "model-pick.down", chords: []string{"j", "down"}},
+		{act: "model-pick.open", chords: []string{"enter"}},
+	},
 	// park-run
 	"park-run": {
 		{act: "park-run.yes", chords: []string{"y", "enter"}, flags: protected},

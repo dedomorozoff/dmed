@@ -180,6 +180,12 @@ func (p *openAIProvider) ChatStream(ctx context.Context, req Request, h Handler)
 	if req.Options.NumPredict > 0 {
 		body["max_tokens"] = req.Options.NumPredict
 	}
+	if h.Usage != nil {
+		// The usage-only final chunk arrives only when asked for; a server
+		// that does not know the field ignores it (or answers without it),
+		// which reads as "no report", never as a failure.
+		body["stream_options"] = map[string]any{"include_usage": true}
+	}
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -266,6 +272,11 @@ func (p *openAIProvider) ChatStream(ctx context.Context, req Request, h Handler)
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
+			Usage *struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+				TotalTokens      int `json:"total_tokens"`
+			} `json:"usage"`
 			Error *struct {
 				Message string `json:"message"`
 			} `json:"error"`
@@ -275,6 +286,16 @@ func (p *openAIProvider) ChatStream(ctx context.Context, req Request, h Handler)
 		}
 		if chunk.Error != nil {
 			return fmt.Errorf("openai: %s", chunk.Error.Message)
+		}
+		// The usage chunk carries no choices and arrives after the
+		// finish_reason one, so it is read ahead of the empty-choices skip.
+		// Some servers end the stream right there without [DONE].
+		if chunk.Usage != nil && h.Usage != nil {
+			h.Usage(Usage{
+				PromptTokens:     chunk.Usage.PromptTokens,
+				CompletionTokens: chunk.Usage.CompletionTokens,
+				TotalTokens:      chunk.Usage.TotalTokens,
+			})
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -302,7 +323,13 @@ func (p *openAIProvider) ChatStream(ctx context.Context, req Request, h Handler)
 		}
 		if chunk.Choices[0].FinishReason != nil {
 			flushTools()
-			return nil
+			// Keep reading: the usage chunk follows the finish_reason one,
+			// then [DONE] — or a silent end of stream. Returning here would
+			// always lose the report, so the accumulator is drained instead
+			// and a later [DONE] flush finds nothing to re-emit.
+			acc = map[int]*accTool{}
+			order = nil
+			continue
 		}
 	}
 	return sc.Err()

@@ -188,6 +188,11 @@ func (r *Runner) stream(ctx context.Context, id string, msgs []ai.Message, ch ch
 			case <-ctx.Done():
 			}
 		},
+		Usage: func(u ai.Usage) {
+			// The report lands on the queue directly: it arrives with the
+			// final chunk, and the task may already be moving to review.
+			r.queue.SetUsage(id, u)
+		},
 	})
 	if err != nil {
 		select {

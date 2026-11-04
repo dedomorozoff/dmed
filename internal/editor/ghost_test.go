@@ -14,6 +14,9 @@ import (
 // LLM provider so ghost-stream tests never touch the network.
 type fakeProvider struct {
 	pieces []string
+	// usage, when set, is reported once per stream — the shape a server
+	// answers with token counts takes.
+	usage *ai.Usage
 }
 
 func (f *fakeProvider) Models(_ context.Context) ([]string, error) { return nil, nil }
@@ -23,6 +26,9 @@ func (f *fakeProvider) ChatStream(_ context.Context, _ ai.Request, h ai.Handler)
 		if h.Delta != nil {
 			h.Delta(p)
 		}
+	}
+	if f.usage != nil && h.Usage != nil {
+		h.Usage(*f.usage)
 	}
 	return nil
 }

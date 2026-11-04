@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -533,5 +534,79 @@ func TestChatStreamOmitsOptionsWhenUnset(t *testing.T) {
 	}
 	if _, ok := gotBody["temperature"]; ok {
 		t.Fatalf("temperature should be omitted when zero: %v", gotBody)
+	}
+}
+
+// TestOpenAIUsageChunk pins the ordering the servers keep: the usage-only
+// chunk (no choices) arrives after the finish_reason one, so a client that
+// returned at finish would never report tokens. The request must also carry
+// stream_options.include_usage for the server to send it at all.
+func TestOpenAIUsageChunk(t *testing.T) {
+	var asked bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"include_usage":true`) {
+			asked = true
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, chunk := range []string{
+			`{"choices":[{"delta":{"content":"hi"}}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+			`{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15}}`,
+		} {
+			_, _ = w.Write([]byte("data: " + chunk + "\n\n"))
+		}
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p := NewProvider(Config{Type: OpenAIProvider, URL: srv.URL, Model: "gpt-4", APIKey: "k"})
+	var got *Usage
+	err := p.ChatStream(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}},
+		Handler{Usage: func(u Usage) { got = &u }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !asked {
+		t.Fatal("the request must ask for the usage chunk")
+	}
+	if got == nil || got.PromptTokens != 11 || got.CompletionTokens != 4 || got.TotalTokens != 15 {
+		t.Fatalf("usage = %+v", got)
+	}
+}
+
+// TestOllamaUsageFinalChunk: Ollama counts ride the done chunk.
+func TestOllamaUsageFinalChunk(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"message":{"content":"x"},"done":false}` + "\n"))
+		_, _ = w.Write([]byte(`{"message":{"content":""},"done":true,"prompt_eval_count":20,"eval_count":7}` + "\n"))
+	}))
+	defer srv.Close()
+	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL, Model: "m"})
+	var got *Usage
+	if err := p.ChatStream(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}},
+		Handler{Usage: func(u Usage) { got = &u }}); err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.PromptTokens != 20 || got.CompletionTokens != 7 || got.TotalTokens != 27 {
+		t.Fatalf("usage = %+v", got)
+	}
+}
+
+// TestUsageWithoutReport: a server that answers neither shape must leave the
+// session counts untouched rather than record a confident zero.
+func TestUsageWithoutReport(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"message":{"content":"x"},"done":true}` + "\n"))
+	}))
+	defer srv.Close()
+	p := NewProvider(Config{Type: OllamaProvider, URL: srv.URL, Model: "m"})
+	fired := false
+	if err := p.ChatStream(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}},
+		Handler{Usage: func(Usage) { fired = true }}); err != nil {
+		t.Fatal(err)
+	}
+	if fired {
+		t.Fatal("no counts, no report")
 	}
 }

@@ -6,6 +6,8 @@ package agent
 
 import (
 	"time"
+
+	"dmed/internal/ai"
 )
 
 // Status is the lifecycle state of a Task.
@@ -53,9 +55,12 @@ type Task struct {
 	Parent   string  // chat thread or tool call that delegated the task (KindSubagent)
 	Progress float32 // 0..1; >0 only while running/streaming
 	Changes  []Change
-	Error    string
-	Created  time.Time
-	Updated  time.Time
+	// Usage is what the model reported for this task; empty means the
+	// server measured nothing, which is not the same as zero.
+	Usage   ai.Usage
+	Error   string
+	Created time.Time
+	Updated time.Time
 }
 
 // IsFinished reports whether the task reached a terminal state.

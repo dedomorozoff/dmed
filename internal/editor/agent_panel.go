@@ -389,6 +389,12 @@ func (m Model) agentPanel(h int) []string {
 			progress = " " + m.g.stop
 		}
 		line += progress
+		// The token card: what the task cost, once the server said. Empty
+		// usage means the server measured nothing, and that reads as no
+		// card, not as a free task.
+		if !t.Usage.Empty() {
+			line += "  " + formatUsage(t.Usage)
+		}
 		pad := gitPanelWidth - 1 - lipgloss.Width(line)
 		if pad < 0 {
 			pad = 0

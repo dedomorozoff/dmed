@@ -1254,6 +1254,9 @@ func (m *Model) dispatchPanes(s string, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if m.outlineOpen {
 		return m.handleOutline(s, msg), true
 	}
+	if m.modelPickOpen {
+		return m.handleModelPick(s, msg), true
+	}
 	// Find in Project owns its keys first: it is a bottom overlay like the
 	// finder, and its Enter must not jump the file-search cursor underneath.
 	// The replace review answers before the panel, since both are open while a

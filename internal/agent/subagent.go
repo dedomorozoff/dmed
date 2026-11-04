@@ -107,7 +107,7 @@ func (s *Subagent) Run(parent context.Context, task Task) (Result, error) {
 			s.finish(task.ID, nil, summary(changes))
 			return Result{Changes: changes}, ctx.Err()
 		}
-		calls, text, err := s.round(ctx, msgs)
+		calls, text, err := s.round(ctx, task.ID, msgs)
 		if text != "" {
 			s.queue.SetProgress(task.ID, progressByRound(round, rounds))
 		}
@@ -141,8 +141,9 @@ func (s *Subagent) Run(parent context.Context, task Task) (Result, error) {
 }
 
 // round runs one provider call and returns its tool calls plus the text it
-// streamed.
-func (s *Subagent) round(ctx context.Context, msgs []ai.Message) ([]ai.ToolCall, string, error) {
+// streamed. Each round's token report folds into the task's total: the
+// sub-agent re-sends the whole context every round, and every send is billed.
+func (s *Subagent) round(ctx context.Context, id string, msgs []ai.Message) ([]ai.ToolCall, string, error) {
 	var (
 		calls []ai.ToolCall
 		text  strings.Builder
@@ -154,6 +155,7 @@ func (s *Subagent) round(ctx context.Context, msgs []ai.Message) ([]ai.ToolCall,
 	}, ai.Handler{
 		Delta:     func(d string) { text.WriteString(d) },
 		ToolCalls: func(c []ai.ToolCall) { calls = append(calls, c...) },
+		Usage:     func(u ai.Usage) { s.queue.SetUsage(id, u) },
 	})
 	return calls, text.String(), err
 }
