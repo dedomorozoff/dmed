@@ -488,6 +488,20 @@ func (m *Model) chatSubmit() tea.Cmd {
 	if text == "" || m.chatBusy {
 		return nil
 	}
+	// A leading "/" is a command, not a message: the template it names is
+	// what the model sees, while the prompt history keeps the raw command —
+	// recall (↑) must give back what was typed, not a paragraph. An unknown
+	// name (or a bare "/") answers with the listing and sends nothing.
+	expanded := text
+	if prompt, notice, isCommand := m.expandSlash(text); isCommand {
+		m.chatIn = nil
+		if notice != "" {
+			m.chatErr = notice
+			m.rebuildChatRows()
+			return nil
+		}
+		expanded = prompt
+	}
 	m.chatIn = nil
 	if m.chatModel == "" {
 		m.pickChatModel()
@@ -498,7 +512,7 @@ func (m *Model) chatSubmit() tea.Cmd {
 		}
 	}
 
-	m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "user", Content: text})
+	m.chatMsgs = append(m.chatMsgs, ai.Message{Role: "user", Content: expanded})
 	m.recordChatPrompt(text)
 	m.saveChatThread()
 	m.chatReply = ""

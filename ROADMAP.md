@@ -871,8 +871,28 @@ cross-build. The cheap part first:
         signals all of them, and a burst coalesces per channel without losing
         a task — the runner was always keyed by task id, so two tasks stream,
         review and cancel independently.
-- Slash commands / prompt templates: `/refactor`, `/test`, user ones in
+- [x] Slash commands / prompt templates: `/refactor`, `/test`, user ones in
   `.dmed/templates` (plain files or Lua).
+  - [x] **A command is a template, not a protocol.** Enter on `/name rest`
+        expands the named template and sends *that* to the model; the raw
+        command goes to the prompt history so `↑` recalls what was typed,
+        while the transcript shows what the model actually saw. A bare `/` or
+        `/help` answers with the listing; an unknown name answers with it too
+        instead of burning a round.
+  - [x] **Project shadows home shadows built-in.** `<project>/.dmed/templates`
+        beats `~/.dmed/templates`, which beats the shipped `/refactor` and
+        `/test`; the scan runs at submit, because templates are edited in the
+        very editor that reads them. A plain file's first `# ` line is its
+        description and never reaches the prompt; `{args}` is replaced, and a
+        body without the placeholder gets the arguments appended — no
+        arguments get the model a line telling it to ask, so an empty target
+        never reads as named.
+  - [x] **`.lua` templates run under the plugin's own budget.** The script
+        sees a global `args` and answers with the prompt (returned string or
+        the global `prompt`) on a fresh VM with the 3-second deadline — a
+        hanging template fails with a message, not with a frozen editor. Its
+        output is the final prompt: post-processing would be rewriting what
+        the script deliberately wrote.
 - Ghost completion → a fill-in-middle prompt for code models
   (qwen-coder and kin can do it); the debounce follows typing speed.
 - Usage: token/cost cards in the chat and the agent panel, quick model

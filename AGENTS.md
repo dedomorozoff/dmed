@@ -184,7 +184,14 @@ The code is split into focused internal packages:
   choke point that records it and `fixPaneTabsAfterClose` the one place that
   renumbers both), `tree.go`, `mouse.go`,
   `completion.go`, `palette.go`, `terminal.go`, `chat.go`
-  (AI chat), `ai_inline.go` (inline rewrite → diff review), `ghost.go`
+  (AI chat), `chat_slash.go` (slash commands: `/name args` expands a template
+  before submit — project `.dmed/templates` beats `~/.dmed/templates` beats the
+  built-ins, scanned at submit because templates are edited in the very editor
+  that reads them; a first `# ` line is the description and never ships;
+  `{args}` is replaced, no arguments gets the model a line to ask; `.lua`
+  templates run on a fresh VM under a 3 s budget with a global `args`, and
+  their output is the final prompt), `ai_inline.go` (inline rewrite → diff
+  review), `ghost.go`
   (Copilot-style ghost text), `agent_panel.go` (agent task queue UI;
   `[agent] workers` goroutines drain the queue in parallel, each waiting on its
   own wake channel; `r` retries a finished task as a new one, sub tasks are
