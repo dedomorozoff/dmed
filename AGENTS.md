@@ -252,6 +252,11 @@ The code is split into focused internal packages:
   walk plus the LIST_DIR/GLOB tools), `tools_core.go` (`toolEnv`: the TUI-free
   tool bodies shared by the chat and by background sub-agents), `tools_plan.go`
   (TODO_* / ASK_USER / SWITCH_MODE tools and the question overlay),
+  `park.go` (one presenter for every parked decision: the `[k/N]` badge over
+  the shared queue — the pending diff review counted as one entry — the
+  per-kind label with its answer hint, and `parkPeek` under Tab, which walks
+  the stack to show what comes next but never moves it: the y/n arms read the
+  head only, and the peek resets with every park transition),
   `tools_web.go` (WEB_SEARCH plus the plan/act modes),
   `tools_subagent.go` (SUB_AGENT: the tool, the tool surface a sub-agent gets,
   and the park that waits for it),

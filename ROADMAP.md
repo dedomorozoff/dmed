@@ -556,7 +556,7 @@ plan with per-item estimates, design decisions and open questions lives in
       traceable in history rather than a silent tree rewrite. No external
       terminal needed.
 
-## M9–M13 (M9, M10, M11 and M13 done; M12 planned)
+## M9–M13 (all done)
 
 The list below is drawn from the aftermath of Post-M8: the "chroma →
 tree-sitter (later)" note in the stack, the plugins' "Remaining: more
@@ -941,9 +941,27 @@ cross-build. The cheap part first:
         session at odds. The fetch is generation-stamped, an error answers on
         the status bar instead of an empty box, and picking the already-active
         model rewrites no file.
-- Park UI: the approval queue already works, but the different kinds
+- [x] Park UI: the approval queue already works, but the different kinds
   (file approval, ASK_USER question, waiting for a sub-agent) deserve to
   be one predictable flow with a shared navigation stack.
+  - [x] **One presenter paints every park.** The queue (a head plus waiting
+        ones) was already shared; what diverged was the presentation — RUN
+        wrote its own sentence, the mode switch and the sub-agent wait
+        reused two more i18n lines, MCP copied RUN's by hand. `parkStatus`
+        is now the single place: a label per kind with its answer hint, and
+        a `[k/N]` badge over the *whole* waiting stack — the pending diff
+        review counted as one entry, the badge dropped when there is nothing
+        to count.
+  - [x] **Tab peeks without moving.** `parkPeek` walks the stack to show the
+        second and third decisions while the head stays the one y/n answers
+        — a peeked line says "(viewing; only the first is answered)". The
+        index is view state: it resets with every park transition, survives
+        nothing the queue does not, and answering cannot reach past the head
+        because the y/n arms never read it.
+  - [x] **The four y/n panes each declare the peek chord**, protected yes/no
+        untouched, so a `[keys]` line can rebind peek per pane and the ask
+        overlay keeps its own keys — a question with choices is answered,
+        not peeked at.
 
 ### M13 — configuration and experience
 - Rebindable keys: a `[keys]` section of `action = key`.

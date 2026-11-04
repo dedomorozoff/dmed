@@ -713,6 +713,9 @@ type Model struct {
 	// single round that needs several approvals asks for them one by one.
 	chatPark  *toolPark
 	chatParks []toolPark
+	// parkPeek walks the parked stack with Tab without moving it: 0 is the
+	// head (the one y/n answers), 1.. look into chatParks. View state only.
+	parkPeek int
 
 	// The model's checklist and the questions it is waiting an answer for.
 	// Both live behind pointers because they are written from the chat tool

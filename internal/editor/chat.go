@@ -838,28 +838,24 @@ func (m *Model) handleChatToolsDone(content string, tools []ai.ToolCall) tea.Cmd
 func (m *Model) startNextPark() bool {
 	if len(m.chatParks) == 0 {
 		m.chatPark = nil
+		m.parkPeek = 0
 		return false
 	}
 	p := m.chatParks[0]
 	m.chatParks = m.chatParks[1:]
 	m.chatPark = &p
+	m.parkPeek = 0
 	switch p.park.Kind {
-	case ParkRunConfirm:
-		m.msg = "RUN: " + p.park.Text + "  (y run / n deny)"
-		return true
 	case ParkAskUser:
+		// The question gets its overlay; the status line still comes from
+		// the shared presenter so the badge shows across all kinds.
 		m.startAsk(p.park.Ask)
+		m.msg = m.parkStatus()
 		return true
-	case ParkSwitchMode:
-		m.msg = m.t("chat.switch_status")
-		return true
-	case ParkSubAgent:
-		// A delegation is already running in the background; the status line
-		// shows the wait and Esc cancels it.
-		m.msg = m.t("chat.subagent_status")
-		return true
-	case ParkMCPConfirm:
-		m.msg = "MCP " + p.park.Text + "  (y run / n deny)"
+	case ParkRunConfirm, ParkMCPConfirm, ParkSwitchMode, ParkSubAgent:
+		// Every kind is painted by the one presenter, so the badge, the
+		// order and the hint read the same however deep the stack is.
+		m.msg = m.parkStatus()
 		return true
 	default:
 		m.chatPark = nil
@@ -912,6 +908,7 @@ func (m *Model) finishChatRunConfirm(run bool) tea.Cmd {
 func (m *Model) clearChatParks() {
 	m.chatPark = nil
 	m.chatParks = nil
+	m.parkPeek = 0
 }
 
 // openTouchedFiles diffs on-disk snapshots taken before and after a tool round
@@ -967,6 +964,8 @@ func (m *Model) handleChatParkKey(s string, msg tea.KeyPressMsg) tea.Cmd {
 			return m.finishChatRunConfirm(true)
 		case "park-run.no":
 			return m.finishChatRunConfirm(false)
+		case "park-run.peek":
+			m.parkCycle()
 		}
 		return nil // ignore other keys while parked
 	case ParkAskUser:
@@ -977,6 +976,8 @@ func (m *Model) handleChatParkKey(s string, msg tea.KeyPressMsg) tea.Cmd {
 			return m.finishChatSwitchMode(true)
 		case "park-mode.no":
 			return m.finishChatSwitchMode(false)
+		case "park-mode.peek":
+			m.parkCycle()
 		}
 		return nil
 	case ParkSubAgent:
@@ -985,6 +986,8 @@ func (m *Model) handleChatParkKey(s string, msg tea.KeyPressMsg) tea.Cmd {
 		switch m.paneCmd("park-sub", s) {
 		case "park-sub.cancel":
 			m.cancelParkedSubAgent()
+		case "park-sub.peek":
+			m.parkCycle()
 		}
 		return nil
 	case ParkMCPConfirm:
@@ -993,6 +996,8 @@ func (m *Model) handleChatParkKey(s string, msg tea.KeyPressMsg) tea.Cmd {
 			return m.finishChatMCPConfirm(true)
 		case "park-mcp.no":
 			return m.finishChatMCPConfirm(false)
+		case "park-mcp.peek":
+			m.parkCycle()
 		}
 		return nil // ignore other keys while parked
 	default:

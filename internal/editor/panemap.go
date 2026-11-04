@@ -327,6 +327,7 @@ var paneCommands = map[paneID][]paneCommand{
 	"park-mode": {
 		{act: "park-mode.yes", chords: []string{"y", "enter"}, flags: protected},
 		{act: "park-mode.no", chords: []string{"n", "esc", "r"}, flags: protected},
+		{act: "park-mode.peek", chords: []string{"tab"}},
 	},
 	// model-pick
 	"model-pick": {
@@ -339,15 +340,18 @@ var paneCommands = map[paneID][]paneCommand{
 	"park-run": {
 		{act: "park-run.yes", chords: []string{"y", "enter"}, flags: protected},
 		{act: "park-run.no", chords: []string{"n", "esc", "r"}, flags: protected},
+		{act: "park-run.peek", chords: []string{"tab"}},
 	},
 	// park-mcp
 	"park-mcp": {
 		{act: "park-mcp.yes", chords: []string{"y", "enter"}, flags: protected},
 		{act: "park-mcp.no", chords: []string{"n", "esc", "r"}, flags: protected},
+		{act: "park-mcp.peek", chords: []string{"tab"}},
 	},
 	// park-sub
 	"park-sub": {
 		{act: "park-sub.cancel", chords: []string{"esc"}, flags: protected},
+		{act: "park-sub.peek", chords: []string{"tab"}},
 	},
 	// chat
 	"chat": {
