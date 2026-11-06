@@ -863,7 +863,7 @@ func TestGitPanelRussianLocale(t *testing.T) {
 	}
 
 	m := New(f)
-	m.width, m.height = 120, 24
+	m.width, m.height = 180, 24
 	m.cfg.UI.Lang = "ru"
 	m.tr = i18n.New(i18n.Resolve(m.cfg.UI.Lang))
 
@@ -871,6 +871,9 @@ func TestGitPanelRussianLocale(t *testing.T) {
 	if m.gitMode != gitModeStatus {
 		t.Fatal("setup: git panel must be in status mode")
 	}
+	// The inline preview opens on the selected file, so the one bottom row is
+	// its footer; drop the preview to read the list summary variant.
+	m.diffRows = nil
 	// Status-line hints and counters are localized.
 	line := m.gitStatusLine()
 	if !strings.Contains(line, "q: закрыть") {

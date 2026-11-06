@@ -183,7 +183,10 @@ The code is split into focused internal packages:
   the untitled buffer has no path to resolve. `setActiveTab` is the one focus
   choke point that records it and `fixPaneTabsAfterClose` the one place that
   renumbers both), `tree.go`, `mouse.go`,
-  `completion.go`, `palette.go`, `terminal.go`, `chat.go`
+  `completion.go`, `palette.go`, `terminal.go` (the persistent shell; the reader
+  feeds child output through `termquery.go`, whose `termResponder` answers the
+  capability queries a program blocks on before it paints — fish waits ten
+  seconds on its primary device attribute query without a reply), `chat.go`
   (AI chat), `chat_slash.go` (slash commands: `/name args` expands a template
   before submit — project `.dmed/templates` beats `~/.dmed/templates` beats the
   built-ins, scanned at submit because templates are edited in the very editor
@@ -206,7 +209,9 @@ The code is split into focused internal packages:
   Changes — rewritten only when that shape moves, so a progress tick writes
   nothing; a running/queued task is stored cancelled with the exit as its
   cause, and the quit path writes unconditionally),
-  `git_panel.go`, `diffview.go`, `sqlite_view.go` (SQLite browser: table
+  `git_panel.go` (its change list, history and inline diff preview share the
+  application status line — one bottom row, never a second status bar; only the
+  commit and branch inputs add a prompt row), `diffview.go`, `sqlite_view.go` (SQLite browser: table
   strip + paged row grid, immediate cell edits through `internal/sqlitedb`),
   `imageview.go` (picture tabs: ASCII/half-block render via
   `internal/imgprev`, empty buffer + decoded frames, read-only key

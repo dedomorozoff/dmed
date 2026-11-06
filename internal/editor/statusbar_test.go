@@ -184,6 +184,62 @@ func TestStatusBarRemainsLastWithBottomPanels(t *testing.T) {
 	}
 }
 
+// TestGitPanelKeepsOneStatusRow guards the layout the panel footer used to
+// break: Ctrl+G must not widen the bottom of the screen by a row. The change
+// list, its inline diff and the history share the application status line, so
+// opening the panel leaves viewHeight() and the status bar row where they were.
+func TestGitPanelKeepsOneStatusRow(t *testing.T) {
+	for _, mode := range []struct {
+		name string
+		log  bool
+	}{
+		{"status", false},
+		{"log", true},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			dir, _ := initTestGitRepo(t)
+			f := writeTemp(t, dir, "code.go", "package main\n\nfunc main() { changed }\n")
+			m := New(f)
+			m.width, m.height = 120, 30
+			m = press(m, tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+			if m.gitMode != gitModeStatus {
+				t.Fatalf("setup: want status mode, got %v", m.gitMode)
+			}
+			if mode.log {
+				m = press(m, tea.KeyPressMsg{Text: "l"})
+				if m.gitMode != gitModeLog {
+					t.Fatalf("setup: want log mode, got %v", m.gitMode)
+				}
+			}
+
+			if got := m.contextBottomExtraRows(); got != 0 {
+				t.Fatalf("git %s mode reserves %d extra bottom rows, want 0", mode.name, got)
+			}
+			if got, want := m.viewHeight(), m.height-2; got != want {
+				t.Fatalf("viewHeight = %d, want %d (the panel must not shrink the editor)", got, want)
+			}
+			rows := plainRows(m.View().Content)
+			if len(rows) != m.height {
+				t.Fatalf("frame has %d rows, want %d", len(rows), m.height)
+			}
+			if got, want := stripANSI(rows[len(rows)-1]), stripANSI(m.statusBar()); got != want {
+				t.Fatalf("last row = %q, want the status bar %q", got, want)
+			}
+			if got := m.statusBarRow(); got != len(rows)-1 {
+				t.Fatalf("statusBarRow = %d, want %d", got, len(rows)-1)
+			}
+			// The git footer used to sit directly above the status bar; nothing
+			// above the last row may duplicate it now.
+			for i, row := range rows[:len(rows)-1] {
+				plain := stripANSI(row)
+				if strings.Contains(plain, "Space stage") || strings.Contains(plain, "q: close") {
+					t.Fatalf("row %d duplicates the git footer: %q", i, plain)
+				}
+			}
+		})
+	}
+}
+
 func TestPaneStatusBarsInSplit(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)

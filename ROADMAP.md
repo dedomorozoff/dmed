@@ -88,6 +88,9 @@ in the Makefile as insurance).
         create a new branch (N → name → Enter).
   - [x] Git init (`i` in the git panel): initialize a repository if missing;
         action hints in the git panel's status line.
+  - [x] The panel's summary and hints live on the application status line: the
+        change list, history and inline diff preview never push a second status
+        bar onto the bottom of the screen.
   - [x] Fetch / push (`f` / `p` in the git panel, status mode): background
         sync to/from `origin` (go-git, embedded credentials, idempotent).
   - [x] Inline git blame (`Alt+B`): author · when annotations, right-aligned
@@ -173,6 +176,9 @@ in the Makefile as insurance).
 - [x] Built-in terminal (`Alt+T`): persistent ConPTY/PTY session at the bottom
       of the editor, ANSI screen emulation, colors/cursor addressing, interactive
       and full-screen TUI programs, resize, paste and native shell history.
+      Capability queries are answered (`termquery.go`): fish's primary device
+      attribute query, cursor reports, colour and capability lookups — without
+      a reply fish sat silent for ten seconds before its first prompt.
 - [x] Go to line (`Ctrl+L` in the editor / "Go to Line" palette): formats
       `N` (absolute), `N:C`, relative `+N`/`-N` (with a `+N:C` column).
 - [x] Duplicate lines: `Ctrl+D` (copy below), `Alt+Shift+Down`/`Up`

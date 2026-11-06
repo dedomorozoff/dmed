@@ -56,7 +56,9 @@ func (m Model) statusIconsVisible() bool {
 		m.agentPrompt, m.askReq != nil, m.treeConfirm != "", m.aiCfgOpen, m.helpOpen:
 		return false
 	case m.gitOpen:
-		// Git keeps its context/diff line above the application status bar.
+		// The git panel's lists and inline diff preview put their summary on the
+		// status bar itself, beside the strip that toggles them with the mouse;
+		// its commit and branch inputs add a row above, leaving the bar intact.
 	}
 	return true
 }

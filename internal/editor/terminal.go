@@ -95,11 +95,24 @@ func (m *Model) ensureShell() {
 
 	termVT := m.termVT
 	go debug.CapturePanicReport(func() {
+		var responder termResponder
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := term.Read(buf)
 			if n > 0 {
 				_, _ = termVT.Write(buf[:n])
+				// Answer the capability queries a shell sends before it paints
+				// anything: fish blocks for ten seconds on its primary device
+				// attribute query until a terminal replies.
+				reply := responder.feed(buf[:n], func() (int, int) {
+					termVT.Lock()
+					cur := termVT.Cursor()
+					termVT.Unlock()
+					return cur.Y, cur.X
+				})
+				if len(reply) > 0 {
+					_, _ = term.Write(reply)
+				}
 				rows := captureTerminalRows(termVT)
 				select {
 				case outCh <- terminalOutputMsg{gen: gen, rows: rows}:

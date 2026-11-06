@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -107,5 +108,42 @@ func TestTerminalPanelRows(t *testing.T) {
 	rows := plainRows(strings.Join(m.terminalPanel(), "\n"))
 	if len(rows) != m.termPanelHeight() {
 		t.Fatalf("got %d rows", len(rows))
+	}
+}
+
+// TestRealShellPromptWithoutQueryTimeout drives a real fish through the panel.
+// fish sends its primary device attribute query before painting anything and
+// waits ten seconds for a reply, so without the responder it looks hung; the
+// deadline here is well below that wait, which makes the test the guard against
+// removing the replies. It skips on hosts without fish, like the Xdebug
+// session test does with its own interpreter.
+func TestRealShellPromptWithoutQueryTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fish is a unix shell")
+	}
+	const shell = "/bin/fish"
+	if _, err := os.Stat(shell); err != nil {
+		t.Skipf("%s not installed", shell)
+	}
+	m := New()
+	m.width, m.height = 100, 30
+	t.Setenv("DMED_SHELL", shell)
+	m.ensureShell()
+	if m.termSession == nil {
+		t.Fatalf("no shell session: %s", m.msg)
+	}
+	defer m.killTerminal()
+	deadline := time.After(8 * time.Second)
+	for {
+		select {
+		case msg := <-m.termCh:
+			for _, row := range msg.rows {
+				if strings.TrimSpace(row.text) != "" {
+					return
+				}
+			}
+		case <-deadline:
+			t.Fatalf("the shell painted nothing within 8s: the panel is not answering its queries\nrows=%v", rowTexts(m.termRows))
+		}
 	}
 }

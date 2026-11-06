@@ -483,6 +483,10 @@ func TestTreeTrashConfirmCancelKeepsFile(t *testing.T) {
 }
 
 func TestTrashMovesFileOffDisk(t *testing.T) {
+	// Keep the trash beside the file: when $TMPDIR lives on another filesystem
+	// than $HOME the freedesktop trash rename fails with EXDEV on Linux, which
+	// says nothing about the code under test.
+	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	file := writeTemp(t, dir, "trashme.txt", "bye\n")
 

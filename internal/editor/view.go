@@ -203,17 +203,26 @@ func (m Model) contextBottomExtraRows() int {
 	switch {
 	case m.diffViewOpen,
 		m.sqlOpen,
-		m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0,
 		m.aiReviewMode, m.agentReviewMode, m.chatReviewMode, m.projReplReview, m.agentPrompt,
 		m.askReq != nil,
 		m.aiInlineOpen, m.aiInlineBusy, m.aiFixOpen, m.aiFixBusy,
 		m.aiFixReviewMode, m.conflictOpen, m.treeConfirm != "", m.quitConfirm,
-		m.aiCfgOpen, m.gitOpen, m.promptSave, m.promptOpen,
+		m.aiCfgOpen, m.promptSave, m.promptOpen,
 		m.searchOpen, m.gotoOpen, m.lspRenameOpen, m.hoverOpen:
+		return 1
+	case m.gitInputMode():
 		return 1
 	default:
 		return 0
 	}
+}
+
+// gitInputMode reports whether the git panel is waiting for typed input — a
+// commit message or a branch name — rather than listing files, history or a
+// diff. Only those two modes need a prompt row of their own: the lists live on
+// the single application status line (see gitStatusLine).
+func (m Model) gitInputMode() bool {
+	return m.gitOpen && (m.gitMode == gitModeCommit || m.gitMode == gitModeBranch)
 }
 
 func (m Model) viewHeight() int {
@@ -236,8 +245,6 @@ func (m Model) contextBottomRow() string {
 		default:
 			return m.sqlBottom()
 		}
-	} else if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) && len(m.diffRows) > 0 {
-		return m.diffBottom()
 	} else if m.aiReviewMode {
 		return m.aiReviewBottom()
 	} else if m.agentReviewMode {
@@ -271,17 +278,10 @@ func (m Model) contextBottomRow() string {
 			return m.aiCfgEditLine()
 		}
 		return m.aiCfgBottom()
-	} else if m.gitOpen {
-		switch m.gitMode {
-		case gitModeCommit:
-			return m.gitLine()
-		case gitModeLog:
-			return m.gitLogStatusLine()
-		case gitModeBranch:
-			return m.gitBranchLine()
-		default:
-			return m.gitStatusLine()
-		}
+	} else if m.gitOpen && m.gitMode == gitModeCommit {
+		return m.gitLine()
+	} else if m.gitOpen && m.gitMode == gitModeBranch {
+		return m.gitBranchLine()
 	} else if m.promptSave {
 		return m.saveLine()
 	} else if m.promptOpen {
@@ -1200,48 +1200,67 @@ func (m Model) gitCommitInputRender() []string {
 	return out
 }
 
+// gitStatusLine is the one bottom row while the git panel lists changes or
+// history. The panel's summary and its key hints live on the application status
+// line instead of in a footer row of their own, so opening the panel never
+// pushes a second status bar onto the screen (which is what a footer row that
+// repeated the icon strip looked like). The icon strip stays, because it is how
+// the panel and its neighbours are toggled with the mouse, and a transient
+// message keeps the place it has on every other status line.
 func (m Model) gitStatusLine() string {
-	r := m.repoForCur()
-	var hint string
-	if r == nil {
-		hint = m.t("git.init_hint")
-	} else {
-		hint = m.t("git.hints")
-	}
-	line := m.statusIconsString()
-	if r == nil {
-		line += statusHiStyle.Render(" git: ") + statusStyle.Render(m.t("git.no_repo"))
-	} else {
-		summary := r.StatusSummary()
+	left := m.statusIconsString()
+	var info, hint string
+	switch {
+	case len(m.diffRows) > 0:
+		// The inline diff preview says what is being diffed and how to act on
+		// it: the same footer the full-screen diff viewer shows.
+		info = m.diffInfo()
+		hint = m.diffHint()
+	case m.gitMode == gitModeLog:
+		tag := statusHiStyle.Render(m.t("git.prefix_log"))
+		if len(m.gitLogEntries) == 0 {
+			info = tag + statusStyle.Render(m.t("git.no_commits"))
+		} else {
+			info = tag + hintStyle.Render(m.t("git.commit_count", len(m.gitLogEntries)))
+		}
+		hint = m.t("git.log_hint")
+	default:
+		r := m.repoForCur()
+		if r == nil {
+			info = statusHiStyle.Render(" git: ") + statusStyle.Render(m.t("git.no_repo"))
+			hint = m.t("git.init_hint")
+			break
+		}
 		staged := 0
 		for _, fs := range m.gitFiles {
 			if fs.IsStaged() {
 				staged++
 			}
 		}
-		line += statusHiStyle.Render(m.t("git.prefix_status")) +
-			hintStyle.Render("("+r.Branch()+" "+summary+")") +
+		info = statusHiStyle.Render(m.t("git.prefix_status")) +
+			hintStyle.Render("("+r.Branch()+" "+r.StatusSummary()+")") +
 			statusStyle.Render(fmt.Sprintf(" %s", m.t("git.status_count", len(m.gitFiles), staged)))
+		hint = m.t("git.hints")
 	}
-	// The hint (keybindings) must stay visible even on narrow terminals: trim the
-	// summary to fit alongside it. If the hint itself is wider than the terminal,
-	// trim the hint too so the summary is not lost entirely.
-	fill := m.width - lipgloss.Width(hint) - lipgloss.Width(line)
-	if fill < 0 {
-		if avail := m.width - lipgloss.Width(hint); avail < 4 {
-			if avail < 0 {
-				avail = 0
-			}
-			hint = m.fitStatusTail(hint, m.width-2)
-		}
-		avail := m.width - lipgloss.Width(hint)
-		if avail < 0 {
-			avail = 0
-		}
-		line = statusStyle.Render(m.fitStatusTail(line, avail))
-		fill = m.width - lipgloss.Width(hint) - lipgloss.Width(line)
+	mid := ""
+	if m.msg != "" {
+		mid = statusStyle.Render("  " + m.msg)
 	}
-	if fill > 0 {
+	// The hint is the discoverability of the panel, so it gets cut only when
+	// nothing else can give: a slice of the summary always stays (its tail
+	// carries the branch and the counts). Only when even that is not enough is
+	// the summary itself shortened — keeping its tail. The hint keeps its head,
+	// where the chords that matter are listed first.
+	room := max(0, m.width-lipgloss.Width(left)-lipgloss.Width(mid))
+	const gitSummaryMin = 24
+	if lipgloss.Width(hint) > max(0, room-gitSummaryMin) {
+		hint = m.fitStatusHead(hint, max(0, room-gitSummaryMin))
+	}
+	if lipgloss.Width(info) > room-lipgloss.Width(hint) {
+		info = statusStyle.Render(m.fitStatusTail(info, max(0, room-lipgloss.Width(hint))))
+	}
+	line := left + info + mid
+	if fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint); fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	return line + hintStyle.Render(hint)
@@ -1259,19 +1278,20 @@ func (m Model) fitStatusTail(s string, w int) string {
 	return m.g.ellipsis + string(r[len(r)-(w-1):])
 }
 
-func (m Model) gitLogStatusLine() string {
-	line := m.statusIconsString()
-	if len(m.gitLogEntries) == 0 {
-		line += statusHiStyle.Render(m.t("git.prefix_log")) + statusStyle.Render(m.t("git.no_commits"))
-	} else {
-		line += statusHiStyle.Render(m.t("git.prefix_log")) + hintStyle.Render(m.t("git.commit_count", len(m.gitLogEntries)))
+// fitStatusHead is fitStatusTail's mirror: it keeps the head of s within w
+// visible columns and marks the cut with the ellipsis.
+func (m Model) fitStatusHead(s string, w int) string {
+	r := []rune(stripANSI(s))
+	if len(r) <= w {
+		return s
 	}
-	hint := m.t("git.log_hint")
-	fill := m.width - lipgloss.Width(line) - lipgloss.Width(hint)
-	if fill > 0 {
-		line += statusStyle.Render(strings.Repeat(" ", fill))
+	if w < 1 {
+		return ""
 	}
-	return line + hintStyle.Render(hint)
+	if w == 1 {
+		return m.g.ellipsis
+	}
+	return string(r[:w-1]) + m.g.ellipsis
 }
 
 func (m Model) gitBranchLine() string {
@@ -1353,7 +1373,7 @@ func (m Model) gitPanel(h int) []string {
 func (m Model) gitLogPanel(h int) []string {
 	rows := make([]string, 0, h)
 	start := m.gitLogOffset
-	end := start + m.gitLogListHeight()
+	end := min(start+m.gitLogListHeight(), len(m.gitLogEntries))
 	for i := start; i < end && len(rows) < h; i++ {
 		entry := m.gitLogEntries[i]
 		// Two-line entry: " hash  subject" on first line, "         author time" on second
@@ -1550,8 +1570,8 @@ func renderDiffCell(lines []string, lineIdx int, dt vcs.DiffType, rightSide bool
 	return cell
 }
 
-func (m Model) diffBottom() string {
-	added, modified, deleted := 0, 0, 0
+// diffCounts tallies the rows of the diff currently on screen.
+func (m Model) diffCounts() (added, modified, deleted int) {
 	for _, dr := range m.diffRows {
 		switch dr.Type {
 		case vcs.DiffAdded:
@@ -1562,21 +1582,38 @@ func (m Model) diffBottom() string {
 			deleted++
 		}
 	}
-	hint := m.t("git.diff_hint")
-	if m.gitDiffFocused {
-		hint = m.t("git.diff_focus")
-	} else if m.gitMode == gitModeLog {
-		hint = m.t("git.log_hint2")
-	}
+	return added, modified, deleted
+}
+
+// diffInfo is the labelled part of the diff footer: what is being diffed and
+// the tally, in the order it reads best when the tail survives truncation.
+func (m Model) diffInfo() string {
+	added, modified, deleted := m.diffCounts()
 	modeTag := ""
 	if m.gitMode == gitModeLog {
 		modeTag = statusHiStyle.Render(m.t("git.log_tag")) + " "
 	}
-	line := modeTag + statusHiStyle.Render(m.t("git.diff_label")) + statusStyle.Render(m.diffPath) +
-		hintStyle.Render(m.t("git.diff_stats", added, modified, deleted)) +
-		hintStyle.Render(hint)
-	fill := m.width - lipgloss.Width(line)
-	if fill > 0 {
+	return modeTag + statusHiStyle.Render(m.t("git.diff_label")) + statusStyle.Render(m.diffPath) +
+		hintStyle.Render(m.t("git.diff_stats", added, modified, deleted))
+}
+
+// diffHint is the key hint that pairs with diffInfo.
+func (m Model) diffHint() string {
+	if m.gitDiffFocused {
+		return m.t("git.diff_focus")
+	}
+	if m.gitMode == gitModeLog {
+		return m.t("git.log_hint2")
+	}
+	return m.t("git.diff_hint")
+}
+
+// diffBottom is the footer of the full-screen diff viewer: the editor's own
+// bottom row there, while the git panel's inline preview puts the same text on
+// the application status line (see gitStatusLine).
+func (m Model) diffBottom() string {
+	line := m.diffInfo() + hintStyle.Render(m.diffHint())
+	if fill := m.width - lipgloss.Width(line); fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
 	}
 	return line
@@ -2802,6 +2839,12 @@ func (m Model) palettePanel() []string {
 }
 
 func (m Model) statusBar() string {
+	// The git panel's lists and its inline diff preview put their summary and
+	// hints here rather than in a footer row of their own: one status line is
+	// the bottom of the screen, whichever panel happens to be open.
+	if m.gitOpen && (m.gitMode == gitModeStatus || m.gitMode == gitModeLog) {
+		return m.gitStatusLine()
+	}
 	t := m.activeTab()
 	if t == nil {
 		// no open file (e.g. directory opened without an untitled tab)
