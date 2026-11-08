@@ -3,6 +3,7 @@ package editor
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,6 +31,7 @@ import (
 	"dmed/internal/sqlitedb"
 	"dmed/internal/syntax"
 	"dmed/internal/todo"
+	"dmed/internal/update"
 	"dmed/internal/vcs"
 	"dmed/internal/watcher"
 	"dmed/internal/websearch"
@@ -749,6 +751,18 @@ type Model struct {
 	mcpFP    string
 	mcpSpawn func(cmdline, dir string) (*mcp.Client, error)
 
+	// Auto-update: the check runs once at startup in the background and the
+	// result arrives through updateCh. updateGen stamps it the same way every
+	// other async subsystem is stamped, so a superseded check is dropped.
+	// updateHTTPClient is the client the check and the apply use; a unit test
+	// injects a test server over it so no check ever reaches the network.
+	updateCh          chan tea.Msg
+	updateGen         int
+	updateChecking    bool
+	updateAvailable   *update.Release
+	updateErr         string
+	updateHTTPClient  *http.Client
+
 	// The question currently on screen and the answer being typed into it.
 	// askSel indexes into askReq.Choices (-1 while there are none).
 	askReq *ask.Request
@@ -914,6 +928,8 @@ func New(paths ...string) Model {
 		chatPromptIdx:         -1,
 		todo:                  todo.New(),
 		asks:                  ask.NewQueue(),
+		updateCh:              make(chan tea.Msg, 8),
+		updateGen:             1,
 	}
 	if w, err := watcher.New(func(p string) {
 		select {
@@ -963,6 +979,10 @@ func New(paths ...string) Model {
 	m.cfg = config.Load(m.root)
 	m.keys = ResolveKeys(m.cfg)
 	m.mcpFP = m.mcpFingerprint()
+	// An update check fires once at startup when the user has not disabled it.
+	// It runs in the background and the answer arrives through updateCh, so
+	// the first frame is not spent on a network round trip.
+	m.maybeCheckUpdate()
 	// Create the AI provider up front so chat, inline, and ghost all work even
 	// before the chat panel is first opened (previously ghost silently no-opped
 	// until toggleChat ran).
@@ -1277,7 +1297,7 @@ func waitForPlugin(ch <-chan tea.Msg) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh), waitForDAPEvent(m.dapCh), waitForSyntax(m.syntaxCh), waitForDiff(m.diffCh), waitForPlugin(m.pluginCh), m.mcpCmd(m.mcpGen))
+	return tea.Batch(waitForFileEvent(m.fileEvents), waitForTermOutput(m.termCh), waitForChatOutput(m.chatCh, m.chatGen), waitForInlineOutput(m.aiInlineCh), waitForFixOutput(m.aiFixCh), waitForLSPDiag(m.diagCh), waitForDAPEvent(m.dapCh), waitForSyntax(m.syntaxCh), waitForDiff(m.diffCh), waitForPlugin(m.pluginCh), m.mcpCmd(m.mcpGen), waitForUpdate(m.updateCh))
 }
 
 // Update handles a message and keeps the background highlighting in step
@@ -1817,6 +1837,15 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.applyDapBPSyncs([]dapBPSyncMsg{msg})
+	case updateCheckMsg:
+		// A reply from a superseded check (the user asked again while one was
+		// in flight) is dropped: the newest generation is the only one that
+		// may write the model.
+		m.applyUpdateCheck(msg)
+		if msg.downloaded {
+			m.relaunchUpdate()
+			return m, nil
+		}
 	}
 	m.clampScroll()
 	// The animation chain asks once per message: something may have brought a

@@ -19,7 +19,7 @@ PREFIX   ?= /usr/local
 # tests run on a developer machine with Delve/PHP installed and skip on CI,
 # so a Windows-local reading is about two points higher and would gate the
 # build on coverage CI can never reach.
-COVERAGE_BASELINE := 70.3
+COVERAGE_BASELINE := 71.0
 COVERAGE_SLACK    := 1
 
 BUILD_TARGETS := build-linux-amd64 build-linux-arm64 build-freebsd-amd64 \

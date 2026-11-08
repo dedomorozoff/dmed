@@ -134,11 +134,12 @@ type AgentConfig struct {
 
 // EditorConfig holds editor-related settings.
 type EditorConfig struct {
-	TabWidth    int
-	SyntaxTheme string
-	LineNumbers bool
-	WordWrap    bool
-	SkippedDirs []string
+	TabWidth     int
+	SyntaxTheme  string
+	LineNumbers  bool
+	WordWrap     bool
+	CheckUpdates bool
+	SkippedDirs  []string
 }
 
 // AIConfig holds AI-related settings.
@@ -287,6 +288,7 @@ func Settings(cfg Config) []Setting {
 		{"editor", "syntax_theme", cfg.Editor.SyntaxTheme},
 		{"editor", "line_numbers", strconv.FormatBool(cfg.Editor.LineNumbers)},
 		{"editor", "word_wrap", strconv.FormatBool(cfg.Editor.WordWrap)},
+		{"editor", "check_updates", strconv.FormatBool(cfg.Editor.CheckUpdates)},
 		{"editor", "skipped_dirs", strings.Join(cfg.Editor.SkippedDirs, ",")},
 		{"ui", "lang", cfg.UI.Lang},
 		{"ui", "tree_width", strconv.Itoa(cfg.UI.TreeWidth)},
@@ -376,11 +378,12 @@ func Defaults() Config {
 	free := PollinationsPreset()
 	return Config{
 		Editor: EditorConfig{
-			TabWidth:    4,
-			SyntaxTheme: "monokai",
-			LineNumbers: true,
-			WordWrap:    false,
-			SkippedDirs: []string{".git", "node_modules"},
+			TabWidth:     4,
+			SyntaxTheme:  "monokai",
+			LineNumbers:  true,
+			WordWrap:     false,
+			CheckUpdates: true,
+			SkippedDirs:  []string{".git", "node_modules"},
 		},
 		AI: AIConfig{
 			Provider:    free.Name,
@@ -577,6 +580,9 @@ func loadFile(path string, cfg *Config) {
 		}
 		if v, ok := s["word_wrap"]; ok {
 			cfg.Editor.WordWrap = parseBool(v)
+		}
+		if v, ok := s["check_updates"]; ok {
+			cfg.Editor.CheckUpdates = parseBool(v)
 		}
 		if v, ok := s["skipped_dirs"]; ok {
 			cfg.Editor.SkippedDirs = parseList(v)

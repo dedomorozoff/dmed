@@ -1229,6 +1229,16 @@ reread.
         `.pkg.tar.zst` (Arch, makepkg under a non-root user),
         Termux `.deb`, Windows `.zip`,
       - publishes a GitHub Release with all artifacts and auto-generated notes.
+- [x] Auto-update (`internal/update`): a background check against GitHub
+      Releases, a 24-hour cache, a semver comparison that treats `dev` as
+      older than everything, and an atomic download-and-rename that rolls back
+      on failure. Wired into the editor at startup (`[editor] check_updates`,
+      default on, skipped for `dev` builds), into the palette as
+      `update.check` / `update.apply`, and into the CLI as `dmed update`.
+      A replaced binary relaunches the editor in a fresh process so the user
+      sees the new version rather than a stale one; on Windows the rename
+      leaves the old process holding the `.old` backup open, which the
+      relaunch is the only way to free.
 - [ ] Publishing packages to external repositories (AUR / COPR / PPA) — not needed yet.
 
 ## Development rule

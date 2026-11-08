@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"runtime/debug"
 
 	tea "charm.land/bubbletea/v2"
@@ -10,6 +11,7 @@ import (
 	"dmed/internal/editor"
 	"dmed/internal/setup"
 	"dmed/internal/syntax"
+	"dmed/internal/update"
 )
 
 // version is set via ldflags: -X main.version=0.3.0
@@ -57,6 +59,7 @@ func main() {
 		case "-h", "--help":
 			fmt.Println("usage: dmed [dir | files...]")
 			fmt.Println("       dmed setup-ai     interactive AI provider setup (writes ~/.dmed.conf)")
+			fmt.Println("       dmed update       check GitHub for a newer release and install it")
 			fmt.Println("       dmed --dump-keys  print the key cheat sheet the editor shows (md|roff|actions)")
 			fmt.Println("       dmed --dump-tokens  print the syntax token names a [theme] rule may name")
 			return
@@ -84,10 +87,45 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "update":
+			// `dmed update` checks for a newer release and installs it, then
+			// relaunches the editor. It is the command-line twin of the
+			// palette's update.apply, for users who would rather not open the
+			// editor first.
+			runUpdate()
+			return
 		}
 	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// runUpdate checks GitHub for a newer release and, if one exists, downloads
+// and installs it before relaunching the editor. It is the command-line twin
+// of the palette's update.apply: the same pipeline, driven from a switch
+// rather than a TUI.
+func runUpdate() {
+	rel, err := update.Check(update.CheckOptions{
+		CurrentVersion: version,
+		Force:          true,
+		CacheFile:      update.DefaultCacheFile(),
+		GOOS:           runtime.GOOS,
+		GOARCH:         runtime.GOARCH,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dmed update: %s\n", err)
+		os.Exit(1)
+	}
+	if rel == nil {
+		fmt.Printf("dmed %s is up to date\n", version)
+		return
+	}
+	fmt.Printf("dmed %s -> %s, downloading…\n", version, rel.Version)
+	if err := update.Apply(update.ApplyOptions{Release: rel}); err != nil {
+		fmt.Fprintf(os.Stderr, "dmed update: %s\n", err)
+		os.Exit(1)
+	}
+	_ = update.Restart(os.Args[1:])
 }
