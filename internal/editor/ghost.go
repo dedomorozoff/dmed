@@ -224,9 +224,12 @@ func (m *Model) ghostTrigger() tea.Cmd {
 	m.ghostRow = t.buf.CurLine()
 	m.ghostCol = t.buf.Col()
 
+	aiClient := m.ai
+	reqOpts := m.aiRequestOptions()
+
 	go debug.CapturePanicReport(func() {
 		defer close(ch)
-		err := m.ai.ChatStream(ctx, ai.Request{Messages: msgs, Options: m.aiRequestOptions()}, ai.Handler{
+		err := aiClient.ChatStream(ctx, ai.Request{Messages: msgs, Options: reqOpts}, ai.Handler{
 			Delta: func(delta string) {
 				select {
 				case ch <- chatEvent{delta: delta}:

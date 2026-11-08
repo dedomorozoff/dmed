@@ -49,8 +49,8 @@ func TestTreeNavigateOpenAndFold(t *testing.T) {
 	m := New(root)
 	m.width, m.height = 100, 24
 	m.treeFocus = true
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})           // select b.txt
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})          // open file, defocus tree
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})  // select b.txt
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open file, defocus tree
 	if m.activeTab().path != filepath.Join(root, "b.txt") {
 		t.Fatalf("enter on file must open it, got %q", m.activeTab().path)
 	}
@@ -66,7 +66,7 @@ func TestTreeNavigateOpenAndFold(t *testing.T) {
 
 	// Re-focus tree to navigate to dir
 	m.treeFocus = true
-	m = press(m, tea.KeyPressMsg{Code: tea.KeyUp})     // select sub dir
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyUp})    // select sub dir
 	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // expand sub (stays in tree)
 	found := false
 	for _, r := range m.treeRows {
