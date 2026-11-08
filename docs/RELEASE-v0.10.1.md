@@ -1,103 +1,104 @@
-# Release v0.10.1 — dmed
+﻿# Release v0.10.1 — dmed
 
-**Запуск релиза:** `git tag v0.10.1` (значение берётся из `Makefile`) или ручное
-`VERSION=0.10.1 make <target>`. Авторелиз (`.github/workflows/release.yml`) сработает
-само на push тега `v*`: соберёт 8 бинARIES, упакует deb/rpm/pkg/win-zip/termux и
-опубликует GitHub Release. Текст релиза берётся из этого файла
-(`docs/RELEASE-<TAG>.md`), если он есть, иначе — из сообщения тега.
+**Release run:** git tag v0.10.1 (version is taken from the Makefile) or
+VERSION=0.10.1 make <target> manually. The auto-release
+(.github/workflows/release.yml) triggers on any v* tag push: it builds the
+8 platform binaries, packages (deb/rpm/pkg/win-zip/termux) and publishes the
+GitHub Release. The release text comes from docs/RELEASE-<TAG>.md when that
+file exists, otherwise from the tag message.
 
 ---
 
 ## What's new in v0.10.1
 
-v0.10.1 выходит из ветки `release/v0.10.1` и содержит 16 коммитов от `main`
-(от `v0.10.0`): M10–M13-фичи и исправления. Новая функциональность в основном
-**ещё не выпускалась в релизы** (`v0.10.0` собирался только из `main` и был
-самодостаточным).
+v0.10.1 is cut from release/v0.10.1, 16 commits ahead of main (v0.10.0): M10–M13
+features and fixes. New functionality was mostly unreleased — v0.10.0 was built
+from main alone and was self-contained.
 
-### М12 — флоу решений, чат, агенты, инструменты
-- **Один общий "park" для всех видов ожидания разрешений** (M12): чат/агент/угловые
-  случаи выстраиваются в одну очередь с shared peek-стеком; `parkPeek` под Tab показывает
-  следующее без перемещения позиции, y/n читают голову только.
-- **Token cards** в чате и в панели агента + быстрый переключатель модели (показ карточек
-  с моделями и быстрое переключение на другую).
-- **Ghost completion как FIM** (`f35823b`): подсказка заполнения среднийми словом или
-  фразой с debounce, читающим паузу вводы (750/450/250 мс по медиане за последние
-  нажатия); `[ai] ghost_auto` выключает триггер типа.
-- **Слэш-команды**: `/name args` раскрывает шаблон перед отправкой:
-  проектные `.dmed/templates` > `~/.dmed/templates` > встроенные; первая строка
-  `# ` — лишь описание и не уходит в промпт; `.lua` шаблоны запускаются на fresh VM
-  под 3с бюджетом.
-- **Агенты выживают перезапуск редактора** (`9b60819`): очередь, ошибки, полный набор
-  `Change` сохраняются в `.dmed_agent.json`; очереди не допускаются stale state.
-- **Пул воркеров** в агентской очереди: несколько воркеров отвечают на wake-канал,
-  очередь шлёт сигнал всем — драфт разбирается параллельно.
-- **MCP-серверы** (`f18119d`): stdio-адаптеры с нуля на JSON-RPC 2.0, инициализация →
-  tools/list → tools/call, flat `mcp_<server>_<tool>` имена (длинные сообщают, но не
-  отправляют), вызов по одному, `plan` режим падает `mcp_` наименования по префиксу.
-- **Одно park-правило** (`52208b3`): каждая форма ожидания разрешения — y/n, вопрос,
-  подагент — проходит через один парк-модель, где `parkPeek` отдаёт следующее действие.
+### M12 — decision flow, chat, agents, tools
+- **One park model for every decision shape.** Chat, agent, question and
+  sub-agent outcomes queue through a single park model: y/n arms read the head
+  only; parkPeek shows the next item without moving the position.
+- **Token cards** in the chat and in the agent panel, plus a quick model
+  switch.
+- **Ghost completion as FIM** (f35823b): fill-blank completion of a word or a
+  phrase, debounced by the typing pause (750/450/250 ms, median of the last
+  keystrokes); [ai] ghost_auto turns the typing trigger off.
+- **Slash commands**: /name args expands a named template before submit —
+  project .dmed/templates beats ~/.dmed/templates beats built-ins. A first
+  # line is the description, not part of the prompt; .lua templates run on a
+  fresh VM under a 3 s budget.
+- **Agent persistence** (9b60819): queues, errors and the full Change set
+  survive an editor restart and are stored in .dmed_agent.json.
+- **Worker pool in the agent queue**: several workers drain the queue through
+  their own wake channels; one Enqueue wakes all of them, so bursts are
+  processed in parallel.
+- **MCP stdio servers** (f18119d): JSON-RPC 2.0 over the attached stdio
+  process. Flat mcp_<server>_<tool> tool names (over-long ones are reported,
+  never sent), per-call confirmation, plan mode drops mcp_ names by prefix.
+- **Single park rule** (52208b3): every ask goes through one park model;
+  y/n arms read the head only.
 
-### М13 — конфиг, темы, панели, клавиши, тесты
-- **`[theme]` секция**: ключ = chroma-токен, значение = стиль; в `[theme]` панели
-  раскрашиваются по образцу синхронно; `nobold` перебивает полужирный наследник;
-  неверное имя отвергается с отчётом (не падает на nil).
-- **`.editorconfig` на уровень одного файла** (`3128381`): при сохранении или изменении
-  конфига кеш `FileOpts` инвалидируется по пути файла.
-- **Все панели пользуются dispatch по имени команды** (`39d2e86`): никогда не завязывайте
-  на `case` в `switch` по клавише, в панелях бывает `escape` и `review y/n`.
-- **`[keys]` секция ребинит команду, а не нажатие** (`c90e486`): `ResolveKeys` добавляет
-  в карту действий, redefining사육ные — отчёт, не half-apply.
-- **Именованные key actions + F1 cheat sheet** (`f61f7eb`, `082ba8e`): `dmed --dump-keys
-  md|roff|actions` round-trips через резолвер без потерь; `Config: Open Keys` показывает
-  def-таблицы.
-- **TUI regression harness** (`082ba8e`): реальный pty, рамки из vt10x, сценарии
-  без sleep (polling по статус-бару, `WaitFor`/`WaitAbsent`/`WaitFile`); F-keys,
-  Alt-комбинации и три-модификаторные chord остаются ручными.
-- **Тест-кот** — `TestStatusBarAlwaysLastRow` накладывает ограничение: статус-бар всегда
-  это последняя строка фрейма независимо от отрисованных панелей и divider-ов.
+### M13 — config, theme, panels, keys, tests
+- **[theme] section**: token name to style. Entries are staged into the model's
+  own map and painted over a fixed sample, synchronously — no server to probe,
+  no reply to stamp, no tea.Cmd a pick can't return. Ctrl+S is the only write;
+  Esc leaves the file untouched.
+- **Per-file .editorconfig** (3128381): the FileOpts cache is invalidated per
+  path on save or on a config change.
+- **Panels dispatch on command names** (39d2e86): pane handlers match on
+  command names, never on key literals. A chord removed through [keys] is
+  swallowed rather than typed into the field; y/n review arms read the head
+  only.
+- **[keys] rebinds commands, not keystrokes** (c90e486): ResolveKeys joins the
+  section to the defaults; an unknown action name is refused with a status-bar
+  notice, never half-applied.
+- **Named key actions + generated F1 cheat sheet** (f61f7eb, 082ba8e):
+  dmed --dump-keys md|roff|actions round-trips through the resolver
+  unchanged; Config: Open Keys shows the default tables.
+- **TUI regression harness** (082ba8e): real pty, frames read back through
+  vt10x; sleep-free scenarios (WaitFor, WaitAbsent, WaitForAtLeast, WaitFile).
+  F-keys, Alt chords and three-modifier chords stay manual.
+- **Status bar always last** (guarded by TestStatusBarAlwaysLastRow): the
+  status row is the final frame line no matter how many dividers chain up.
 
-### Фиксы
-- **terminal/git panel**: `termquery.go` отвечает на capability-запросы терминала
-  (fish блокируется до 10с на primary device query), правильная обработка выхода из
-  shell-сессии, обновление status bar, поправки в тестах.
-- **Ctrl+B** снова переключает боковую панель, как в оригинале.
-- Поправлены gofmt-отступы в buffer/editor/i18n/lsp.
+### Fixes
+- **terminal / git panel**: termquery.go answers terminal capability queries
+  (fish waits ten seconds on the primary device attribute query without a
+  reply), the shell exit flow and status-bar updates; tests aligned.
+- **Ctrl+B** toggles the sidebar's binary source again.
+- gofmt alignment in buffer, editor, i18n and lsp.
 
-### Внутреннее
-- CI: `make fmt-check`, `make vet`, `make cover-check` (порог 70.3 — поднят на 0.2),
-  `make test`, `make race`, `make tui` + нативный билд; на `main`/`master` и в PR
-  улетают 8-платформенные кросс-билды.
+### Internal
+- CI: fmt-check, vet, cover-check (floor 70.3, raised 0.2), test, race, tui
+  and the native build; 8-platform cross-builds run on main/master and in PRs.
 
 ---
 
 ## Release checklist (for humans)
 
-- [ ] `make fmt-check` — чистый gofmt.
-- [ ] `make vet` — static analysis.
-- [ ] `make cover-check` — порог 70.3% (поднять `COVERAGE_BASELINE` в Makefile, если
-      покрытие выросло).
-- [ ] `make test` — unit suite.
-- [ ] `make race` — race detector над agent + editor.
-- [ ] `make tui` — TUI regression harness (real pty, painted frames).
-- [ ] Native build: `make build` + проверка `dmed -v` → **dmed 0.10.1**.
-- [ ] 8-платформенные cross-билды:
-      `make build-linux-amd64 build-linux-arm64 build-freebsd-amd64 build-openbsd-amd64 \
-       build-netbsd-amd64 build-darwin-amd64 build-darwin-arm64 build-windows-amd64`.
-- [ ] Пакеты: `make deb rpm pkg win-zip termux` (release.yml делает это автоматически).
-- [ ] Поставить тег `v0.10.1` (аннотированный, сообщение = краткая строка).
-- [ ] `docs/RELEASE-v0.10.1.md` уже есть — GitHub Release получит его в качестве текста.
+- [ ] make fmt-check — gofmt-clean.
+- [ ] make vet — static analysis.
+- [ ] make cover-check — 70.3% floor.
+- [ ] make test — unit suite.
+- [ ] make race — race detector over agent and editor.
+- [ ] make tui — TUI regression harness (real pty, painted frames).
+- [ ] Native build: make build and dmed -v prints dmed 0.10.1.
+- [ ] 8 cross-builds: make build-linux-amd64 build-linux-arm64 build-freebsd-amd64 build-openbsd-amd64 build-netbsd-amd64 build-darwin-amd64 build-darwin-arm64 build-windows-amd64.
+- [ ] Packages: make deb rpm pkg win-zip termux (release.yml does this
+      automatically).
+- [ ] Tag v0.10.1 (annotated, message = short line).
+- [ ] docs/RELEASE-v0.10.1.md — GitHub Release takes it as its body.
 
 ## After tagging
 
-1. CI: `vet + test`, `cover-check`, `tui`, 8 cross-builds, пакеты, GitHub Release — автоматически.
-2. Ветка `release/v0.10.1` сливается в `main` (если нет конфликтов), удаляется.
-3. `main` получает тег `v0.10.1` (запустит release.yml оттуда).
-4. Деплой: deb/rpm/termux в сторонние репозитории (AUR/COPR/PPA) — вынесено в работу,
-   пока не нужно.
-5. Привыкаем: `make release` полного не существует — тег запускает всё выше.
+1. CI: vet + test, cover-check, tui, 8 cross-builds, packages and the GitHub
+   Release run automatically.
+2. release/v0.10.1 merges into main (no conflicts), the branch is deleted;
+   main keeps the v0.10.1 tag.
+3. Deployment (deb/rpm/termux into AUR/COPR/PPA) is deferred to project work.
+4. Golden rule: there is no make release target — a tag runs everything
+   above.
 
----
-
-*Релизный скрипт: `make build` + `make <target> VERSION=0.10.1` локально; на CI —
-автоматически по тегу.*
+*Release script: make build + make <target> VERSION=0.10.1 locally; CI does
+the rest on tag.*

@@ -1,0 +1,3 @@
+﻿# Release v0.10.1 — dmed
+
+**Release run:** git tag v0.10.1 (version is taken from the Makefile) or
