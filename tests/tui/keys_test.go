@@ -25,6 +25,7 @@ func TestKeysSectionSwapsTwoChords(t *testing.T) {
 	s.Press("ctrl+e")
 	s.WaitFor("Ctrl+K", settleWait)
 	s.Press("esc")
+	s.WaitAbsent("dmed — keys", settleWait)
 
 	s.Type("X")
 	s.Press("ctrl+k")
