@@ -756,12 +756,12 @@ type Model struct {
 	// other async subsystem is stamped, so a superseded check is dropped.
 	// updateHTTPClient is the client the check and the apply use; a unit test
 	// injects a test server over it so no check ever reaches the network.
-	updateCh          chan tea.Msg
-	updateGen         int
-	updateChecking    bool
-	updateAvailable   *update.Release
-	updateErr         string
-	updateHTTPClient  *http.Client
+	updateCh         chan tea.Msg
+	updateGen        int
+	updateChecking   bool
+	updateAvailable  *update.Release
+	updateErr        string
+	updateHTTPClient *http.Client
 
 	// The question currently on screen and the answer being typed into it.
 	// askSel indexes into askReq.Choices (-1 while there are none).
