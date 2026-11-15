@@ -1,0 +1,24 @@
+pkgbase = dmed-bin
+	pkgdesc = Terminal-native code editor with AI agents (prebuilt binary)
+	pkgver = 0.10.2
+	pkgrel = 1
+	url = https://github.com/dedomorozoff/dmed
+	arch = x86_64
+	arch = aarch64
+	license = BSD-3-Clause
+	provides = dmed
+	conflicts = dmed
+	source_x86_64 = dmed-bin-0.10.2-x86_64::https://github.com/dedomorozoff/dmed/releases/download/v0.10.2/dmed-linux-amd64
+	source_x86_64 = LICENSE-0.10.2::https://github.com/dedomorozoff/dmed/raw/v0.10.2/LICENSE
+	source_x86_64 = dmed.1-0.10.2::https://github.com/dedomorozoff/dmed/raw/v0.10.2/docs/dmed.1
+	sha256sums_x86_64 = SKIP
+	sha256sums_x86_64 = SKIP
+	sha256sums_x86_64 = SKIP
+	source_aarch64 = dmed-bin-0.10.2-aarch64::https://github.com/dedomorozoff/dmed/releases/download/v0.10.2/dmed-linux-arm64
+	source_aarch64 = LICENSE-0.10.2::https://github.com/dedomorozoff/dmed/raw/v0.10.2/LICENSE
+	source_aarch64 = dmed.1-0.10.2::https://github.com/dedomorozoff/dmed/raw/v0.10.2/docs/dmed.1
+	sha256sums_aarch64 = SKIP
+	sha256sums_aarch64 = SKIP
+	sha256sums_aarch64 = SKIP
+
+pkgname = dmed-bin

@@ -1,0 +1,30 @@
+# Maintainer: dedomorozoff <dedomorozoff@gmail.com>
+pkgname=dmed-bin
+pkgver=0.10.2
+pkgrel=1
+pkgdesc="Terminal-native code editor with AI agents (prebuilt binary)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/dedomorozoff/dmed"
+license=('BSD-3-Clause')
+provides=('dmed')
+conflicts=('dmed')
+source_x86_64=("${pkgname}-${pkgver}-x86_64::${url}/releases/download/v${pkgver}/dmed-linux-amd64"
+               "LICENSE-${pkgver}::${url}/raw/v${pkgver}/LICENSE"
+               "dmed.1-${pkgver}::${url}/raw/v${pkgver}/docs/dmed.1")
+source_aarch64=("${pkgname}-${pkgver}-aarch64::${url}/releases/download/v${pkgver}/dmed-linux-arm64"
+                "LICENSE-${pkgver}::${url}/raw/v${pkgver}/LICENSE"
+                "dmed.1-${pkgver}::${url}/raw/v${pkgver}/docs/dmed.1")
+sha256sums_x86_64=('SKIP' 'SKIP' 'SKIP')
+sha256sums_aarch64=('SKIP' 'SKIP' 'SKIP')
+
+package() {
+  local _bin
+  if [[ "$CARCH" == "x86_64" ]]; then
+    _bin="${srcdir}/${pkgname}-${pkgver}-x86_64"
+  else
+    _bin="${srcdir}/${pkgname}-${pkgver}-aarch64"
+  fi
+  install -Dm755 "${_bin}" "${pkgdir}/usr/bin/dmed"
+  install -Dm644 "${srcdir}/dmed.1-${pkgver}" "${pkgdir}/usr/share/man/man1/dmed.1"
+  install -Dm644 "${srcdir}/LICENSE-${pkgver}" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

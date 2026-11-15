@@ -1,0 +1,50 @@
+# Maintainer: dedomorozoff <dedomorozoff@gmail.com>
+pkgname=dmed
+pkgver=0.10.2
+pkgrel=1
+pkgdesc="Terminal-native code editor with AI agents and diff-review apply"
+arch=('x86_64' 'aarch64')
+url="https://github.com/dedomorozoff/dmed"
+license=('BSD-3-Clause')
+depends=('glibc')
+makedepends=('go')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")
+sha256sums=('08422c1c8be673ae4bdbea5cadd452df534c3db51b114f3ca18b7607b9082c13')
+
+prepare() {
+  cd "${pkgname}-${pkgver}"
+  export GOPATH="${srcdir}/gopath"
+  export GOMODCACHE="${srcdir}/gomodcache"
+  export GOPROXY="https://proxy.golang.org,direct"
+  export GOSUMDB="sum.golang.org"
+  go mod download
+}
+
+build() {
+  cd "${pkgname}-${pkgver}"
+  export CGO_ENABLED=0
+  export GOPATH="${srcdir}/gopath"
+  export GOMODCACHE="${srcdir}/gomodcache"
+  export GOPROXY="https://proxy.golang.org,direct"
+  export GOSUMDB="sum.golang.org"
+  go build -trimpath -buildmode=pie -mod=readonly -modcacherw \
+    -ldflags "-s -w -X main.version=${pkgver} -linkmode external -extldflags \"${LDFLAGS}\"" \
+    -o dmed .
+}
+
+check() {
+  cd "${pkgname}-${pkgver}"
+  export CGO_ENABLED=0
+  export GOPATH="${srcdir}/gopath"
+  export GOMODCACHE="${srcdir}/gomodcache"
+  export GOPROXY="https://proxy.golang.org,direct"
+  export GOSUMDB="sum.golang.org"
+  go test $(go list ./... | grep -v '/tests/tui')
+}
+
+package() {
+  cd "${pkgname}-${pkgver}"
+  install -Dm755 dmed "${pkgdir}/usr/bin/dmed"
+  install -Dm644 docs/dmed.1 "${pkgdir}/usr/share/man/man1/dmed.1"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

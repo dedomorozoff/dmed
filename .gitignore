@@ -1,7 +1,7 @@
-dmed
+/dmed
 *.log
-dmed.exe
-dmed.exe~
+/dmed.exe
+/dmed.exe~
 dist/
 
 # Coverage profiles and scratch output from local runs

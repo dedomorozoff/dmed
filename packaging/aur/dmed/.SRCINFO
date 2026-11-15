@@ -1,0 +1,14 @@
+pkgbase = dmed
+	pkgdesc = Terminal-native code editor with AI agents and diff-review apply
+	pkgver = 0.10.2
+	pkgrel = 1
+	url = https://github.com/dedomorozoff/dmed
+	arch = x86_64
+	arch = aarch64
+	license = BSD-3-Clause
+	makedepends = go
+	depends = glibc
+	source = dmed-0.10.2.tar.gz::https://github.com/dedomorozoff/dmed/archive/v0.10.2.tar.gz
+	sha256sums = 08422c1c8be673ae4bdbea5cadd452df534c3db51b114f3ca18b7607b9082c13
+
+pkgname = dmed
