@@ -452,6 +452,20 @@ type Model struct {
 	lspActionsOff  int
 	lspActions     []lsp.CodeAction
 
+	// LSP add prompt (Command palette "LSP: Add Language Server...").
+	lspAddOpen bool
+	lspAddStep int // 0 = language / extension, 1 = server command
+	lspAddLang string
+	lspAddIn   []rune
+
+	// LSP auto-install
+	lspInstallConfirm  bool
+	lspInstallBin      string
+	lspInstallCmd      string
+	lspInstallPickOpen bool
+	lspInstallPickSel  int
+	lspInstallPickOff  int
+
 	// M10: diagnostics navigation, hover popup, references and outline.
 	// diagsCursor tracks the F8 walk through the active tab's diagnostics;
 	// hover renders as a bottom overlay like the rename input; references and
@@ -1745,6 +1759,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleAgentUndoMsg(msg)
 	case lspFormatMsg:
 		m.handleLspFormatMsg(msg)
+	case lspInstallResultMsg:
+		m.handleLspInstallResult(msg)
 	case pluginStoreMsg:
 		m.storeLoading = false
 		if msg.err != nil {

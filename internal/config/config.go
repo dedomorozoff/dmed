@@ -1063,6 +1063,15 @@ func WriteLSP(path string, l LSPConfig) (int, error) {
 	return writeSection(path, "lsp", known)
 }
 
+// WriteLSPLanguage sets the `[lsp] lang.<id>` command in the INI file at path,
+// preserving all other sections, keys, and comments.
+func WriteLSPLanguage(path, lang, cmd string) error {
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	lang = strings.TrimPrefix(lang, ".")
+	_, err := writeSection(path, "lsp", [][2]string{{"lang." + lang, strings.TrimSpace(cmd)}})
+	return err
+}
+
 // WriteTheme merges the given token rules into the [theme] section of the INI
 // file at path, updating the rules it names and leaving every other line —
 // including a rule the picker knows nothing about — exactly as written. A rule

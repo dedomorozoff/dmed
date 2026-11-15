@@ -256,6 +256,24 @@ var paneCommands = map[paneID][]paneCommand{
 		{act: "lsp-rename.run", chords: []string{"enter"}},
 		{act: "lsp-rename.erase", chords: []string{"backspace"}, flags: protected},
 	},
+	// lsp-add
+	"lsp-add": {
+		{act: "lsp-add.close", chords: []string{"esc", "ctrl+c"}, flags: protected},
+		{act: "lsp-add.run", chords: []string{"enter"}},
+		{act: "lsp-add.erase", chords: []string{"backspace"}, flags: protected},
+	},
+	// lsp-install-confirm
+	"lsp-install-confirm": {
+		{act: "lsp-install-confirm.yes", chords: []string{"y", "Y", "enter"}, flags: protected},
+		{act: "lsp-install-confirm.no", chords: []string{"n", "N", "esc"}, flags: protected},
+	},
+	// lsp-install-pick
+	"lsp-install-pick": {
+		{act: "lsp-install-pick.close", chords: []string{"esc", "ctrl+c"}, flags: protected},
+		{act: "lsp-install-pick.up", chords: []string{"up", "k"}},
+		{act: "lsp-install-pick.down", chords: []string{"down", "j"}},
+		{act: "lsp-install-pick.open", chords: []string{"enter"}},
+	},
 	// plugin-store
 	"plugin-store": {
 		{act: "plugin-store.close", chords: []string{"esc"}, flags: protected},

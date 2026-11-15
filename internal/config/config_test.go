@@ -753,6 +753,49 @@ func TestWriteLangCreatesSectionInEmptyFile(t *testing.T) {
 	}
 }
 
+func TestWriteLSPLanguage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".dmed.conf")
+	if err := os.WriteFile(path, []byte("[editor]\ntab_width = 2\n[lsp]\nenabled = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WriteLSPLanguage(path, "python", "pyright-langserver --stdio"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := os.ReadFile(path)
+	s := string(out)
+	if !strings.Contains(s, "lang.python = pyright-langserver --stdio") {
+		t.Fatalf("lang.python not set:\n%s", s)
+	}
+	if !strings.Contains(s, "tab_width = 2") || !strings.Contains(s, "enabled = true") {
+		t.Fatalf("existing content clobbered:\n%s", s)
+	}
+
+	// Overwrite/update existing language
+	if err := WriteLSPLanguage(path, ".Python", "ruff server"); err != nil {
+		t.Fatal(err)
+	}
+	out2, _ := os.ReadFile(path)
+	s2 := string(out2)
+	if !strings.Contains(s2, "lang.python = ruff server") {
+		t.Fatalf("lang.python not updated:\n%s", s2)
+	}
+	if strings.Count(s2, "lang.python =") != 1 {
+		t.Fatalf("lang.python duplicated:\n%s", s2)
+	}
+
+	// Writes to empty file
+	emptyPath := filepath.Join(dir, "empty.conf")
+	if err := WriteLSPLanguage(emptyPath, "zig", "zls"); err != nil {
+		t.Fatal(err)
+	}
+	emptyOut, _ := os.ReadFile(emptyPath)
+	if !strings.Contains(string(emptyOut), "[lsp]") || !strings.Contains(string(emptyOut), "lang.zig = zls") {
+		t.Fatalf("empty file did not get [lsp] section:\n%s", string(emptyOut))
+	}
+}
+
 func TestLoadKeysSection(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".dmed.conf")

@@ -24,6 +24,7 @@ var (
 	cursorStyle       = lipgloss.NewStyle().Reverse(true)
 	statusStyle       = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("250"))
 	statusHiStyle     = lipgloss.NewStyle().Background(lipgloss.Color("61")).Foreground(lipgloss.Color("255")).Bold(true)
+	activeStyle       = lipgloss.NewStyle().Background(lipgloss.Color("61")).Foreground(lipgloss.Color("255")).Bold(true)
 	langStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
 	hintStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	activePaneStyle   = lipgloss.NewStyle().Background(lipgloss.Color("235"))
@@ -208,7 +209,7 @@ func (m Model) contextBottomExtraRows() int {
 		m.aiInlineOpen, m.aiInlineBusy, m.aiFixOpen, m.aiFixBusy,
 		m.aiFixReviewMode, m.conflictOpen, m.treeConfirm != "", m.quitConfirm,
 		m.aiCfgOpen, m.promptSave, m.promptOpen,
-		m.searchOpen, m.gotoOpen, m.lspRenameOpen, m.hoverOpen:
+		m.searchOpen, m.gotoOpen, m.lspRenameOpen, m.lspAddOpen, m.lspInstallConfirm, m.hoverOpen:
 		return 1
 	case m.gitInputMode():
 		return 1
@@ -226,7 +227,7 @@ func (m Model) gitInputMode() bool {
 }
 
 func (m Model) viewHeight() int {
-	h := m.height - 2 - m.contextBottomExtraRows() - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows() - m.askExtraRows() - m.projSearchExtraRows() - m.lspActionsExtraRows() - m.m10PanelExtraRows()
+	h := m.height - 2 - m.contextBottomExtraRows() - m.finderExtraRows() - m.folderExtraRows() - m.paletteExtraRows() - m.langChooserExtraRows() - m.termExtraRows() - m.debugExtraRows() - m.pluginStoreExtraRows() - m.gitCommitExtraRows() - m.aiInlineExtraRows() - m.aiFixExtraRows() - m.agentPromptExtraRows() - m.askExtraRows() - m.projSearchExtraRows() - m.lspActionsExtraRows() - m.lspInstallPickExtraRows() - m.m10PanelExtraRows()
 	if h < 1 {
 		h = 1
 	}
@@ -293,6 +294,10 @@ func (m Model) contextBottomRow() string {
 		return m.searchLine()
 	} else if m.gotoOpen {
 		return m.gotoLine()
+	} else if m.lspAddOpen {
+		return m.lspAddLine()
+	} else if m.lspInstallConfirm {
+		return m.lspInstallConfirmLine()
 	}
 	return ""
 }
@@ -393,6 +398,9 @@ func (m Model) View() tea.View {
 	}
 	if m.modelPickOpen {
 		rows = append(rows, m.withDivider(m.modelPickPanel())...)
+	}
+	if m.lspInstallPickOpen {
+		rows = append(rows, m.withDivider(m.lspInstallPickPanel())...)
 	}
 	if m.agentPrompt {
 		rows = append(rows, m.agentPromptInputRender()...)
@@ -1093,6 +1101,23 @@ func (m Model) promptLine() string {
 		label = m.t("prompt.new_folder")
 	}
 	line := statusHiStyle.Render(label) + statusStyle.Render(string(m.promptIn)) + cursorStyle.Render(" ")
+	fill := m.width - lipgloss.Width(line)
+	if fill > 0 {
+		line += statusStyle.Render(strings.Repeat(" ", fill))
+	}
+	return line
+}
+
+func (m Model) lspAddLine() string {
+	label := m.t("lsp.prompt_lang")
+	hint := m.t("lsp.hint_step1")
+	if m.lspAddStep == 1 {
+		label = m.t("lsp.prompt_cmd", m.lspAddLang)
+		hint = m.t("lsp.hint_step2")
+	}
+	line := statusHiStyle.Render(label) +
+		statusStyle.Render(string(m.lspAddIn)) + cursorStyle.Render(" ") +
+		hintStyle.Render(hint)
 	fill := m.width - lipgloss.Width(line)
 	if fill > 0 {
 		line += statusStyle.Render(strings.Repeat(" ", fill))
@@ -2880,7 +2905,7 @@ func (m Model) statusBar() string {
 		}
 	}
 	hint := ""
-	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gotoOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !m.projSearchOpen && !m.lspRenameOpen && !m.lspActionsOpen && !m.hoverOpen && !m.refsOpen && !m.outlineOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
+	if !m.promptOpen && !m.promptSave && !m.quitConfirm && !m.finderOpen && !m.searchOpen && !m.gotoOpen && !m.gitOpen && !m.conflictOpen && !m.diffViewOpen && !m.termOpen && !m.chatOpen && !m.aiInlineOpen && !m.aiInlineBusy && !m.aiReviewMode && !m.aiFixOpen && !m.aiFixBusy && !m.aiFixReviewMode && !m.aiCfgOpen && !m.helpOpen && !m.projSearchOpen && !m.lspRenameOpen && !m.lspAddOpen && !m.lspInstallConfirm && !m.lspInstallPickOpen && !m.lspActionsOpen && !m.hoverOpen && !m.refsOpen && !m.outlineOpen && !(m.agentOpen && m.agentFocus) && !m.agentReviewMode {
 		hint = m.t("")
 		if m.layout != splitNone {
 			hint += m.t("status.f8_pane")

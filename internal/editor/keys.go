@@ -1241,6 +1241,15 @@ func (m *Model) dispatchPanes(s string, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if m.lspRenameOpen {
 		return m.handleLspRename(s, msg), true
 	}
+	if m.lspAddOpen {
+		return m.handleLspAddPrompt(s, msg), true
+	}
+	if m.lspInstallConfirm {
+		return m.handleLspInstallConfirm(s), true
+	}
+	if m.lspInstallPickOpen {
+		return m.handleLspInstallPick(s), true
+	}
 	if m.lspActionsOpen {
 		return m.handleLspActions(s, msg), true
 	}
