@@ -28,6 +28,9 @@ codebases.
 
 ## Fixed
 
+- Path validation now canonicalizes the longest existing prefix of a change
+  path, so creating files inside not-yet-existing directories works when the
+  project root is a symlink or a Windows short-name path.
 - The restart build tag now covers OpenBSD and NetBSD, so those cross-builds
   no longer pull in the Unix-only restart path.
 - A few formatting-only fixes in the editor and i18n tables that kept the CI

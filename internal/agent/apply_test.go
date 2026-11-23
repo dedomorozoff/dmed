@@ -165,6 +165,26 @@ func TestRootRejectsEscapesInRelativePaths(t *testing.T) {
 	}
 }
 
+// TestRootAllowsMissingNestedDirectories covers the shape the bulk-create
+// stress test hit on the CI runner: the root resolves to a symlink (or a
+// Windows short name) while the change names a file under directories that
+// do not exist yet. Canonicalizing only the immediate parent made an in-root
+// creation look like an escape.
+func TestRootAllowsMissingNestedDirectories(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(filepath.Dir(dir), filepath.Base(dir)+"-link")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(link) })
+
+	a := NewApplier()
+	a.Root = link
+	if err := a.Validate([]Change{{Path: "gen/pkg00/file000.go", Orig: "", New: "package pkg00\n"}}); err != nil {
+		t.Fatalf("creation under a missing nested directory must stay in root: %v", err)
+	}
+}
+
 // TestRootEmptyDisablesTheCheck documents that an unset Root keeps the
 // previous permissive behaviour, for callers that legitimately apply changes
 // to an arbitrary location.

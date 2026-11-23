@@ -95,6 +95,32 @@ func (a *Applier) resolve(path string) string {
 	return filepath.Join(a.Root, filepath.FromSlash(path))
 }
 
+// canonicalize resolves the longest existing prefix of p and puts the missing
+// tail back. A Change may name a file — or a whole directory tree — that does
+// not exist yet, so evaluating just the immediate parent is not enough: on
+// Windows %TEMP% arrives as C:\Users\RUNNER~1\..., and a path under a not-yet-
+// created gen/pkg/ stays in short form while the root resolves to its long
+// form, making an in-root file look like an escape.
+func canonicalize(p string) string {
+	cur := p
+	var tail []string
+	for {
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+			parts := []string{resolved}
+			for i := len(tail) - 1; i >= 0; i-- {
+				parts = append(parts, tail[i])
+			}
+			return filepath.Join(parts...)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return p // nothing on this path exists; leave it as it came
+		}
+		tail = append(tail, filepath.Base(cur))
+		cur = parent
+	}
+}
+
 // withinRoot reports whether path stays inside the applier's Root. It
 // resolves symlinks first so a link or a "a/../.." cannot be used to escape;
 // a non-existent path is fine (it is a file about to be created).
@@ -110,22 +136,8 @@ func (a *Applier) withinRoot(path string) error {
 	if err != nil {
 		return fmt.Errorf("cannot resolve path %s: %w", path, err)
 	}
-	// Resolve the existing part of both sides so they land in the same form:
-	// symlinked parents cannot be used to escape, and Windows short names
-	// (a %TEMP% at C:\Users\RUNNER~1) must not make an in-root path look
-	// outside once the root was resolved to its long form.
-	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil {
-		abs = resolved
-	} else if d := filepath.Dir(abs); d != abs {
-		// The final component is a file about to be created: evaluating the
-		// directory part still canonicalizes the path the same way.
-		if resolved, rerr := filepath.EvalSymlinks(d); rerr == nil {
-			abs = filepath.Join(resolved, filepath.Base(abs))
-		}
-	}
-	if resolvedRoot, rerr := filepath.EvalSymlinks(root); rerr == nil {
-		root = resolvedRoot
-	}
+	root = canonicalize(root)
+	abs = canonicalize(abs)
 	if abs != root && !strings.HasPrefix(abs, root+string(filepath.Separator)) {
 		return fmt.Errorf("path %s is outside the project root %s", path, a.Root)
 	}
