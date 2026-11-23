@@ -380,6 +380,39 @@ func TestRebuildChatRowsEmptyStateAndTurns(t *testing.T) {
 	}
 }
 
+// TestChatRowsHaveNoDecorativeGlyphs keeps the transcript text-only: tool
+// cards, usage notices, list items and the plan block carry their meaning in
+// words/color, not in pictographic badges sprinkled through the rows.
+func TestChatRowsHaveNoDecorativeGlyphs(t *testing.T) {
+	m := newChatModel()
+	m.chatMsgs = []ai.Message{
+		{
+			Role:      "assistant",
+			Content:   "- bullet item\n",
+			ToolCalls: []ai.ToolCall{{Name: "READ", Args: `{"arg":"x.go"}`}},
+			Usage:     &ai.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		},
+		{Role: "tool", ToolName: "READ", Content: "x.go"},
+	}
+	m.execChatTool(ai.ToolCall{Name: "TODO_WRITE", Args: `{"items":[{"text":"step one"}]}`})
+	m.rebuildChatRows()
+
+	bad := []string{"⛏", "•", "◆", "✓", "○"}
+	for _, r := range m.chatRows {
+		texts := []string{r.text}
+		for _, s := range r.rich {
+			texts = append(texts, s.text)
+		}
+		for _, text := range texts {
+			for _, glyph := range bad {
+				if strings.Contains(text, glyph) {
+					t.Errorf("%q row %q contains decorative glyph %q", r.kind, text, glyph)
+				}
+			}
+		}
+	}
+}
+
 func TestComposeChatRailNoOpWhenClosed(t *testing.T) {
 	m := newChatModel()
 	in := []string{"abc"}
@@ -438,13 +471,17 @@ func TestChatNewThreadClearsConversation(t *testing.T) {
 }
 
 // TestChatPanelShowsHintBar verifies the chat panel replaces the old key
-// hint line with the clickable icon button strip.
+// hint line with the clickable button strip, in both glyph modes. The ASCII
+// fallback spells the actions out — "+ c d x" was unreadable on old consoles.
 func TestChatPanelShowsHintBar(t *testing.T) {
-	m := newChatModel()
-	m.toggleChat()
-	for _, glyph := range []string{m.g.btnNew, m.g.btnCopy, m.g.btnClear, m.g.cross} {
-		if !strings.Contains(m.View().Content, " "+glyph+" ") {
-			t.Fatalf("chat panel must render the %q button, got:\n%s", glyph, m.View().Content)
+	for _, g := range []glyphSet{unicodeGlyphs, asciiGlyphs} {
+		m := newChatModel()
+		m.g = g
+		m.toggleChat()
+		for _, glyph := range []string{g.btnNew, g.btnCopy, g.btnClear, g.btnClose} {
+			if !strings.Contains(m.View().Content, " "+glyph+" ") {
+				t.Fatalf("chat panel must render the %q button, got:\n%s", glyph, m.View().Content)
+			}
 		}
 	}
 }

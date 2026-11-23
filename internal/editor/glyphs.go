@@ -10,8 +10,10 @@ import (
 // glyphSet holds every non-ASCII token the TUI renders, in one table. The
 // unicode set is the default look; asciiGlyphs trades box drawing, arrows and
 // symbols for plain ASCII so legacy consoles and dumb terminals still render a
-// readable UI. Keeping both sets single-width means hit-testing, padding and
-// lipgloss.Width arithmetic stay identical in either mode.
+// readable UI. Single-cell glyphs keep hit-testing and padding identical in
+// either mode; the chat button labels are the exception — they are measured
+// with lipgloss.Width, so the ASCII set can spell words out instead of leaving
+// the user guessing what "+", "c" or "d" meant.
 type glyphSet struct {
 	vline      string // │         continuous vertical rule (splits, diff view)
 	hline      string // ─         horizontal rule (pane separator, git header)
@@ -38,10 +40,10 @@ type glyphSet struct {
 	iconSplitV string // ◫ / V    tab-bar vertical-split toggle
 	iconSplitH string // ▤ / H    tab-bar horizontal-split toggle
 	mask       string // • / *     obscured secret (API key fields)
-	iconTool   string // ⛏ / >     tool-call card marker in chat
-	btnNew     string // ✚ / +     chat: new-thread button
-	btnCopy    string // ⎘ / c     chat: copy-reply button
-	btnClear   string // ⌫ / d     chat: clear-history button
+	btnNew     string // ✚ / NEW   chat: new-thread button
+	btnCopy    string // ⎘ / COPY  chat: copy-reply button
+	btnClear   string // ⌫ / CLEAR chat: clear-history button
+	btnClose   string // × / X     chat: close-panel button
 }
 
 var unicodeGlyphs = glyphSet{
@@ -70,10 +72,10 @@ var unicodeGlyphs = glyphSet{
 	iconSplitV: "◫",
 	iconSplitH: "▤",
 	mask:       "•",
-	iconTool:   "⛏",
 	btnNew:     "✚",
 	btnCopy:    "⎘",
 	btnClear:   "⌫",
+	btnClose:   "×",
 }
 
 var asciiGlyphs = glyphSet{
@@ -102,10 +104,10 @@ var asciiGlyphs = glyphSet{
 	iconSplitV: "V",
 	iconSplitH: "H",
 	mask:       "*",
-	iconTool:   ">",
-	btnNew:     "+",
-	btnCopy:    "c",
-	btnClear:   "d",
+	btnNew:     "NEW",
+	btnCopy:    "COPY",
+	btnClear:   "CLEAR",
+	btnClose:   "X",
 }
 
 // ApplyTerminalCompat switches the render glyph set to ASCII when the running

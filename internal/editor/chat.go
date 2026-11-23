@@ -352,7 +352,7 @@ func (m Model) chatButtonGlyph(a chatButtonAction) string {
 	case chatBtnClear:
 		return m.g.btnClear
 	case chatBtnClose:
-		return m.g.cross
+		return m.g.btnClose
 	}
 	return "?"
 }
@@ -1296,7 +1296,7 @@ func (m *Model) rebuildChatRows() {
 					m.addAIRows(&rows, msg.Content)
 				}
 				for _, tc := range msg.ToolCalls {
-					add("label-tool", " "+m.g.iconTool+" "+tc.Name+" "+toolArgSummary(tc))
+					add("label-tool", " "+tc.Name+" "+toolArgSummary(tc))
 				}
 				add("hint", "")
 			} else {
@@ -1305,7 +1305,7 @@ func (m *Model) rebuildChatRows() {
 				// a rebuilt transcript shows the same cards, and a thread
 				// loaded from history shows the ones the server reported.
 				if msg.Usage != nil && !msg.Usage.Empty() {
-					add("notice", " "+m.g.iconTool+" "+formatUsage(*msg.Usage))
+					add("notice", " "+formatUsage(*msg.Usage))
 				}
 			}
 		}
@@ -1347,7 +1347,7 @@ func (m *Model) rebuildChatRows() {
 // addToolResultRow renders a tool result as a compact card instead of dumping
 // the raw output (which is still sent to the model as context).
 func (m Model) addToolResultRow(rows *[]chatRow, add func(string, string), msg ai.Message, inner int) {
-	add("label-tool", " "+m.g.iconTool+" "+msg.ToolName)
+	add("label-tool", " "+msg.ToolName)
 	for _, l := range m.compactLines(msg.Content, inner, 6) {
 		add("tool", l)
 	}

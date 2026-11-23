@@ -6,9 +6,9 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// TestGlyphSetsSingleWidth guards the assumption the whole renderer relies on:
-// every glyph is exactly one terminal cell wide in both modes, so hit-testing,
-// padding and width arithmetic never change when ASCII fallback kicks in.
+// TestGlyphSetsSingleWidth guards the single-cell glyphs the layout relies on:
+// hit-testing and padding use their width without measuring. Chat button labels
+// are excluded — those are measured with lipgloss.Width and may be words.
 func TestGlyphSetsSingleWidth(t *testing.T) {
 	for name, g := range map[string]glyphSet{
 		"unicode": unicodeGlyphs,
@@ -40,7 +40,6 @@ func TestGlyphSetsSingleWidth(t *testing.T) {
 			"iconSplitV": g.iconSplitV,
 			"iconSplitH": g.iconSplitH,
 			"mask":       g.mask,
-			"iconTool":   g.iconTool,
 		} {
 			w := lipgloss.Width(glyph)
 			if w != 1 {

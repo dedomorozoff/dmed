@@ -92,7 +92,7 @@ func TestChatMarkdownRows(t *testing.T) {
 			if s.text == "bold" && sameStyle(s.style, chatMDBoldStyle) {
 				boldSeen = true
 			}
-			if strings.HasPrefix(s.text, m.g.diagInfo) && sameStyle(s.style, chatMDBulletStyle) {
+			if s.text == "  " && sameStyle(s.style, chatMDBulletStyle) {
 				bulletSeen = true
 			}
 		}

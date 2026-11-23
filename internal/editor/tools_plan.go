@@ -281,15 +281,13 @@ func (m *Model) todoBlock(add func(kind, text string), inner int) {
 	if m.todo == nil || m.todo.Empty() {
 		return
 	}
-	add("label-todo", " "+m.g.bookmark+" "+m.t("chat.todo"))
+	add("label-todo", " "+m.t("chat.todo"))
 	for i, it := range m.todo.Items() {
-		mark := m.g.breakptO
 		kind := "todo"
 		if it.Done {
-			mark = m.g.check
 			kind = "todo-done"
 		}
-		for j, l := range wrapRunes(fmt.Sprintf("%s %d. %s", mark, i+1, it.Text), inner) {
+		for j, l := range wrapRunes(fmt.Sprintf("%d. %s", i+1, it.Text), inner) {
 			if j == 0 {
 				l = " " + l
 			}

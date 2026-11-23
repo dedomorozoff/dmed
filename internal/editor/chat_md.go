@@ -76,10 +76,10 @@ func (m Model) mdRows(content string, w int, addRich func(string, []mdSeg), add 
 				addRich("ai-quote", segs)
 			}
 		case mdBullet(trimmed) != "":
-			segs := []mdSeg{{text: " " + m.g.diagInfo + " ", style: chatMDBulletStyle}}
-			segs = append(segs, parseInlineMD(mdBullet(trimmed), chatAITextStyle)...)
-			for _, line := range wrapSegs(segs, w) {
-				addRich("ai", line)
+			// List items are indented, not badged: the panel keeps its
+			// color coding, but no decorative glyph rides in the text.
+			for _, line := range wrapSegs(parseInlineMD(mdBullet(trimmed), chatAITextStyle), max(1, w-2)) {
+				addRich("ai", append([]mdSeg{{text: "  ", style: chatMDBulletStyle}}, line...))
 			}
 		default:
 			for _, segs := range wrapSegs(parseInlineMD(line, chatAITextStyle), w) {

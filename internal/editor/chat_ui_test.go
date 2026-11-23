@@ -41,6 +41,31 @@ func TestChatButtonStripHitAndActivate(t *testing.T) {
 	}
 }
 
+// TestChatButtonStripASCIILabels keeps the fallback buttons readable: the
+// labels are words, and a multi-cell label still hit-tests across its whole
+// width (the cells are measured, not assumed to be one column).
+func TestChatButtonStripASCIILabels(t *testing.T) {
+	m := New()
+	m.width = 100
+	m.height = 30
+	m.g = asciiGlyphs
+	m.toggleChat()
+
+	strip := m.chatButtonsString()
+	for _, label := range []string{"NEW", "COPY", "CLEAR", "X"} {
+		if !strings.Contains(strip, label) {
+			t.Fatalf("ASCII button strip missing %q: %q", label, strip)
+		}
+	}
+	for _, c := range m.chatButtonCells() {
+		for col := c.start; col < c.start+c.w; col++ {
+			if got := m.chatButtonAt(m.width-m.rightRailWidth() + col); got != c.act {
+				t.Fatalf("column %d of %v = %v, want the button itself", col, c.act, got)
+			}
+		}
+	}
+}
+
 // TestChatButtonTooltip shows the label and key combination of the hovered
 // button in a floating callout above the strip.
 func TestChatButtonTooltip(t *testing.T) {
