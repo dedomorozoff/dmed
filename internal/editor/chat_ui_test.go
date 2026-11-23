@@ -59,7 +59,7 @@ func TestChatButtonStripASCIILabels(t *testing.T) {
 	}
 	for _, c := range m.chatButtonCells() {
 		for col := c.start; col < c.start+c.w; col++ {
-			if got := m.chatButtonAt(m.width-m.rightRailWidth() + col); got != c.act {
+			if got := m.chatButtonAt(m.width - m.rightRailWidth() + col); got != c.act {
 				t.Fatalf("column %d of %v = %v, want the button itself", col, c.act, got)
 			}
 		}
