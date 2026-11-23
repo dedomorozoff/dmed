@@ -76,6 +76,11 @@ func TestEditorGitGutterAndHunkJump(t *testing.T) {
 	_, f := initTestGitRepo(t)
 
 	m := New(f)
+	t.Cleanup(func() {
+		if m.watcher != nil {
+			_ = m.watcher.Close()
+		}
+	})
 	m.width, m.height = 80, 24
 
 	// Status bar should show branch

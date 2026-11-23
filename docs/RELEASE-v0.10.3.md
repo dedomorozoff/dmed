@@ -2,7 +2,8 @@
 
 Maintenance release over v0.10.2: LSP project setup is now one command, Arch
 users get proper packages, and the project is stress-tested against generated
-codebases.
+codebases. The `v0.10.2` tag exists but never produced a GitHub Release — its
+workflow failed on the OpenBSD cross-build, which is fixed here.
 
 ## Added
 
